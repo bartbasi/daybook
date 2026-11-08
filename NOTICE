@@ -1,0 +1,70 @@
+Daybook
+Copyright 2026 Play, Inc.
+
+Designed and written by Bart Basi, with assistance from Claude.
+
+Daybook is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License, version 3, as published by the Free
+Software Foundation, with the additional terms below. The full license is in
+the file LICENSE.
+
+Daybook is distributed in the hope that it will be enjoyable and useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+details.
+
+Source code: https://github.com/bartbasi/daybook
+Feedback: bartbasi@gmail.com
+
+
+Additional terms (GNU General Public License, version 3, section 7)
+
+These terms apply to all of Daybook: its code, art, icons and documents. They
+do not apply to the third-party data listed below, which keeps its own
+license.
+
+1. Author attribution (section 7(b)). Any work based on Daybook, in whole or
+   in part, must keep this author attribution, which credits Bart Basi as
+   the creator of the original Daybook and Play, Inc. as its copyright
+   holder:
+
+       Based on Daybook, designed and written by Bart Basi, with assistance
+       from Claude. Copyright 2026 Play, Inc.
+
+   (a) in its source code, by keeping this NOTICE file or its full text; and
+   (b) if the work has an interactive user interface, among the Appropriate
+       Legal Notices it displays (for example on an About, Credits or License
+       screen), where its users can readily see it.
+
+2. Marking modified versions (sections 7(c) and 7(d)). A modified version
+   must be marked as changed from the original and must not be presented as
+   the original Daybook. Beyond the attribution in term 1, the names Play,
+   Inc. and Bart Basi may not be used to promote a modified version or to
+   suggest that it was made or endorsed by Play, Inc. or Bart Basi.
+
+3. Name and icon (sections 7(c) and 7(e)). This license grants no rights under
+   trademark law to the name "Daybook" or to the Daybook icon. A modified
+   version you distribute is marked as different from the original by using
+   its own name and icon instead of them. Saying that your work is "based on
+   Daybook" is allowed, and term 1 requires it.
+
+
+Third-party software
+
+Daybook is built with Flutter (https://flutter.dev), which is under the
+BSD 3-Clause license. The other packages it uses, and their licenses, are
+listed in docs/dependencies.md. Their notices are shown on Daybook's License
+screen.
+
+
+Third-party data
+
+Food data from USDA FoodData Central (U.S. Department of Agriculture,
+Agricultural Research Service, fdc.nal.usda.gov). Public domain (CC0 1.0).
+
+Barcode product data from Open Food Facts (https://openfoodfacts.org), made
+available under the Open Database License (ODbL) v1.0
+(https://opendatacommons.org/licenses/odbl/1-0/). Individual contents under
+the Database Contents License (DbCL) v1.0.
+
+Details and full attribution are in docs/data-sources.md.

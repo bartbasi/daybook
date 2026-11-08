@@ -1,0 +1,84 @@
+{
+ "format": "daybook-export",
+ "formatVersion": 1,
+ "schemaVersion": 1,
+ "exportedAt": "2026-01-02T12:00:00.000Z",
+ "app": "Daybook 0.1.0",
+ "tables": {
+  "foods": [
+   {
+    "id": 1,
+    "kind": "custom",
+    "name": "Oats",
+    "brand": null,
+    "barcode": null,
+    "base_amount": 100.0,
+    "base_unit": "g",
+    "source_json": null,
+    "archived": 0,
+    "created_at_ms": 1700000000000,
+    "updated_at_ms": 1700000000000
+   }
+  ],
+  "food_nutrients": [
+   {
+    "food_id": 1,
+    "nutrient_id": 1008,
+    "amount": 389.0
+   }
+  ],
+  "food_portions": [],
+  "recipe_ingredients": [],
+  "meal_slots": [
+   {
+    "id": 1,
+    "name": "Breakfast",
+    "position": 0,
+    "archived": 0
+   }
+  ],
+  "meal_slot_rules": [
+   {
+    "start_minute": 0,
+    "slot_id": 1
+   }
+  ],
+  "meals": [],
+  "meal_entries": [],
+  "meal_entry_nutrients": [],
+  "saved_meals": [],
+  "saved_meal_items": [],
+  "saved_meal_item_nutrients": [],
+  "aliases": [],
+  "learned_matches": [],
+  "weight_entries": [
+   {
+    "id": 1,
+    "local_date": "2026-01-02",
+    "measured_at_ms": 1767355200000,
+    "tz_offset_minutes": -360,
+    "weight_kg": 81.5,
+    "source": "manual",
+    "source_id": null,
+    "created_at_ms": 1767355200000,
+    "updated_at_ms": 1767355200000,
+    "deleted_at_ms": null
+   }
+  ],
+  "exercises": [],
+  "routines": [],
+  "routine_exercises": [],
+  "workouts": [],
+  "workout_sets": [],
+  "cardio_sessions": [],
+  "profile": [],
+  "goals": [],
+  "goal_nutrients": [],
+  "settings": [
+   {
+    "key": "units",
+    "value": "metric"
+   }
+  ]
+ }
+}

@@ -1,0 +1,74 @@
+# Daybook. Copyright 2026 Play, Inc.
+# Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  android:
+    name: Test and Android build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Generated code is up to date
+        run: |
+          dart run build_runner build
+          git diff --exit-code -- lib
+
+      - name: Schema change has a new schema version
+        run: |
+          dart run drift_dev make-migrations
+          git diff --exit-code -- drift_schemas test/drift
+          test -z "$(git status --porcelain -- drift_schemas test/drift)"
+
+      - run: flutter analyze
+
+      - run: flutter test
+
+      - name: Food database build script tests
+        run: python3 -I -m unittest discover -s tools
+
+      - run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: daybook-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
+  ios:
+    name: iOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Unsigned for now. Signing and TestFlight upload come in Phase 6.
+      - run: flutter build ios --release --no-codesign
