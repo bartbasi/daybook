@@ -16,6 +16,16 @@ import 'food_entry_screen.dart';
 /// it is done or has been refused (the screen then shows one plain line), and
 /// the sheet closes either way. A [Listenable]: it changes when the box, the
 /// newest result or the worker changes.
+/// One way of writing an amount: [quantity] of [unit] as text (empty for a
+/// bare count). The sheet gives a list of them, best first, and the screen
+/// uses the first that works.
+class AmountTry {
+  const AmountTry(this.quantity, this.unit);
+
+  final double quantity;
+  final String unit;
+}
+
 abstract class CorrectionHost implements Listenable {
   /// The screen's current handle. A sheet for a typed line closes when this is
   /// no longer the handle it was opened with (Try again made a new one).
@@ -34,16 +44,16 @@ abstract class CorrectionHost implements Listenable {
   /// A plain line under the meal chips.
   void sheetNote(String text);
 
-  /// Picks [ref] for the line. [quantity] and [unit] are an amount staged in
-  /// the sheet, applied with the pick.
+  /// Picks [ref] for the line. [amount] is an amount staged in the sheet,
+  /// applied with the pick. Picking the line's own food changes nothing but
+  /// a staged amount.
   Future<void> sheetPick(
     LineTap tap,
     String ref, {
     Marker marker = Marker.yourPick,
-    double? quantity,
-    String? unit,
+    List<AmountTry> amount = const [],
   });
-  Future<void> sheetSetAmount(LineTap tap, double quantity, String unit);
+  Future<void> sheetSetAmount(LineTap tap, List<AmountTry> tries);
   Future<void> sheetRemove(LineTap tap);
   Future<void> sheetForget(LineTap tap);
   Future<void> sheetUseFood(LineTap tap, String ref, {double? quantity});
@@ -90,6 +100,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   final _search = TextEditingController();
   var _results = const <FoodChoice>[];
   var _searched = false;
+  var _lastQuery = '';
   var _seq = 0;
   var _useFood = false;
   var _closed = false;
@@ -99,6 +110,15 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   LineTap get _tap => widget.tap;
   Line get _line => _tap.line;
   bool get _notFound => _line.state == LineState.notFound;
+
+  /// The unit with the weight of the line's amount beside it, for a line
+  /// measured in grams (frame 4: "tbsp, 30 g").
+  String _unitShown(String unit) {
+    final g = _line.baseQuantity;
+    return _line.baseUnit == 'g' && g != null
+        ? S.sheetUnitWeight(unit, g)
+        : unit;
+  }
 
   /// The line's grams per unit, when it has both.
   double? get _gramsPerUnit {
@@ -263,6 +283,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       setState(() {
         _results = found;
         _searched = true;
+        _lastQuery = q;
       });
       _showSearch();
     } catch (_) {
@@ -292,10 +313,13 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   }
 
   /// What the amount fields say when they differ from the line: null when
-  /// unchanged, [bad] when the number is not usable. The unit sent is always
-  /// typable text, never a label: with no matching choice the amount is sent
-  /// in grams.
-  ({bool bad, double q, String unit})? _amountChange() {
+  /// unchanged, [bad] when the number is not usable. [tries] are ways to
+  /// write it, best first. With the unit picker untouched the line's own unit
+  /// word comes first (so "2 slices" stays a slice, not "medium"), then the
+  /// choice that weighs the same, then grams. A unit that was picked is the
+  /// only try. A label is only sent as a unit when it is the line's own, and
+  /// the screen drops it if the text cannot express it.
+  ({bool bad, List<AmountTry> tries})? _amountChange() {
     final q = _parseQty(_qty.text);
     final orig = _kind == _Kind.header
         ? (_line.multiplier ?? 1)
@@ -306,39 +330,57 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       final same =
           _qty.text.trim() == (orig == null ? '' : S.quantityText(orig));
       if (same && !unitChanged) return null;
-      return (bad: true, q: 0, unit: '');
+      return (bad: true, tries: const <AmountTry>[]);
     }
     if (orig != null && (q - orig).abs() < 1e-9 && !unitChanged) return null;
-    if (_kind == _Kind.header) return (bad: false, q: q, unit: '');
+    if (_kind == _Kind.header) return (bad: false, tries: [AmountTry(q, '')]);
     final u = _unit;
-    if (u != null) return (bad: false, q: q, unit: u.unitText);
+    if (unitChanged && u != null) {
+      return (bad: false, tries: [AmountTry(q, u.unitText)]);
+    }
+    final tries = <AmountTry>[];
+    void add(double quantity, String unit) {
+      if (!tries.any(
+        (t) => t.unit == unit && (t.quantity - quantity).abs() < 1e-9,
+      )) {
+        tries.add(AmountTry(quantity, unit));
+      }
+    }
+
+    add(q, _line.unitLabel ?? '');
+    if (_unit0 != null) add(q, _unit0!.unitText);
     final per = _gramsPerUnit;
     if (per != null &&
         _line.baseUnit == 'g' &&
         _units.any((c) => c.unitText == 'g')) {
-      return (bad: false, q: q * per, unit: 'g');
+      add(q * per, 'g');
     }
-    return (bad: false, q: q, unit: '');
+    return (bad: false, tries: tries);
   }
 
   Future<void> _choose(FoodChoice f) async {
     if (_busy || _closed) return;
-    final ch = _kind == _Kind.header ? null : _amountChange();
+    final ch = _amountChange();
     if (ch != null && ch.bad) {
       setState(() => _qtyError = S.sheetQuantityBad);
       return;
     }
     if (_kind == _Kind.header) {
       // A changed multiplier goes with the replacement food.
-      final m = _amountChange();
-      if (m != null && m.bad) {
-        setState(() => _qtyError = S.sheetQuantityBad);
-        return;
-      }
-      return _act(() => widget.host.sheetUseFood(_tap, f.ref, quantity: m?.q));
+      return _act(
+        () => widget.host.sheetUseFood(
+          _tap,
+          f.ref,
+          quantity: ch?.tries.first.quantity,
+        ),
+      );
     }
     return _act(
-      () => widget.host.sheetPick(_tap, f.ref, quantity: ch?.q, unit: ch?.unit),
+      () => widget.host.sheetPick(
+        _tap,
+        f.ref,
+        amount: ch?.tries ?? const <AmountTry>[],
+      ),
     );
   }
 
@@ -357,7 +399,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       setState(() => _qtyError = S.sheetQuantityBad);
       return;
     }
-    await _act(() => widget.host.sheetSetAmount(_tap, ch.q, ch.unit));
+    await _act(() => widget.host.sheetSetAmount(_tap, ch.tries));
   }
 
   // Seams for the later tasks. Both are shown on a not found typed line only,
@@ -390,27 +432,24 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       else
         ..._foodBody(theme),
     ];
-    return PopScope(
-      canPop: !_busy,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: insets),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Flexible(
-              child: SingleChildScrollView(
-                primary: false,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: body,
-                ),
+    return Padding(
+      padding: EdgeInsets.only(bottom: insets),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Flexible(
+            child: SingleChildScrollView(
+              primary: false,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: body,
               ),
             ),
-            _footer(),
-          ],
-        ),
+          ),
+          _footer(),
+        ],
       ),
     );
   }
@@ -566,7 +605,18 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
               child: DropdownButton<UnitChoice>(
                 isExpanded: true,
                 value: _unit,
-                hint: Text(cur.isEmpty ? S.sheetBareCount : cur),
+                hint: Text(_unitShown(cur.isEmpty ? S.sheetBareCount : cur)),
+                selectedItemBuilder: (_) => [
+                  for (final c in _units)
+                    Text(
+                      c == _unit0
+                          ? _unitShown(
+                              c.label.isEmpty ? S.sheetBareCount : c.label,
+                            )
+                          : (c.label.isEmpty ? S.sheetBareCount : c.label),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
                 items: [
                   for (final c in _units)
                     DropdownMenuItem(
@@ -622,9 +672,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(
-            _notFound
-                ? S.sheetNothingMatches(_line.foodText ?? _tap.typedText ?? '')
-                : S.sheetNoResults,
+            _notFound ? S.sheetNothingMatches(_lastQuery) : S.sheetNoResults,
           ),
         ),
       if (_results.isNotEmpty)

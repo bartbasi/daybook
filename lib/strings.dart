@@ -262,9 +262,12 @@ class S {
   static const sheetForget = 'Forget this match';
   static const sheetDone = 'Done';
   static const sheetUseFood = 'Use a food instead';
-  static const sheetSavedMeal = 'Saved meal';
   static const sheetQuantityBad = 'Enter a number above 0.';
   static const sheetRowHint = 'Double tap to choose this food';
+
+  /// 'tbsp, 30 g': the unit with the weight of the current amount.
+  static String sheetUnitWeight(String unit, double grams) =>
+      '$unit, ${_gramsText(grams)} g';
   static String sheetRowLabel(String name, String sub) => '$name. $sub';
 
   /// The dataset of a food, for a row of the sheet. Null for a food whose

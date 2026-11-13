@@ -179,18 +179,23 @@ void main() {
   void appTest(String name, Future<void> Function(WidgetTester) body) {
     testWidgets(name, (tester) async {
       final messenger = tester.binding.defaultBinaryMessenger;
-      for (final c in ['home_widget', 'home_widget/updates']) {
+      const channels = ['home_widget', 'home_widget/updates'];
+      for (final c in channels) {
         messenger.setMockMethodCallHandler(MethodChannel(c), (_) async => null);
       }
-      addTearDown(() {
-        for (final c in ['home_widget', 'home_widget/updates']) {
+      try {
+        await body(tester);
+      } finally {
+        // Even when the body failed: unmount, close the database, and only
+        // then remove the mocks, so a left over screen cannot fail the next
+        // test.
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 10));
+        await tester.runAsync(db.close);
+        for (final c in channels) {
           messenger.setMockMethodCallHandler(MethodChannel(c), null);
         }
-      });
-      await body(tester);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(milliseconds: 10));
-      await tester.runAsync(db.close);
+      }
     });
   }
 
