@@ -17,17 +17,21 @@ import '../../util/units.dart';
 /// read back from the database, and the units it was typed in.
 typedef SavedWeight = ({WeightEntry row, UnitSystem units});
 
+/// What the edit sheet hands back after a write: the stored row read back, the
+/// units shown, and whether the write was a delete.
+typedef EditedWeight = ({WeightEntry row, UnitSystem units, bool deleted});
+
 /// The UTC offset in minutes that applies at a picked local date and time.
 typedef OffsetAt = int Function(DateTime local);
 
-int _systemOffsetAt(DateTime local) => local.timeZoneOffset.inMinutes;
+int systemOffsetAt(DateTime local) => local.timeZoneOffset.inMinutes;
 
 /// Opens the weight sheet over the current screen. Completes with the saved
 /// weight, or null if the sheet was closed without saving. [offsetAt] is
 /// replaceable so tests can pick any time zone.
 Future<SavedWeight?> showWeightSheet(
   BuildContext context, {
-  OffsetAt offsetAt = _systemOffsetAt,
+  OffsetAt offsetAt = systemOffsetAt,
 }) async {
   final scope = AppScope.of(context);
   var units = UnitSystem.imperial;
@@ -39,7 +43,41 @@ Future<SavedWeight?> showWeightSheet(
     // The sheet still opens. Saving will say if the database is not working.
   }
   if (!context.mounted) return null;
-  return showModalBottomSheet<SavedWeight>(
+  return _present<SavedWeight>(
+    context,
+    WeightSheet(
+      db: scope.db,
+      clock: scope.clock,
+      units: units,
+      last: last,
+      offsetAt: offsetAt,
+    ),
+  );
+}
+
+/// Opens the sheet on an existing weigh-in. Completes with the stored row after
+/// a save or a delete, or null if the sheet was closed without either.
+Future<EditedWeight?> showEditWeightSheet(
+  BuildContext context,
+  WeightEntry row,
+  UnitSystem units, {
+  OffsetAt offsetAt = systemOffsetAt,
+}) {
+  final scope = AppScope.of(context);
+  return _present<EditedWeight>(
+    context,
+    WeightSheet(
+      db: scope.db,
+      clock: scope.clock,
+      units: units,
+      editing: row,
+      offsetAt: offsetAt,
+    ),
+  );
+}
+
+Future<T?> _present<T>(BuildContext context, WeightSheet sheet) {
+  return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
     // A drag calls Navigator.pop directly, so it would close the sheet while
@@ -47,13 +85,7 @@ Future<SavedWeight?> showWeightSheet(
     enableDrag: false,
     useSafeArea: true,
     constraints: const BoxConstraints(maxWidth: 600),
-    builder: (_) => WeightSheet(
-      db: scope.db,
-      clock: scope.clock,
-      units: units,
-      last: last,
-      offsetAt: offsetAt,
-    ),
+    builder: (_) => sheet,
   );
 }
 
@@ -67,16 +99,20 @@ class WeightSheet extends StatefulWidget {
     required this.db,
     required this.clock,
     required this.units,
-    required this.last,
-    this.offsetAt = _systemOffsetAt,
+    this.last,
+    this.editing,
+    this.offsetAt = systemOffsetAt,
   });
 
   final AppDatabase db;
   final Clock clock;
   final UnitSystem units;
 
-  /// The newest weigh-in, or null if there is none.
+  /// The newest weigh-in, or null if there is none. Used when adding.
   final WeightEntry? last;
+
+  /// The weigh-in being edited, or null when adding a new one.
+  final WeightEntry? editing;
   final OffsetAt offsetAt;
 
   @override
@@ -87,18 +123,26 @@ class _WeightSheetState extends State<WeightSheet> {
   late final TextEditingController _text;
   late final Now _opened;
 
-  /// The date and time picked with Change, or null for "now".
+  /// The date and time picked, or null for "now" (adding) or "as stored"
+  /// (editing).
   Now? _at;
   bool _saving = false;
   bool _failed = false;
+  bool _deleteFailed = false;
+  bool _gone = false;
   bool _futureTime = false;
+
+  WeightEntry? get _row => widget.editing;
 
   @override
   void initState() {
     super.initState();
     _opened = widget.clock();
-    final last = widget.last;
-    final start = last == null ? '' : formatWeight(last.weightKg, widget.units);
+    final row = _row;
+    final source = row ?? widget.last;
+    final start = source == null
+        ? ''
+        : formatWeight(source.weightKg, widget.units);
     _text = TextEditingController(text: start)
       ..selection = TextSelection(baseOffset: 0, extentOffset: start.length);
   }
@@ -107,6 +151,19 @@ class _WeightSheetState extends State<WeightSheet> {
   void dispose() {
     _text.dispose();
     super.dispose();
+  }
+
+  /// The date and time the sheet shows right now.
+  Now get _current {
+    final picked = _at;
+    if (picked != null) return picked;
+    final row = _row;
+    if (row == null) return _opened;
+    return Now.fromLocal(
+      row.localDate,
+      minuteOfDayOf(row.measuredAtMs, row.tzOffsetMinutes),
+      row.tzOffsetMinutes,
+    );
   }
 
   _Check get _check {
@@ -122,24 +179,48 @@ class _WeightSheetState extends State<WeightSheet> {
   }
 
   Future<void> _save() async {
-    if (_saving || _check != _Check.ok) return;
+    if (_saving || _gone || _check != _Check.ok) return;
     final value = parseWeight(_text.text)!;
     setState(() {
       _saving = true;
       _failed = false;
+      _deleteFailed = false;
     });
     try {
-      final row = await widget.db.saveWeight(
-        value,
-        widget.units,
-        widget.clock(),
-        at: _at,
-      );
+      final row = _row;
+      if (row == null) {
+        final saved = await widget.db.saveWeight(
+          value,
+          widget.units,
+          widget.clock(),
+          at: _at,
+        );
+        if (!mounted) return;
+        Navigator.of(context)
+            .pop<SavedWeight>((row: saved, units: widget.units));
+      } else {
+        final saved = await widget.db.editWeight(
+          row.id,
+          value,
+          widget.units,
+          widget.clock(),
+          at: _at,
+        );
+        if (!mounted) return;
+        Navigator.of(
+          context,
+        ).pop<EditedWeight>((row: saved, units: widget.units, deleted: false));
+      }
+    } on StateError {
+      // The row was deleted or removed while the sheet was open.
       if (!mounted) return;
-      Navigator.of(context).pop<SavedWeight>((row: row, units: widget.units));
+      setState(() {
+        _saving = false;
+        _gone = true;
+      });
     } catch (_) {
-      // Any failure (a full disk, a closed database, a missing row): stay
-      // open, keep the number, say so.
+      // Any other failure (a full disk, a closed database): stay open, keep
+      // the number, say so.
       if (!mounted) return;
       setState(() {
         _saving = false;
@@ -148,41 +229,75 @@ class _WeightSheetState extends State<WeightSheet> {
     }
   }
 
-  Future<void> _change() async {
-    setState(() => _futureTime = false);
-    final cur = _at ?? _opened;
+  Future<void> _delete() async {
+    final row = _row;
+    if (row == null || _saving || _gone) return;
+    setState(() {
+      _saving = true;
+      _failed = false;
+      _deleteFailed = false;
+    });
+    try {
+      final deleted = await widget.db.deleteWeight(row.id, widget.clock());
+      if (!mounted) return;
+      Navigator.of(
+        context,
+      ).pop<EditedWeight>((row: deleted, units: widget.units, deleted: true));
+    } on StateError {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _gone = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _deleteFailed = true;
+      });
+    }
+  }
+
+  DateTime get _firstDate => DateTime(2000);
+
+  Future<DateTime?> _askDate(Now cur) {
     final day = parseDate(cur.localDate);
     final today = parseDate(_opened.localDate);
-    final date = await showDatePicker(
+    var initial = DateTime(day.year, day.month, day.day);
+    if (initial.isBefore(_firstDate)) initial = _firstDate;
+    return showDatePicker(
       context: context,
-      initialDate: DateTime(day.year, day.month, day.day),
-      firstDate: DateTime(2000),
+      initialDate: initial,
+      firstDate: _firstDate,
       lastDate: DateTime(today.year, today.month, today.day),
     );
-    if (date == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(
-        hour: cur.minuteOfDay ~/ 60,
-        minute: cur.minuteOfDay % 60,
-      ),
-    );
-    if (time == null || !mounted) return;
+  }
+
+  Future<TimeOfDay?> _askTime(Now cur) => showTimePicker(
+    context: context,
+    initialTime: TimeOfDay(
+      hour: cur.minuteOfDay ~/ 60,
+      minute: cur.minuteOfDay % 60,
+    ),
+  );
+
+  /// Takes a picked day and time of day. A time that has not happened yet is
+  /// refused: the earlier value stays and the sheet says so.
+  void _apply(DateTime date, int minuteOfDay) {
     final local = DateTime(
       date.year,
       date.month,
       date.day,
-      time.hour,
-      time.minute,
+      minuteOfDay ~/ 60,
+      minuteOfDay % 60,
     );
     final picked = Now.fromLocal(
       formatDate(DateTime.utc(date.year, date.month, date.day)),
-      time.hour * 60 + time.minute,
+      minuteOfDay,
       widget.offsetAt(local),
     );
     setState(() {
       if (picked.utcMs > widget.clock().utcMs) {
-        // Keep the earlier value and say so.
         _futureTime = true;
       } else {
         _at = picked;
@@ -190,22 +305,100 @@ class _WeightSheetState extends State<WeightSheet> {
     });
   }
 
+  /// Adding: the date, then the time.
+  Future<void> _change() async {
+    setState(() => _futureTime = false);
+    final cur = _current;
+    final date = await _askDate(cur);
+    if (date == null || !mounted) return;
+    final time = await _askTime(cur);
+    if (time == null || !mounted) return;
+    _apply(date, time.hour * 60 + time.minute);
+  }
+
+  /// Editing: the date alone.
+  Future<void> _changeDate() async {
+    setState(() => _futureTime = false);
+    final cur = _current;
+    final date = await _askDate(cur);
+    if (date == null || !mounted) return;
+    _apply(date, cur.minuteOfDay);
+  }
+
+  /// Editing: the time alone.
+  Future<void> _changeTime() async {
+    setState(() => _futureTime = false);
+    final cur = _current;
+    final time = await _askTime(cur);
+    if (time == null || !mounted) return;
+    final day = parseDate(cur.localDate);
+    _apply(day, time.hour * 60 + time.minute);
+  }
+
   String _when(String date, int minute) =>
       S.whenInSentence(date, minute, _opened.localDate);
+
+  Widget _pickerField(String label, String value, VoidCallback? onTap) {
+    return Semantics(
+      button: true,
+      label: '$label, $value',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: label,
+              border: const OutlineInputBorder(),
+            ),
+            child: Text(value),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final unit = S.unitWord(widget.units);
     final check = _check;
-    final at = _at ?? _opened;
+    final at = _current;
     final last = widget.last;
+    final row = _row;
+    final editing = row != null;
     final reason = switch (check) {
       _Check.ok => null,
       _Check.missing => S.weightMissing,
       _Check.notNumber => S.weightNotNumber(widget.units),
       _Check.outOfRange => S.weightOutOfRange(widget.units),
     };
+    final canSave = check == _Check.ok && !_saving && !_gone;
+
+    final field = Semantics(
+      label: S.weightField,
+      child: TextField(
+        controller: _text,
+        autofocus: !editing,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        textInputAction: TextInputAction.done,
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+        ],
+        style: theme.textTheme.headlineSmall,
+        decoration: const InputDecoration(border: OutlineInputBorder()),
+        onChanged: (_) => setState(() {
+          _failed = false;
+          _deleteFailed = false;
+        }),
+        onSubmitted: (_) => _save(),
+      ),
+    );
+    final unitText = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Text(unit, style: theme.textTheme.titleMedium),
+    );
 
     return PopScope(
       canPop: !_saving,
@@ -219,77 +412,92 @@ class _WeightSheetState extends State<WeightSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Semantics(
-                          header: true,
-                          child: Text(
-                            S.weightTitle,
-                            style: theme.textTheme.titleLarge,
-                          ),
-                        ),
-                        Text(
-                          S.whenAsLabel(
-                            at.localDate,
-                            at.minuteOfDay,
-                            _opened.localDate,
-                          ),
-                        ),
-                      ],
-                    ),
+              if (editing)
+                Semantics(
+                  header: true,
+                  child: Text(
+                    S.editWeightTitle,
+                    style: theme.textTheme.titleLarge,
                   ),
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                    ),
-                    onPressed: _saving ? null : _change,
-                    child: const Text(S.change),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Semantics(
-                      label: S.weightField,
-                      child: TextField(
-                        controller: _text,
-                        autofocus: true,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.done,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Semantics(
+                            header: true,
+                            child: Text(
+                              S.weightTitle,
+                              style: theme.textTheme.titleLarge,
+                            ),
+                          ),
+                          Text(
+                            S.whenAsLabel(
+                              at.localDate,
+                              at.minuteOfDay,
+                              _opened.localDate,
+                            ),
+                          ),
                         ],
-                        style: theme.textTheme.headlineSmall,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => setState(() => _failed = false),
-                        onSubmitted: (_) => _save(),
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(unit, style: theme.textTheme.titleMedium),
-                  ),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(72, 56),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
+                      onPressed: _saving ? null : _change,
+                      child: const Text(S.change),
                     ),
-                    onPressed: (check == _Check.ok && !_saving) ? _save : null,
-                    child: const Text(S.save),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              const SizedBox(height: 8),
+              if (editing) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: field),
+                    unitText,
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _pickerField(
+                        S.dateField,
+                        S.dayShort(at.localDate, _opened.localDate),
+                        _saving ? null : _changeDate,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _pickerField(
+                        S.timeField,
+                        S.timeOfDay(at.minuteOfDay),
+                        _saving ? null : _changeTime,
+                      ),
+                    ),
+                  ],
+                ),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: field),
+                    unitText,
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(72, 56),
+                      ),
+                      onPressed: canSave ? _save : null,
+                      child: const Text(S.save),
+                    ),
+                  ],
+                ),
               if (_futureTime)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -317,7 +525,68 @@ class _WeightSheetState extends State<WeightSheet> {
                     ),
                   ),
                 ),
-              if (last != null)
+              if (_deleteFailed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      S.deleteFailed,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              if (_gone)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      S.weighInGone,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              if (editing) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    S.enteredNote(
+                      row.source,
+                      '${S.monthDay(localDateOf(row.createdAtMs, row.tzOffsetMinutes), _opened.localDate)}, '
+                      '${S.timeOfDay(minuteOfDayOf(row.createdAtMs, row.tzOffsetMinutes))}',
+                    ),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  runSpacing: 8,
+                  children: [
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 56),
+                      ),
+                      onPressed: (_saving || _gone) ? null : _delete,
+                      child: const Text(S.delete),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(72, 56),
+                      ),
+                      onPressed: canSave ? _save : null,
+                      child: const Text(S.save),
+                    ),
+                  ],
+                ),
+              ] else if (last != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(

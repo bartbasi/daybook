@@ -9,6 +9,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
+import 'package:daybook/screens/weight/weight_tab.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
@@ -191,7 +192,6 @@ void main() {
     gate.holdReads = Completer<void>();
     await tester.tap(barButton('Weight'));
     await tester.tap(barButton('Weight'));
-    await tester.tap(find.text('No weight yet. Tap to add.'));
     gate.holdReads!.complete();
     await settle(tester);
     expect(find.byType(WeightSheet), findsOneWidget);
@@ -202,7 +202,7 @@ void main() {
     expect(find.byType(WeightSheet), findsNothing);
 
     // Closed again, it can be opened again.
-    await tester.tap(find.text('No weight yet. Tap to add.'));
+    await tester.tap(barButton('Weight'));
     await settle(tester);
     expect(find.byType(WeightSheet), findsOneWidget);
   });
@@ -276,20 +276,41 @@ void main() {
     expect(find.text('81.9 kg'), findsOneWidget);
   });
 
-  appTest('tapping the weight row or the Weight button opens the sheet', (
-    tester,
-  ) async {
+  appTest('tapping the weight row opens the Weight tab, and the Weight '
+      'button opens the sheet', (tester) async {
+    await seed(tester, 182.4, UnitSystem.imperial, nowFixed);
     await openApp(tester);
-    await tester.tap(find.text('No weight yet. Tap to add.'));
-    await settle(tester);
-    expect(find.byType(WeightSheet), findsOneWidget);
-    await tester.tapAt(const Offset(200, 20)); // the scrim
+    await tester.tap(find.text('182.4 lb'));
     await settle(tester);
     expect(find.byType(WeightSheet), findsNothing);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      3,
+    );
+    expect(find.byType(WeightTab), findsOneWidget);
+    expect(find.text('Weigh-ins'), findsOneWidget);
 
+    // Back on Today, the Weight button still opens the sheet.
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
+    await settle(tester);
     await tester.tap(barButton('Weight'));
     await settle(tester);
     expect(find.byType(WeightSheet), findsOneWidget);
+  });
+
+  appTest('the empty weight row also opens the Weight tab', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.text('No weight yet. Tap to add.'));
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsNothing);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      3,
+    );
+    expect(
+      find.text('No weigh-ins yet. Tap + Log to add one.'),
+      findsOneWidget,
+    );
   });
 
   appTest('two taps: Weight, then Save, with the number already there', (

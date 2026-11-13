@@ -48,6 +48,59 @@ class S {
       'Could not save. Your $typed $unit is still here. '
       'Tap Save to try again.';
 
+  // Weight tab and the edit sheet.
+  static const logWeight = '+ Log';
+  static const range1Month = '1 month';
+  static const range3Months = '3 months';
+  static const range1Year = '1 year';
+  static const rangeAll = 'All';
+  static const trendToday = 'Trend today';
+  static const noTrend = 'No trend yet';
+  static String trendChange(
+    String direction,
+    String amount,
+    String unit,
+    int days,
+  ) => '$direction $amount $unit in $days days';
+  static const trendDown = 'Down';
+  static const trendUp = 'Up';
+  static String trendSame(int days) => 'No change in $days days';
+  static const weighIns = 'Weigh-ins';
+  static const noWeighIns = 'No weigh-ins yet. Tap + Log to add one.';
+  static const chartKey =
+      "Dots: weigh-ins. Line: trend, labeled with today's value.";
+  static String chartLabel(
+    String from,
+    String to,
+    String trendFrom,
+    String trendTo,
+    String unit,
+  ) => 'Weight, $from to $to. Trend from $trendFrom to $trendTo $unit.';
+  static String chartLabelOne(
+    String from,
+    String to,
+    String trend,
+    String unit,
+  ) => 'Weight, $from to $to. Trend $trend $unit.';
+  static const fromHealthConnect = 'from Health Connect';
+  static const fromAppleHealth = 'from Apple Health';
+  static const editWeightTitle = 'Edit weigh-in';
+  static const dateField = 'Date';
+  static const timeField = 'Time';
+  static const delete = 'Delete';
+  static String enteredNote(String source, String created) => switch (source) {
+    'health_connect' => 'From Health Connect. Created $created.',
+    'apple_health' => 'From Apple Health. Created $created.',
+    _ => 'Entered by hand. Created $created.',
+  };
+  static String weightDeleted(String weight, String unit, String day) =>
+      'Deleted $weight $unit from $day';
+  static const weighInGone = 'That weigh-in is no longer in your list.';
+  static const deleteFailed =
+      'Could not delete. The weigh-in is still in your list.';
+  static const undoDeleteFailed =
+      'Could not undo. The weigh-in is still deleted.';
+
   // More.
   static const moreTitle = 'More';
 
@@ -101,6 +154,27 @@ class S {
     final d = parseDate(localDate);
     final year = d.year == parseDate(today).year ? '' : ', ${d.year}';
     return '${_weekdays[d.weekday - 1]}, ${_months[d.month - 1]} ${d.day}$year';
+  }
+
+  /// 'Nov 11', with the year ('Nov 11, 2025') for another year.
+  static String monthDay(String localDate, String today) {
+    final d = parseDate(localDate);
+    final year = d.year == parseDate(today).year ? '' : ', ${d.year}';
+    return '${_months[d.month - 1]} ${d.day}$year';
+  }
+
+  /// 'Wed, Nov 11' (never 'yesterday'), with the year for another year.
+  static String dayShort(String localDate, String today) {
+    final d = parseDate(localDate);
+    return '${_weekdays[d.weekday - 1]}, ${monthDay(localDate, today)}';
+  }
+
+  /// For the weigh-in list: 'Today, Nov 12, 7:02 am' or 'Wed, Nov 11, 6:55 am'.
+  static String weighInWhen(String localDate, int minute, String today) {
+    final day = localDate == today
+        ? 'Today, ${monthDay(localDate, today)}'
+        : dayShort(localDate, today);
+    return '$day, ${timeOfDay(minute)}';
   }
 
   /// For a sentence: 'today 7:02 am'.

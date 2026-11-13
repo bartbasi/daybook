@@ -19,7 +19,10 @@ import '../weight/weight_sheet.dart';
 /// The Today tab. This step has the date, the weight row and the bottom
 /// action bar. The budget card and meals come in later steps.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.onOpenWeightTab});
+
+  /// Tapping the weight row opens the Weight tab.
+  final VoidCallback onOpenWeightTab;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -136,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   trend: _trend!,
                   units: _units!,
                   today: today,
-                  onTap: _openWeightSheet,
+                  onTap: widget.onOpenWeightTab,
                 ),
               ],
             ),

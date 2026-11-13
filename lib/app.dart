@@ -8,6 +8,7 @@ import 'clock.dart';
 import 'data/database.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/more/more_screen.dart';
+import 'screens/weight/weight_tab.dart';
 import 'strings.dart';
 
 class DaybookApp extends StatelessWidget {
@@ -72,6 +73,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   static const _today = 0;
+  static const _weight = 3;
 
   int _index = _today;
 
@@ -81,12 +83,12 @@ class _HomeShellState extends State<HomeShell> {
       body: SafeArea(
         child: IndexedStack(
           index: _index,
-          children: const [
-            HomeScreen(),
-            SizedBox.shrink(),
-            SizedBox.shrink(),
-            SizedBox.shrink(),
-            MoreScreen(),
+          children: [
+            HomeScreen(onOpenWeightTab: () => setState(() => _index = _weight)),
+            const SizedBox.shrink(),
+            const SizedBox.shrink(),
+            const WeightTab(),
+            const MoreScreen(),
           ],
         ),
       ),
@@ -110,8 +112,8 @@ class _HomeShellState extends State<HomeShell> {
             label: S.tabWorkouts,
           ),
           NavigationDestination(
-            enabled: false,
             icon: Icon(Icons.monitor_weight_outlined),
+            selectedIcon: Icon(Icons.monitor_weight),
             label: S.tabWeight,
           ),
           NavigationDestination(icon: Icon(Icons.more_horiz), label: S.tabMore),

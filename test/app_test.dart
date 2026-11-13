@@ -8,6 +8,7 @@ import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/screens/home/home_screen.dart';
 import 'package:daybook/screens/more/more_screen.dart';
+import 'package:daybook/screens/weight/weight_tab.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,8 +72,9 @@ void main() {
       'selected', (tester) async {
     await openApp(tester);
     expect(tab(tester, 'Today').enabled, isTrue);
+    expect(tab(tester, 'Weight').enabled, isTrue);
     expect(tab(tester, 'More').enabled, isTrue);
-    for (final label in ['Summary', 'Workouts', 'Weight']) {
+    for (final label in ['Summary', 'Workouts']) {
       expect(tab(tester, label).enabled, isFalse, reason: label);
       await tester.tap(find.widgetWithText(NavigationDestination, label));
       await tester.pump();
@@ -84,6 +86,22 @@ void main() {
       expect(find.text('Thursday, Nov 12'), findsOneWidget, reason: label);
     }
     expect(find.textContaining('oon'), findsNothing);
+  });
+
+  appTest('Weight opens its tab and Today comes back', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Weight'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WeightTab), findsOneWidget);
+    expect(
+      find.text('No weigh-ins yet. Tap + Log to add one.'),
+      findsOneWidget,
+    );
+    expect(find.text('Thursday, Nov 12'), findsNothing);
+
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
+    await tester.pumpAndSettle();
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
   });
 
   appTest('More opens, keeps Home alive, and leads to Data check', (
