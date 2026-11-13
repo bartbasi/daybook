@@ -5,7 +5,13 @@ import 'dart:io';
 
 import 'package:daybook/data/food_reference.dart';
 import 'package:daybook/data/nutrients.dart';
+import 'package:daybook/parser/line.dart';
+import 'package:daybook/parser/parser.dart';
+import 'package:daybook/parser/search_index.dart';
+import 'package:daybook/parser/user_snapshot.dart';
+import 'package:daybook/parser/user_snapshot_data.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 import 'worked_examples.dart';
 
@@ -501,7 +507,7 @@ void main() {
     });
   });
 
-  // The parser run. Task 2.5 removes the skip and fills the body.
+  // The parser run (the groups above do not call the parser).
   //
   // Pass rule (grammar 11.1), for each example, with its setup installed
   // (saved meals, aliases, user foods, learned rows, history, cursor):
@@ -514,13 +520,198 @@ void main() {
   // Examples with alternateInputs (63) must give the same result for each
   // input. Examples with variants (74) are run again with the variant's
   // setup. Every failure message names the example number and what differs.
-  group(
-    'the parser gives the expected lines',
-    skip: 'Waiting for the parser: task 2.5 connects these examples',
-    () {
-      for (final e in workedExamples) {
-        test('example ${e.number}', () {});
+  // Run on the real database. A saved meal header whose example lists no
+  // items is compared alone and its items are not counted. Markers are
+  // compared too, and `plain` (example 62, cursor at the end; every other
+  // example has the cursor outside the text).
+  group('the parser gives the expected lines', () {
+    late Database db;
+    late Parser parser;
+
+    setUpAll(() {
+      db = sqlite3.open(_dir, mode: OpenMode.readOnly);
+      parser = Parser(
+        SearchIndex.build(readUsdaFoods(db)),
+        sqliteUsdaFoods(db),
+      );
+    });
+    tearDownAll(() => db.close());
+
+    UserSnapshot snapshotOf(ExampleSetup setup) {
+      var id = 0;
+      final meals = <SavedMealData>[];
+      final aliases = <AliasData>[];
+      for (final m in savedMealFixtures) {
+        if (!setup.savedMeals.contains(m.name)) continue;
+        id++;
+        meals.add(
+          SavedMealData(
+            id: id,
+            name: m.name,
+            items: [
+              for (final it in m.items)
+                SavedMealItemData(
+                  foodRef: it.ref,
+                  foodName: it.name ?? 'food',
+                  quantity: it.quantity,
+                  unitLabel: it.unit ?? '',
+                  baseQuantity: it.grams,
+                  baseUnit: 'g',
+                  nutrients: {
+                    for (final e
+                        in _ref
+                            .food(int.parse(it.ref.substring(5)))!
+                            .nutrients
+                            .entries)
+                      e.key: e.value * it.grams / 100,
+                  },
+                ),
+            ],
+          ),
+        );
+        if (m.alias != null) aliases.add(AliasData(m.alias!, id));
       }
-    },
-  );
+      return UserSnapshot.from(
+        UserSnapshotData(
+          foods: [
+            if (setup.userFoods.contains('local:1'))
+              const UserFoodData(
+                ref: 'local:1',
+                name: 'Turkey chili',
+                kind: 'recipe',
+                baseUnit: 'serving',
+                baseAmount: 1,
+                nutrients: {1008: 420},
+              ),
+            if (setup.userFoods.contains('local:2'))
+              const UserFoodData(
+                ref: 'local:2',
+                name: 'Peanut butter cookies',
+                kind: 'custom',
+                baseUnit: 'g',
+                baseAmount: 100,
+                portions: [PortionData('1 cookie', 20)],
+                nutrients: {1008: 450},
+              ),
+          ],
+          learned: [
+            for (final l in setup.learned)
+              LearnedMatchData(
+                key: l.phrase,
+                foodRef: l.ref,
+                foodName: 'learned',
+                quantity: l.quantity,
+                unitLabel: l.unit,
+              ),
+          ],
+          aliases: aliases,
+          savedMeals: meals,
+          historyCounts: setup.history,
+        ),
+      );
+    }
+
+    Set<ExpectedMarker> markersOf(Line l) => {
+      for (final m in l.markers)
+        switch (m) {
+          Marker.guess => ExpectedMarker.guess,
+          Marker.assumed => ExpectedMarker.assumed,
+          Marker.yourPick => ExpectedMarker.yourPick,
+          Marker.scanned => ExpectedMarker.scanned,
+        },
+    };
+
+    void check(
+      int number,
+      String input,
+      ExampleSetup setup,
+      List<ExpectedLine> expected,
+      int cursor,
+    ) {
+      final lines = parser.parseMeal(input, cursor, snapshotOf(setup));
+      final flatExpected = [
+        for (final l in expected) ...[l, ...?l.items],
+      ];
+      final flat = <Line>[];
+      for (var i = 0; i < lines.length; i++) {
+        flat.add(lines[i]);
+        final headerOnly =
+            i < expected.length &&
+            expected[i].state == ExpectedState.aliasOrSavedMeal &&
+            expected[i].items == null;
+        if (!headerOnly) flat.addAll(lines[i].items);
+      }
+      final problems = <String>[];
+      if (flat.length != flatExpected.length) {
+        problems.add(
+          'expected ${flatExpected.length} lines but got ${flat.length}',
+        );
+      }
+      for (var i = 0; i < flat.length && i < flatExpected.length; i++) {
+        final a = flat[i];
+        final e = flatExpected[i];
+        final w = 'line ${i + 1}';
+        final state = ExpectedState.values[a.state.index];
+        if (state != e.state) {
+          problems.add('$w: state $state but expected ${e.state}');
+        }
+        if (e.state == ExpectedState.aliasOrSavedMeal) {
+          if (a.foodName != e.savedMeal) {
+            problems.add('$w: header "${a.foodName}" not "${e.savedMeal}"');
+          }
+          if (e.multiplier != null &&
+              (a.multiplier == null ||
+                  (a.multiplier! - e.multiplier!).abs() > _eps)) {
+            problems.add('$w: multiplier ${a.multiplier} not ${e.multiplier}');
+          }
+        } else {
+          if (a.foodRef != e.ref) {
+            problems.add('$w: ref ${a.foodRef} but expected ${e.ref}');
+          }
+          final plain = a is ParsedLine && a.plain;
+          if (plain != e.plain) {
+            problems.add('$w: plain $plain but expected ${e.plain}');
+          }
+          final got = markersOf(a);
+          if (got.length != e.markers.length || !got.containsAll(e.markers)) {
+            problems.add(
+              '$w: markers ${markersOf(a)} but expected ${e.markers}',
+            );
+          }
+        }
+        final local = e.ref != null && e.ref!.startsWith('local:');
+        if (e.grams != null && !local) {
+          final g = a.baseQuantity;
+          if (g == null || (g - e.grams!).abs() > _gramsTol) {
+            problems.add('$w: grams $g but expected ${e.grams}');
+          }
+        }
+        if (e.kcal != null) {
+          final k = a.nutrients[Nutrients.energy];
+          if (k == null || (k - e.kcal!).abs() > _kcalTol) {
+            problems.add('$w: kcal $k but expected ${e.kcal}');
+          }
+        }
+      }
+      final got = [for (final l in flat) '${l.state.name} ${l.foodRef}'];
+      expect(
+        problems,
+        isEmpty,
+        reason: 'example $number ("$input")\n${problems.join('\n')}\n$got',
+      );
+    }
+
+    for (final e in workedExamples) {
+      test('example ${e.number}', () {
+        int cursorFor(String s) => e.setup.cursorAtEnd ? s.length : -1;
+        check(e.number, e.input, e.setup, e.lines, cursorFor(e.input));
+        for (final alt in e.alternateInputs) {
+          check(e.number, alt, e.setup, e.lines, cursorFor(alt));
+        }
+        for (final v in e.variants) {
+          check(e.number, e.input, v.setup, v.lines, cursorFor(e.input));
+        }
+      });
+    }
+  });
 }
