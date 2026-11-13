@@ -121,6 +121,8 @@ Two more behaviors to know about:
 - A word that is spelled right but is not in the USDA data can be "corrected" into another food as a guess: "skyr" becomes a Skor toffee bar.
 
 ## Known gaps to decide later
+- **A changed amount is written with a singular unit.** Changing "2 slices sourdough toast" to 3 in the correction sheet gives "3 slice sourdough toast". It reads back as the right food and amount; only the wording is off. The fix belongs in the parser's rewrite (write the unit's own plural when the amount is not 1).
+- **Changing the food on a counted line keeps the count, not the weight.** "4 eggs" changed to oatmeal gives 4 cups of oatmeal, not the eggs' 200 g. The amount as written is tried first and the weight second. Say if you would rather the weight came first for plain counts.
 
 - **Text typed in the food box is lost if Android kills the app in the background** (for example after switching to another app for a while). The text is kept through folding, rotation and a failed save, and closing the screen offers Undo, but it is not written to disk until Save. Saving a draft when the app is paused would cover it.
 

@@ -10,12 +10,6 @@ import '../../parser/parse_worker.dart';
 import '../../strings.dart';
 import 'food_entry_screen.dart';
 
-/// What the correction sheet needs from the food entry screen (grammar 8.3).
-/// The screen owns the box, the added lines and the parser handle; the sheet
-/// only asks questions and asks the screen to act. Every action completes when
-/// it is done or has been refused (the screen then shows one plain line), and
-/// the sheet closes either way. A [Listenable]: it changes when the box, the
-/// newest result or the worker changes.
 /// One way of writing an amount: [quantity] of [unit] as text (empty for a
 /// bare count). The sheet gives a list of them, best first, and the screen
 /// uses the first that works.
@@ -26,6 +20,12 @@ class AmountTry {
   final String unit;
 }
 
+/// What the correction sheet needs from the food entry screen (grammar 8.3).
+/// The screen owns the box, the added lines and the parser handle; the sheet
+/// only asks questions and asks the screen to act. Every action completes when
+/// it is done or has been refused (the screen then shows one plain line), and
+/// the sheet closes either way. A [Listenable]: it changes when the box, the
+/// newest result or the worker changes.
 abstract class CorrectionHost implements Listenable {
   /// The screen's current handle. A sheet for a typed line closes when this is
   /// no longer the handle it was opened with (Try again made a new one).
