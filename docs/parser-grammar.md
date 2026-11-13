@@ -541,7 +541,7 @@ The last four are poor defaults. The "Guess" marker flags each one, and one corr
 
 ### 5.7 The search box in the correction sheet
 
-The search box uses the same normalizing and ranking on whatever the user types into it, including synonyms, typo correction and the user's own foods, exactly as matching does. There is one difference: a food is listed if it matches at least one word. It shows the top 20. The plain LIKE search in `FoodReference.search` stays for the Data check screen only.
+The search box uses the same normalizing and ranking on whatever the user types into it, including synonyms, typo correction and the user's own foods, exactly as matching does. There is one difference: a food is listed if it matches at least one word. It shows the top 20. (The plain LIKE search in `FoodReference.search` was removed with the temporary Data check screen in Phase 4.)
 
 ## 6. Aliases and saved meals
 
@@ -1022,7 +1022,7 @@ Phase 3 changes no code. Everything below is for Phase 4.
 - keep that row in `food_portion` with its label unchanged;
 - no table or column changes;
 - the data version changes on its own because the file contents change;
-- the Data check screen and the portion pickers must hide that label. The pickers hide every portion label that starts with "Quantity not specified", which also covers the antipasto food's two longer labels (4.4).
+- the portion pickers must hide that label (the temporary Data check screen, which also hid it, was removed in Phase 4). The pickers hide every portion label that starts with "Quantity not specified", which also covers the antipasto food's two longer labels (4.4).
 
 Without it, defaults fall back to rules 3 to 6 of 4.6, which give worse amounts for drinks. For example, coffee would default to "1 medium" (480 g) instead of 360 g, and every example marked "(default)" in section 11 would change. This is [open question 4](#142-open-questions).
 

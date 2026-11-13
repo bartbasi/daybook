@@ -8,8 +8,8 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, and the food and recipe editors are done, reviewed and pushed. Still to do: removing the temporary Data check screen, and the food speed tests |
-| 3 Goals and daily budget | Not started |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Follow-up fixes to the tests from the last review are in progress |
+| 3 Goals and daily budget | In progress. The budget math and goals data are being built |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
@@ -159,6 +159,8 @@ Two more behaviors to know about:
 - **Chips look the same for the moment a save is running.** They do nothing then, and the screen closes right after, so no word or shape was added.
 
 - **With a screen reader on, the "Add it" message stays until it is used**, and while the keyboard is up it keeps the totals line hidden. Closing the keyboard brings the totals back. A "Not now" button on that message would be the fix if this turns out to bother anyone.
+
+- **The app shows no USDA credit anywhere until the About screen is built** (step 8). The only screen that showed one was the temporary Data check screen, now removed. docs/data-sources.md has the wording About must use. The Open Food Facts credit is on scanned lines and in My foods.
 
 ## Not finished
 

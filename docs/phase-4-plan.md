@@ -381,11 +381,13 @@ Checked on pub.dev on 2026-11-12 (version and license tags from the pub.dev API;
 | Kind | Runs on | What it covers |
 |---|---|---|
 | Unit tests (`test/`) | Local `flutter test` and CI ubuntu | Data, parser, maths, guards. |
-| Widget tests (`test/screens/`, `test/speed/`) | Local and CI ubuntu | Whole screens and the whole app (`DaybookApp` with an in-memory database, a fixed clock and the real USDA asset installed in a temp folder, the same way the existing Data check test does it). Plugins mocked at the channel. |
+| Widget tests (`test/screens/`, `test/speed/`) | Local and CI ubuntu | Whole screens and the whole app (`DaybookApp` with an in-memory database, a fixed clock and the real USDA asset installed in a temp folder, the same way the food screen tests do it). Plugins mocked at the channel. |
 | Integration tests (`integration_test/`) | CI only: Android emulator job and iOS simulator job (task 0.3), on pushes to main and on manual runs | The same flows on a real build: real SQLite on the device, real plugin registration, manifest and Info.plist mistakes, the widget launch link. |
 | Python tests (`tools/`) | Local and CI ubuntu | The three data build scripts. |
 
 **Time per integration test file.** Found in step 1: on the iOS simulator each file under `integration_test/` rebuilds and relaunches the app, 2 to 4 minutes per file. Tasks 2.14, 4.6, 5.4 and 8.4 add more flows. Each should add its test to one entry file that starts the app once, or the iOS job's time limits must rise again; the task that adds the fourth file decides and tests which.
+
+**Decided in task 2.14:** the flows (weight, food, and later workouts, cardio and settings) run from one entry file, `integration_test/flows_test.dart`, which starts the app once and has one test per flow. `app_launch_test.dart` and `widget_launch_test.dart` stay separate because they test the first run and the launch link. The reason is not only time: the iOS job retries only when the test never connected to the simulator, so a hang on a later file is never retried, and each extra launch adds a chance of one.
 
 **Is the emulator job worth it? Yes.** It is the only place before Bart's phones where native code runs at all: the widget launch link, Health Connect and camera permission plumbing, the notification channel, and a release build that actually starts. GitHub Actions minutes are free for public repositories, so the cost is only waiting time, which is why it runs on main and on demand rather than on every branch push. The iOS simulator job is worth it for the same reason, since there is no Mac. Neither can place a home-screen widget, scan a real barcode or read real health data.
 
