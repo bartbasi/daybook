@@ -220,7 +220,7 @@ The dictated version `two eggs two slices of sourdough toast one tablespoon of b
 
 A multiplier with no other quantity is the quantity.
 
-The `x2` form works only after the food (`eggs x2`); at the start of an item only the `2x` form is a multiplier (`2x eggs`), so `x2 usual breakfast` is not a multiplied saved meal and is read as ordinary text.
+A multiplier may be written `2x` or `x2` at the start of an item, and `x2` or `2x` at its end: `x2 eggs` is 2 eggs, and `x2 usual breakfast` is the saved meal times 2.
 
 ### 3.3 Ranges
 
@@ -779,7 +779,7 @@ post_amount   = quantity , [ unit ] , [ trail_mult ] , { trail_word }
               | trail_mult
               | number , ( "x" | "×" ) ;          (* "eggs 2x": only at the end of the item, rule 3.2 *)
 trail_word    = food_word | mid_filler ;          (* "chicken breast 6 oz grilled": rule 2.6.2 *)
-lead_mult     = number , ( "x" | "×" ) ;
+lead_mult     = number , ( "x" | "×" ) | ( "x" | "×" ) , number ;
 trail_mult    = ( "x" | "×" ) , number ;
 
 quantity      = counted , [ range_tail ] ;
