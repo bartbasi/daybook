@@ -25,6 +25,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
+import '../../integration_test/flows/food_flow.dart' show foodSnapshot;
+
 // Food entry (task 2.8) over the real bundled food data, with the parser
 // worker running inline so every result arrives before the call that asked
 // for it returns.
@@ -2150,6 +2152,222 @@ void main() {
       expect(boxText(tester), '2 eggs, 1 banana');
       expect(tiles(), findsNWidgets(2));
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('edges found in review', () {
+    /// Every entry belongs to a meal that is there, every nutrient row to an
+    /// entry that is there, and each entry has its nutrient rows.
+    Future<void> expectNoOrphans(
+      WidgetTester tester, {
+      required int mealCount,
+      required int entryCount,
+    }) async {
+      final meals = await mealRows(tester);
+      final entries = await real(tester, () => db.select(db.mealEntries).get());
+      final nutrients = await real(
+        tester,
+        () => db.select(db.mealEntryNutrients).get(),
+      );
+      expect(meals, hasLength(mealCount));
+      expect(entries, hasLength(entryCount));
+      final mealIds = {for (final m in meals) m.id};
+      final entryIds = {for (final e in entries) e.id};
+      expect(entries.every((e) => mealIds.contains(e.mealId)), isTrue);
+      expect(nutrients.every((n) => entryIds.contains(n.entryId)), isTrue);
+      expect(
+        {for (final n in nutrients) n.entryId},
+        entryIds,
+        reason: 'every entry has nutrient rows, and only entries do',
+      );
+    }
+
+    Future<void> openLoggedMeal(WidgetTester tester) async {
+      await tester.tap(find.text('Breakfast').last);
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+    }
+
+    appTest('opened at 23:58 and saved at 00:01: the meal is on the day the '
+        'screen showed, and Home says so', (tester) async {
+      clockNow = at('2026-11-12', 23, 58);
+      await openApp(tester);
+      await openFood(tester);
+      expect(find.text('Today, Nov 12'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<ChoiceChip>(find.byType(ChoiceChip))
+            .singleWhere((c) => c.selected)
+            .label,
+        isA<Text>().having((t) => t.data, 'slot', 'Snack'),
+      );
+      await type(tester, '1 apple');
+      clockNow = at('2026-11-13', 0, 1);
+      await tester.tap(saveButton());
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      final meal = await theMeal(tester);
+      // The day and slot the screen showed, and the time the save happened.
+      expect(meal.meal.localDate, '2026-11-12');
+      expect(meal.slotName, 'Snack');
+      expect(meal.meal.loggedAtMs, at('2026-11-13', 0, 1).utcMs);
+      expect(meal.meal.tzOffsetMinutes, -360);
+      // Home has not looked at the clock yet: it still shows the 12th, with
+      // the new meal in its Snack row, and the message names the day from the
+      // clock now, so it says "yesterday" (the screen then catches up).
+      expect(find.text('Thursday, Nov 12'), findsOneWidget);
+      expect(find.text('Snack saved for yesterday, 122 kcal'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+      // After the clock tick Home is on the 13th, with nothing in its rows
+      // (the meal is on the 12th, one tap back), and the message is gone.
+      await tester.pump(const Duration(minutes: 2));
+      await tester.pump();
+      expect(find.text('Friday, Nov 13'), findsOneWidget);
+      expect(find.text('Thursday, Nov 12'), findsNothing);
+      expect(find.text('Nothing yet. Tap to add.'), findsNWidgets(4));
+      expect(find.text('122 kcal'), findsNothing);
+      expect(find.text('Undo'), findsNothing);
+      expect((await theMeal(tester)).meal.localDate, '2026-11-12');
+    });
+
+    appTest('a meal logged with a custom food, after the food was edited '
+        'and after it was deleted: opening the meal and saving with no '
+        'change leaves every stored value identical', (tester) async {
+      final food = await real(
+        tester,
+        () => db.createCustomFood(
+          const CustomFoodInput(
+            name: 'House bread',
+            basis: FoodBasis.per100g,
+            nutrients: {Nutrients.energy: 250, Nutrients.protein: 8},
+          ),
+          nowFixed,
+        ),
+      );
+      final slots = await real(tester, () => db.select(db.mealSlots).get());
+      await real(
+        tester,
+        () => db.saveMeal(
+          now: nowFixed,
+          localDate: '2026-11-12',
+          slotId: slots.firstWhere((s) => s.name == 'Breakfast').id,
+          sourceText: '2 slices house bread',
+          lines: [
+            MealLineInput(
+              foodRef: food.ref,
+              foodName: 'House bread',
+              quantity: 2,
+              unitLabel: 'slice',
+              baseQuantity: 60,
+              baseUnit: 'g',
+              nutrients: {Nutrients.energy: 150, Nutrients.protein: 4.8},
+            ),
+          ],
+        ),
+      );
+      await real(
+        tester,
+        () => db.editCustomFood(
+          food.food.id,
+          const CustomFoodInput(
+            name: 'Renamed bread',
+            basis: FoodBasis.per100g,
+            nutrients: {Nutrients.energy: 999},
+          ),
+          at('2026-11-12', 8, 0),
+        ),
+      );
+      await openApp(tester);
+      final before = await foodSnapshot(tester);
+      final foodsBefore = (await real(
+        tester,
+        () => db.select(db.foods).get(),
+      )).map((f) => f.toString()).toList();
+      expect(before['entries'], hasLength(1));
+      expect(before['entries']!.single, contains('House bread'));
+
+      // After the food was edited.
+      clockNow = at('2026-11-12', 15, 15);
+      await openLoggedMeal(tester);
+      expect(find.text('House bread'), findsOneWidget);
+      await tester.tap(saveButton());
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      expect(await foodSnapshot(tester), before);
+      expect(tester.takeException(), isNull);
+
+      // After the food was deleted.
+      await real(
+        tester,
+        () =>
+            (db.delete(db.foods)..where((f) => f.id.equals(food.food.id))).go(),
+      );
+      await openLoggedMeal(tester);
+      expect(find.text('House bread'), findsOneWidget);
+      await tester.tap(saveButton());
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      expect(await foodSnapshot(tester), before);
+      expect(tester.takeException(), isNull);
+      // Saving the meal never wrote the food: only the delete changed it.
+      expect(foodsBefore, hasLength(1));
+      expect(await real(tester, () => db.select(db.foods).get()), isEmpty);
+    });
+
+    appTest('within the ten seconds after a save, opening the meal, '
+        'changing it and saving: the first Undo is gone, and no row is lost '
+        'or left over', (tester) async {
+      final before = await logBrief(tester);
+      expect(find.text('Undo'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await openLoggedMeal(tester);
+      await type(tester, '1 banana');
+      await tester.tap(saveButton());
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      final edited = await theMeal(tester);
+      // The edit replaced the message: the first Undo is no longer offered,
+      // so it cannot delete the meal the edit changed.
+      expect(find.text('Undo'), findsNothing);
+      expect(find.text('Breakfast saved, 613 kcal'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 11));
+      expect(find.text('Undo'), findsNothing);
+      // The same meal, the old five lines and the new one, nothing orphaned.
+      expect(edited.meal.id, before.meal.id);
+      // The typed text is added to the source text on a new line; no other
+      // column of the meal moves.
+      expect(edited.meal.sourceText, '$brief\n1 banana');
+      expect(
+        edited.meal.copyWith(sourceText: Value(before.meal.sourceText)),
+        before.meal,
+      );
+      expect(edited.entries, hasLength(6));
+      for (var i = 0; i < 5; i++) {
+        expect(edited.entries[i].entry, before.entries[i].entry);
+        expect(edited.entries[i].nutrients, before.entries[i].nutrients);
+      }
+      await expectNoOrphans(tester, mealCount: 1, entryCount: 6);
+    });
+
+    appTest('within the ten seconds after a save, opening the meal and '
+        'closing it with no change keeps the first Undo, which then removes '
+        'the whole meal and leaves no row behind', (tester) async {
+      final before = await logBrief(tester);
+      await tester.pump(const Duration(seconds: 3));
+      await openLoggedMeal(tester);
+      await tester.tap(find.byTooltip('Close'));
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      // Nothing was changed, so the screen gave no result and Home kept its
+      // message with its Undo.
+      expect(find.text('Breakfast saved, 490 kcal'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+      expect((await theMeal(tester)).entries, hasLength(5));
+      await tester.tap(find.text('Undo'));
+      await settle(tester);
+      expect(await mealRows(tester), isEmpty);
+      await expectNoOrphans(tester, mealCount: 0, entryCount: 0);
+      expect(before.entries, hasLength(5));
     });
   });
 }

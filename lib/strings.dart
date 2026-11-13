@@ -65,7 +65,6 @@ class S {
   static const range1Year = '1 year';
   static const rangeAll = 'All';
   static const trendToday = 'Trend today';
-  static const noTrend = 'No trend yet';
   static String trendChange(
     String direction,
     String amount,

@@ -4,7 +4,7 @@
 // Speed target 3 (docs/design/speed-targets.md, section 3): log body weight
 // from Home, or from the widget, in as few taps as the design promises. The
 // whole app runs here, with an in-memory database and a fixed clock. The same
-// flow runs on a real build in integration_test/weight_test.dart.
+// flow runs on a real build in integration_test/flows_test.dart.
 
 import 'dart:io';
 

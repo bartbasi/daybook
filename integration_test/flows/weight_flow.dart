@@ -3,7 +3,7 @@
 
 // The body weight flow of speed target 3, written once and used twice: by
 // test/speed/weight_speed_test.dart (the whole app, an in-memory database) and
-// by integration_test/weight_test.dart (a real build, the real database). It
+// by integration_test/flows_test.dart (a real build, the real database). It
 // finds widgets by type and by their words and uses no mocks, so it cannot
 // tell which of the two it is running in.
 //
@@ -158,4 +158,88 @@ Future<WeightEntry> saveOpenWeightSheet(
     'Home to confirm "$said"',
   );
   return row;
+}
+
+/// Speed target 3 on a real build or in the whole app: the device clock, the
+/// real database. Does not assume the database is empty, never looks at a date
+/// or a time zone, and at the end deletes the rows it added and puts the
+/// units setting back. The widget link is sent by hand, as in
+/// widget_launch_test.dart: a test cannot tap a home-screen widget.
+Future<void> runWeightFlow(WidgetTester tester) async {
+  final db = appDatabase(tester);
+  final rowsBefore = {for (final r in await storedWeights(tester)) r.id};
+  final unitsBefore = (await tester.runAsync(db.getUnits))!;
+  final startedMs = DateTime.now().millisecondsSinceEpoch;
+
+  /// The device clock, so the test never looks at a date.
+  void expectNow(WeightEntry row) {
+    expect(
+      (row.measuredAtMs - startedMs).abs(),
+      lessThan(const Duration(minutes: 10).inMilliseconds),
+    );
+  }
+
+  try {
+    await tester.runAsync(() => db.setUnits(UnitSystem.imperial));
+
+    // Home, typing 181.8: 2 counted taps.
+    var taps = TapCounter(tester);
+    final typed = await logWeightFromHome(tester, taps, type: '181.8');
+    taps.expectCount(2, flow: 'Weight, Save');
+    expect(typed.weightKg, lbToKg(181.8));
+    expectNow(typed);
+
+    // Home, the weight unchanged from last time: 2 counted taps, no typing.
+    taps = TapCounter(tester);
+    final same = await logWeightFromHome(tester, taps);
+    taps.expectCount(2, flow: 'Weight, Save');
+    expect(same.weightKg, typed.weightKg);
+    expectNow(same);
+
+    // The widget link, typing: 1 counted tap.
+    await deliverWidgetLink(tester);
+    taps = TapCounter(tester);
+    final fromWidget = await saveOpenWeightSheet(tester, taps, type: '182.2');
+    taps.expectCount(1, flow: 'the widget link, then Save');
+    expect(fromWidget.weightKg, lbToKg(182.2));
+    expectNow(fromWidget);
+
+    // Kilograms: the same flows.
+    await tester.runAsync(() => db.setUnits(UnitSystem.metric));
+    taps = TapCounter(tester);
+    final metric = await logWeightFromHome(tester, taps, type: '82.5');
+    taps.expectCount(2, flow: 'Weight, Save, in kg');
+    expect(metric.weightKg, 82.5);
+    expectNow(metric);
+
+    await deliverWidgetLink(tester);
+    taps = TapCounter(tester);
+    final metricWidget = await saveOpenWeightSheet(tester, taps);
+    taps.expectCount(1, flow: 'the widget link, then Save, in kg');
+    expect(metricWidget.weightKg, 82.5);
+    expectNow(metricWidget);
+
+    // Everything is on the device, once each.
+    final added = [
+      for (final r in await storedWeights(tester))
+        if (!rowsBefore.contains(r.id)) r.id,
+    ];
+    expect(added, hasLength(5));
+  } finally {
+    // CI removes the app after each entry file, so this does not matter there.
+    // It is for a run on a phone or a simulator that is kept: the rows and the
+    // units setting this flow added are taken out, so the next flow in the
+    // same run starts from what it expects and nothing of the test is left in
+    // the person's data. It uses the handle from the start, not the widget
+    // tree, so it works even if a failure left no app on screen.
+    await tester.runAsync(() async {
+      final added = [
+        for (final r in await db.select(db.weightEntries).get())
+          if (!rowsBefore.contains(r.id)) r.id,
+      ];
+      await (db.delete(db.weightEntries)..where((w) => w.id.isIn(added))).go();
+      await db.setUnits(unitsBefore);
+    });
+    await tester.pump(const Duration(milliseconds: 500));
+  }
 }

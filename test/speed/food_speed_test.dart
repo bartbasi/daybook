@@ -4,7 +4,7 @@
 // Speed targets 1 and 2 (docs/design/speed-targets.md, sections 1 and 2): log
 // a typed 4-item meal, and log a saved meal or "same as yesterday". The whole
 // app runs here, with an in-memory database, a fixed clock and the real USDA
-// food data. The same flows run on a real build in integration_test/food_test.dart.
+// food data. The same flows run on a real build in integration_test/flows_test.dart.
 //
 // What counts as a tap, from speed-targets.md: "Every touch on the screen
 // counts: buttons, chips, fields, keyboard action keys (Next, Done, Save), and
@@ -23,6 +23,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
 import 'package:daybook/data/nutrients.dart';
+import 'package:daybook/parser/learned_key.dart';
 import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/parser/parser.dart';
 import 'package:daybook/parser/search_index.dart';
@@ -252,7 +253,11 @@ void main() {
       expect(e.entry.foodName, names[i]);
       expect(e.entry.unitLabel, w.$2, reason: 'line ${i + 1}');
       expect(e.entry.quantity, w.$3, reason: 'line ${i + 1}');
-      expect(e.entry.baseQuantity, closeTo(w.$4, 0.5), reason: 'line ${i + 1}');
+      expect(
+        e.entry.baseQuantity,
+        closeTo(w.$4, 0.05),
+        reason: 'line ${i + 1}',
+      );
       expect(e.entry.baseUnit, 'g');
       expect(e.nutrients[Nutrients.energy], closeTo(w.$5, 0.5));
       expect(e.nutrients[Nutrients.protein], closeTo(w.$6, 0.051));
@@ -412,7 +417,22 @@ void main() {
   });
 
   appTest('editing a logged meal and saving with no change leaves every '
-      'stored value identical', (tester) async {
+      'stored value identical, a learned match included', (tester) async {
+    // One learned match, so the sample meal has a line that comes from it. The
+    // first save counts it up, as it should; the no-change edit must not.
+    await real(
+      tester,
+      () => db
+          .into(db.learnedMatches)
+          .insert(
+            LearnedMatchesCompanion.insert(
+              phrase: learnedKey('half and half'),
+              foodRef: 'usda:2705594',
+              foodName: 'Cream, half and half',
+              updatedAtMs: nowFixed.utcMs - 86400000,
+            ),
+          ),
+    );
     await openApp(tester);
     final logged = await logTypedMeal(
       tester,
@@ -422,10 +442,16 @@ void main() {
       kcal: 490,
     );
     final before = await foodSnapshot(tester);
-    // The columns the snapshot reads, so a new column cannot slip past it.
+    // Each snapshot row is the generated toString() of a stored row, which
+    // lists every column. These checks only count rows, to show the snapshot
+    // is not empty; the comparison below is what checks the values.
     expect(before['meals'], hasLength(1));
     expect(before['entries'], hasLength(5));
     expect(before['nutrients']!.length, greaterThanOrEqualTo(5 * 4));
+    // The first save used the learned match and counted it up.
+    expect(before['learned'], hasLength(1));
+    expect(before['learned']!.single, contains('timesUsed: 2'));
+    expect(before['learned']!.single, contains('${nowFixed.utcMs}'));
 
     // Hours later, so a timestamp that follows the clock would show.
     clockNow = Now.fromLocal('2026-11-12', 15 * 60 + 15, -360);
@@ -440,10 +466,10 @@ void main() {
     await saveAndClose(tester, taps);
 
     // Every column of every row of the meal, its entries and their nutrients,
-    // the learned matches and the saved meals, byte for byte. Nothing in a
-    // save with no change is allowed to move, the updated times included: the
-    // meal has no updated-at column, and editMeal says "The logged time
-    // stays" and writes an entry only when its values differ.
+    // the learned matches, the saved meals, their items and aliases, byte for
+    // byte. Nothing in a save with no change is allowed to move, the updated
+    // times included: the meal has no updated-at column, and editMeal says
+    // "The logged time stays" and writes an entry only when its values differ.
     expect(await foodSnapshot(tester), before);
     final after = (await storedMeals(tester)).single;
     expect(after.meal, logged.meal);

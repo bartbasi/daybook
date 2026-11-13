@@ -162,9 +162,18 @@ void main() {
         expect(toast.baseQuantity, 40.5);
         expect(m.entries[1].nutrients, {kcal: 110});
         // And the same from a fresh read of the tables.
-        expect(await db.loadMeal(m.meal.id), isNotNull);
-        final rows = await nutrientRows();
-        expect(rows, hasLength(3));
+        final back = (await db.loadMeal(m.meal.id))!;
+        expect(back.meal, m.meal);
+        expect(back.slotName, m.slotName);
+        expect(
+          [for (final e in back.entries) e.entry],
+          [for (final e in m.entries) e.entry],
+        );
+        expect(
+          [for (final e in back.entries) e.nutrients],
+          [for (final e in m.entries) e.nutrients],
+        );
+        expect(await nutrientRows(), hasLength(3));
       },
     );
 
@@ -346,20 +355,100 @@ void main() {
       ),
     ];
 
-    test('is stored line by line, with each ref and the day total', () async {
-      final m = await save(everything());
+    test('the day the app reads holds one entry per kind, as logged', () async {
+      final logged = await save(everything());
+      final day = await db.watchDay('2026-11-12').first;
+      expect(day.meals, hasLength(1));
+      final read = day.meals.single;
+      expect(read.meal, logged.meal);
       expect(
-        [for (final e in m.entries) e.entry.foodRef],
+        [for (final e in read.entries) e.entry.foodRef],
         ['usda:2707153', custom.ref, recipe.ref, 'local:$scannedId'],
       );
-      expect(m.totals[kcal], 143 + 200 + 260 + 102);
-      expect(m.totals[protein], closeTo(12.5 + 5 + 30 + 6.8, 1e-9));
-      expect(m.totals[fat], 7.5);
-      // The kinds really are four different kinds of food.
-      expect(custom.food.kind, 'custom');
-      expect(recipe.food.kind, 'recipe');
-      expect((await db.loadFood(scannedId))!.food.kind, 'off');
-      expect((await db.loadDay('2026-11-12')).totals[kcal], 705);
+      expect(
+        [for (final e in read.entries) e.entry.foodName],
+        ['Egg, whole', 'Grandma granola', 'Turkey chili', 'Plain yogurt'],
+      );
+      // Each local ref points at a food of its own kind.
+      expect(
+        [
+          for (final e in read.entries.skip(1))
+            (await db.loadFood(int.parse(e.entry.foodRef.substring(6))))!
+                .food
+                .kind,
+        ],
+        ['custom', 'recipe', 'off'],
+      );
+      // The day, the meal and a fresh read of the meal agree.
+      expect(day.totals, read.totals);
+      expect(read.totals, (await db.loadMeal(logged.meal.id))!.totals);
+    });
+
+    test('the foods and the recent list that the parser and the chips read '
+        'include all four kinds', () async {
+      await save(everything());
+      final snapshot = await db.loadUserSnapshot();
+      expect(
+        {for (final f in snapshot.foods) f.ref: f.kind},
+        {custom.ref: 'custom', recipe.ref: 'recipe', 'local:$scannedId': 'off'},
+      );
+      final recent = await db.recentFoods(
+        slotId: breakfast,
+        today: '2026-11-12',
+      );
+      expect(
+        {for (final r in recent) r.foodRef},
+        {'usda:2707153', custom.ref, recipe.ref, 'local:$scannedId'},
+      );
+      // A chip adds the food as it was last logged.
+      final granola = recent.firstWhere((r) => r.foodRef == custom.ref);
+      expect(granola.asInput().quantity, 50);
+      expect(granola.asInput().unitLabel, 'g');
+    });
+
+    test('each food edited or archived later: the logged refs, names and '
+        'numbers do not move, and the history still counts them', () async {
+      final logged = await save(everything());
+      final before = await db.watchDay('2026-11-12').first;
+      await db.editCustomFood(
+        custom.food.id,
+        const CustomFoodInput(
+          name: 'Renamed granola',
+          basis: FoodBasis.per100g,
+          nutrients: {kcal: 1},
+        ),
+        morning,
+      );
+      await db.editRecipe(
+        recipe.food.id,
+        RecipeInput(
+          name: 'Renamed chili',
+          servings: 2,
+          ingredients: [
+            line('usda:1', 'Turkey', n: {kcal: 5}),
+          ],
+        ),
+        morning,
+      );
+      await db.archiveFood(scannedId, morning);
+      final after = await db.watchDay('2026-11-12').first;
+      expect(
+        [for (final e in after.meals.single.entries) e.entry],
+        [for (final e in before.meals.single.entries) e.entry],
+      );
+      expect(after.totals, before.totals);
+      expect(after.meals.single.meal, logged.meal);
+      final counts = await db.historyCounts();
+      for (final ref in [custom.ref, recipe.ref, 'local:$scannedId']) {
+        expect(counts[ref], 1, reason: ref);
+      }
+      // The archived product leaves what the parser reads; its entry stays.
+      final snapshot = await db.loadUserSnapshot();
+      expect(
+        snapshot.foods.map((f) => f.ref),
+        isNot(contains('local:$scannedId')),
+      );
+      expect(snapshot.foods.map((f) => f.ref), contains(custom.ref));
     });
 
     test('counts toward the history of each food', () async {
@@ -988,30 +1077,48 @@ void main() {
       expect((await db.loadDay('2026-11-13')).meals, isEmpty);
     });
 
-    test(
-      'travelling to another time zone does not move meals already logged',
-      () async {
-        final home = await save([
-          line('home', 'Home'),
-        ], now: local('2026-11-12', 22, 0, cst));
-        // Later, in Tokyo (UTC plus 9), the same instant is already the 13th.
-        final tokyo = Now(utcMs: home.meal.loggedAtMs, offsetMinutes: 540);
-        expect(tokyo.localDate, '2026-11-13');
-        expect((await db.loadMeal(home.meal.id))!.meal.localDate, '2026-11-12');
-        final away = await save([
-          line('away', 'Away'),
-        ], now: local('2026-11-13', 8, 0, 540));
-        expect(away.meal.tzOffsetMinutes, 540);
-        expect(
-          (await db.loadDay('2026-11-12')).meals.single.meal.id,
-          home.meal.id,
-        );
-        expect(
-          (await db.loadDay('2026-11-13')).meals.single.meal.id,
-          away.meal.id,
-        );
-      },
-    );
+    test('after a move to another time zone, a new meal takes the new day and '
+        'slot, and the meals logged before stay on their day', () async {
+      final home = await save(
+        [line('home', 'Home')],
+        slot: snack,
+        now: local('2026-11-12', 22, 0, cst),
+      );
+      final homeBefore = (await db.loadMeal(home.meal.id))!;
+      // Six hours later it is 7:00 pm on the 13th in Tokyo (UTC plus 9).
+      final tokyo = Now(
+        utcMs: home.meal.loggedAtMs + 6 * 3600000,
+        offsetMinutes: 540,
+      );
+      expect(tokyo.localDate, '2026-11-13');
+      // The screen takes its day and slot from the clock like this.
+      final slot = await db.defaultMealSlot(tokyo.minuteOfDay);
+      expect(slot.name, 'Dinner');
+      final away = await save(
+        [line('away', 'Away')],
+        date: tokyo.localDate,
+        slot: slot.id,
+        now: tokyo,
+      );
+      expect(away.meal.localDate, '2026-11-13');
+      expect(away.slotName, 'Dinner');
+      expect(away.meal.tzOffsetMinutes, 540);
+      expect(away.meal.loggedAtMs, tokyo.utcMs);
+      // Reading the earlier day still returns the meal logged before.
+      final earlier = await db.loadDay('2026-11-12');
+      expect(earlier.meals.single.meal, homeBefore.meal);
+      expect(
+        [for (final e in earlier.meals.single.entries) e.entry],
+        [for (final e in homeBefore.entries) e.entry],
+      );
+      expect(
+        (await db.loadDay('2026-11-13')).meals.single.meal.id,
+        away.meal.id,
+      );
+      // Same as yesterday, from Tokyo's 13th, finds the 12th's snack.
+      final y = await db.sameAsYesterday(forDate: '2026-11-13', slotId: snack);
+      expect(y!.meal.id, home.meal.id);
+    });
 
     test(
       'spring forward: a day of 23 hours holds both sides of the change',
@@ -1113,21 +1220,31 @@ void main() {
       );
     });
 
-    test('follows a daylight saving change by the wall clock', () async {
-      // 10:29 and 10:30 on the day the clocks go forward, and the day after.
-      for (final date in ['2026-03-07', '2026-03-08', '2026-03-09']) {
-        final offset = date == '2026-03-07' ? cst : cdt;
-        expect(
-          (await db.defaultMealSlot(local(date, 10, 29, offset).minuteOfDay))
-              .name,
-          'Breakfast',
+    test('follows a daylight saving change: the offset in force at the '
+        'instant decides', () async {
+      Future<String> slotAt(DateTime utc, int offset) async {
+        final now = Now(
+          utcMs: utc.millisecondsSinceEpoch,
+          offsetMinutes: offset,
         );
-        expect(
-          (await db.defaultMealSlot(local(date, 10, 30, offset).minuteOfDay))
-              .name,
-          'Lunch',
-        );
+        return (await db.defaultMealSlot(now.minuteOfDay)).name;
       }
+
+      // Clocks go forward at 8:00 UTC on 2026-03-08 (2:00 am to 3:00 am). At
+      // 15:29 and 15:30 UTC the phone is on UTC minus 5: 10:29 and 10:30.
+      expect(await slotAt(DateTime.utc(2026, 3, 8, 15, 29), cdt), 'Breakfast');
+      expect(await slotAt(DateTime.utc(2026, 3, 8, 15, 30), cdt), 'Lunch');
+      // The day before, the phone is on UTC minus 6, so the boundary is an
+      // hour later in UTC: 16:30.
+      expect(await slotAt(DateTime.utc(2026, 3, 7, 16, 29), cst), 'Breakfast');
+      expect(await slotAt(DateTime.utc(2026, 3, 7, 16, 30), cst), 'Lunch');
+      // Read with the wrong offset, 15:30 UTC would still be breakfast.
+      expect(await slotAt(DateTime.utc(2026, 3, 8, 15, 30), cst), 'Breakfast');
+      // Clocks go back at 7:00 UTC on 2026-11-01. At 15:30 UTC the phone is
+      // on UTC minus 6 (9:30, Breakfast); a week earlier it was UTC minus 5
+      // (10:30, Lunch).
+      expect(await slotAt(DateTime.utc(2026, 11, 1, 15, 30), cst), 'Breakfast');
+      expect(await slotAt(DateTime.utc(2026, 10, 25, 15, 30), cdt), 'Lunch');
     });
 
     test('the very first and last minute of the day', () async {

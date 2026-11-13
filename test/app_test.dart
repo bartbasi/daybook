@@ -477,10 +477,7 @@ void main() {
     await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
     await tester.pumpAndSettle();
     expect(find.text('My foods and recipes'), findsOneWidget);
-    expect(
-      find.text('Foods you made, recipes, scanned products'),
-      findsOneWidget,
-    );
+    expect(find.text('Foods you made, recipes, scanned products'), findsOneWidget);
     await tester.tap(find.text('My foods and recipes'));
     await tester.pumpAndSettle();
     expect(find.byType(MyFoodsScreen), findsOneWidget);
