@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals and barcode scanning are done, reviewed and pushed. Still to do: the food and recipe editors, the speed tests |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, and the food and recipe editors are done, reviewed and pushed. Still to do: the food and recipe editors, the speed tests |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -157,6 +157,8 @@ Two more behaviors to know about:
 - **Licence notices for the scanner's built-in code** (zxing-cpp, zint, CameraX) are not collected automatically. They are added to the licence list in About in step 8; docs/dependencies.md carries the note.
 - **The saved meal editor does not scroll the line you are typing into view**, as the food entry screen does. With many items and the keyboard up you may have to scroll by hand.
 - **Chips look the same for the moment a save is running.** They do nothing then, and the screen closes right after, so no word or shape was added.
+
+- **With a screen reader on, the "Add it" message stays until it is used**, and while the keyboard is up it keeps the totals line hidden. Closing the keyboard brings the totals back. A "Not now" button on that message would be the fix if this turns out to bother anyone.
 
 ## Not finished
 
