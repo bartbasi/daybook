@@ -16,6 +16,10 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 7 Health sync | Not started |
 | 8 About, settings, units | Not started |
 
+## On your phone now
+
+A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It has weight entry, the Weight tab, the weight widget and a preview of the food entry screen (typing and saving a meal; tapping a line does nothing yet).
+
 ## Before you install the Phase 4 build
 
 Uninstall the Phase 2 test build from your phone first, or clear its data. The database layout changed before any release (see the first decision below), and the old build's database is not migrated.
@@ -41,22 +45,27 @@ Each is the recommended option from the plan's open questions, or a small call m
 15. **Aliases are stored as you typed them.** They are compared on the fly, so a later change to the comparison rules cannot make saved aliases stop working. A test also pins the keys the app stores for learned corrections: after release, changing one means migrating stored data.
 16. **The speed tests run in their own CI step.** Run beside the rest of the suite they failed once from machine load alone. The budgets are unchanged.
 
-## Open questions from the plan, still to confirm
+## Open questions from the plan: answered
 
-Work is going ahead on the recommended option for each. They are listed in phase-4-plan.md section 9: iPhone signing for the gate (2), Compendium permission (3), cardio general entries (4), imported workouts (5), rest alert timing on Android (6), no exercise images (7), and the "collects no data" line in About (8).
+Bart approved the recommended option for each on 2026-11-13 ("your recommendations are approved"). They are in phase-4-plan.md section 9:
 
-## A question about the "data stays on the device" promise
+- **iPhone for the gate (2):** signing and TestFlight setup move to the end of Phase 4. You do the Apple Developer account steps by hand; docs/ios-widget.md lists what the widget needs.
+- **Compendium permission (3):** cardio is built with the 2024 values now, and the reply (or your decision to go ahead without one) is a condition of release in Phase 6. The email is still yours to send.
+- **Cardio with no distance typed (4):** the Compendium's general entry for the activity (Running 12145, Walking 17190, Bicycling 01014).
+- **Imported workouts (5):** every session from Health Connect or Apple Health is imported; a strength session logged in both places counts twice until one is deleted.
+- **Rest alert on Android (6):** no extra permission; the alert may be a few seconds late.
+- **Exercise images (7):** none shipped, and the "Some illustrations by Everkinetic" sentence is dropped from About.
+- **Items missing from the brief (8):** only a one-line "Daybook collects no data" statement in About is added. First-run setup, hiding the weight on the widget, a weight typo check and calorie quick-add wait for the Phase 5 friction log.
 
-Found in review of the widget, and true since Phase 2. Android backs up every app's data to the user's own Google account unless the app opts out, and an iPhone does the same to iCloud. Daybook does not opt out today, so with phone backup turned on, Daybook's database is in that backup. Nothing goes to Play, Inc. or anyone else either way.
+## Phone backups and the "data stays on the device" promise: answered
 
-- (a) **Recommended:** leave phone backups working, and say so plainly in About and the privacy policy: "Daybook sends nothing to us or anyone else. If your phone's own backup is on, it includes Daybook's data like any other app." A person who replaces a phone keeps their history without having to remember to export first.
-- (b) Opt out on both platforms, so the data never leaves the phone except through Export. A lost or replaced phone then means lost history unless the user exported.
+Android backs up every app's data to the user's own Google account unless the app opts out, and an iPhone does the same to iCloud. Daybook does not opt out, so with phone backup turned on, Daybook's database is in that backup. Nothing goes to Play, Inc. or anyone else either way.
 
-Nothing has been changed yet. The brief says "All user data stays on the device", so this is yours to decide.
+Bart approved the recommended option on 2026-11-13: phone backups keep working, and About and the privacy policy say so plainly: "Daybook sends nothing to us or anyone else. If your phone's own backup is on, it includes Daybook's data like any other app." Someone who replaces a phone keeps their history without having to export first. The About wording is added in step 8.
 
 ## The model rule in CLAUDE.md
 
-CLAUDE.md says agents use Sonnet 5.5 or Opus 5.5 only, never Fable. In this phase every implementation agent ran on Sonnet 5.5 or Opus 5.5 and every reviewer on Opus 5.5. The session that coordinates them, makes the rulings recorded above, writes this summary and makes the commits has been running on Fable 5.2, and the commits carry that name in their co-author line. That goes against the rule as written. It needs your answer: either add a line to CLAUDE.md allowing the coordinating session to run on Fable, or switch the session's model. Carrying on with the work is not an answer to it.
+CLAUDE.md says agents use Sonnet 5.5 or Opus 5.5 only, never Fable. In this phase every implementation agent ran on Sonnet 5.5 or Opus 5.5 and every reviewer on Opus 5.5. The session that coordinates them, makes the rulings recorded above, writes this summary and makes the commits has been running on Fable 5.2, and the commits carry that name in their co-author line. That goes against the rule as written. You were asked to either add a line to CLAUDE.md allowing the coordinating session to run on Fable, or switch the session's model. On 2026-11-13 you said to continue and that the recommendations were approved, without naming this point, so the work has continued the same way and CLAUDE.md is unchanged. If you want the rule to match what is happening, add that line to CLAUDE.md yourself, or switch the model.
 
 ## Review findings worth knowing
 
