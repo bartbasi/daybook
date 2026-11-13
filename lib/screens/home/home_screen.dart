@@ -28,7 +28,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> {
   static const _bannerTime = Duration(seconds: 10);
 
   Stream<List<WeightEntry>>? _weights;
@@ -39,19 +39,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _undoFailed = false;
   Timer? _bannerTimer;
   bool _sheetOpen = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  /// "Today" comes from the clock, so draw again when the app comes back
-  /// (it may be a new day).
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) setState(() {});
-  }
 
   @override
   void didChangeDependencies() {
@@ -66,7 +53,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _bannerTimer?.cancel();
     super.dispose();
   }

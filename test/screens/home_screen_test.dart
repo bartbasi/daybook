@@ -112,7 +112,7 @@ void main() {
   ) async {
     await openApp(tester);
     expect(find.text('Thursday, Nov 12'), findsOneWidget);
-    expect(find.text('No weight yet. Tap to add.'), findsOneWidget);
+    expect(find.text('No weight yet.'), findsOneWidget);
 
     expect(find.text('+ Food'), findsOneWidget);
     expect(find.text('Cardio'), findsOneWidget);
@@ -146,7 +146,7 @@ void main() {
     // 182.4 moves 10% of the way to 181.8: 182.34, shown as 182.3.
     await settle(tester); // the trend stream starts after the weights arrive
     expect(find.text('Trend 182.3 lb'), findsOneWidget);
-    expect(find.text('No weight yet. Tap to add.'), findsNothing);
+    expect(find.text('No weight yet.'), findsNothing);
   });
 
   appTest('a metric user never sees lb while Home loads', (tester) async {
@@ -300,7 +300,7 @@ void main() {
 
   appTest('the empty weight row also opens the Weight tab', (tester) async {
     await openApp(tester);
-    await tester.tap(find.text('No weight yet. Tap to add.'));
+    await tester.tap(find.text('No weight yet.'));
     await settle(tester);
     expect(find.byType(WeightSheet), findsNothing);
     expect(
@@ -353,7 +353,7 @@ void main() {
     expect(stored.deletedAtMs, nowFixed.utcMs);
     expect(find.text('Undo'), findsNothing);
     expect(find.textContaining('Weight saved'), findsNothing);
-    expect(find.text('No weight yet. Tap to add.'), findsOneWidget);
+    expect(find.text('No weight yet.'), findsOneWidget);
   });
 
   appTest('the confirmation goes away after ten seconds', (tester) async {

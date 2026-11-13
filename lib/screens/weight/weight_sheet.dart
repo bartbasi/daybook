@@ -264,12 +264,15 @@ class _WeightSheetState extends State<WeightSheet> {
     final day = parseDate(cur.localDate);
     final today = parseDate(_opened.localDate);
     var initial = DateTime(day.year, day.month, day.day);
+    final last = DateTime(today.year, today.month, today.day);
     if (initial.isBefore(_firstDate)) initial = _firstDate;
+    // A row can be dated after today (after travelling west).
+    if (initial.isAfter(last)) initial = last;
     return showDatePicker(
       context: context,
       initialDate: initial,
       firstDate: _firstDate,
-      lastDate: DateTime(today.year, today.month, today.day),
+      lastDate: last,
     );
   }
 

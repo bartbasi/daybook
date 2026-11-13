@@ -19,7 +19,7 @@ class S {
   // Home.
   static const homeToday = 'Today';
   static const homeWeightLabel = 'Weight';
-  static const homeNoWeight = 'No weight yet. Tap to add.';
+  static const homeNoWeight = 'No weight yet.';
   static String homeTrend(String weight, String unit) => 'Trend $weight $unit';
   static const addFood = '+ Food';
   static const addWeight = 'Weight';

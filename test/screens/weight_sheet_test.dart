@@ -646,6 +646,34 @@ void main() {
       expect(stored.measuredAtMs, at('2026-11-05', 6, 55, -300).utcMs);
     });
 
+    testWidgets('a row dated after today opens the date picker without '
+        'an assertion', (tester) async {
+      // 7:00 on Nov 13 at plus 9 hours is Nov 12 22:00 UTC, after the clock
+      // (Nov 12, 7:02 at minus 6, which is 13:02 UTC).
+      final when = at('2026-11-13', 7, 0, 540);
+      await real(
+        tester,
+        () => db
+            .into(db.weightEntries)
+            .insert(
+              WeightEntriesCompanion.insert(
+                localDate: '2026-11-13',
+                measuredAtMs: when.utcMs,
+                tzOffsetMinutes: 540,
+                weightKg: 82.5,
+                createdAtMs: when.utcMs,
+                updatedAtMs: when.utcMs,
+              ),
+            ),
+      );
+      final row = (await rows(tester)).single;
+      await openEdit(tester, row);
+      await tester.tap(find.text('Fri, Nov 13'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+    });
+
     testWidgets('a picked time that has not happened yet is refused', (
       tester,
     ) async {

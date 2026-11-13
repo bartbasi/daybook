@@ -71,11 +71,30 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   static const _today = 0;
   static const _weight = 3;
 
   int _index = _today;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// "Today" comes from the clock, so draw the shell and the tabs again when
+  /// the app comes back (it may be a new day).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,14 +106,20 @@ class _HomeShellState extends State<HomeShell> {
             HomeScreen(onOpenWeightTab: () => setState(() => _index = _weight)),
             const SizedBox.shrink(),
             const SizedBox.shrink(),
-            const WeightTab(),
+            // Not const, so a redraw of the shell reaches the tab.
+            // ignore: prefer_const_constructors
+            WeightTab(),
             const MoreScreen(),
           ],
         ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          // A tab's message does not follow the user to another tab.
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          setState(() => _index = i);
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.today_outlined),

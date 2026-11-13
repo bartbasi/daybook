@@ -3,6 +3,7 @@
 
 import 'dart:async';
 
+import 'package:daybook/app.dart';
 import 'package:daybook/app_scope.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
@@ -11,6 +12,7 @@ import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/screens/weight/weight_chart.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/screens/weight/weight_tab.dart';
+import 'package:daybook/math/weight_trend.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
@@ -66,8 +68,10 @@ Future<void> settle(WidgetTester tester) async {
 void main() {
   late AppDatabase db;
   late Gate gate;
+  late Now clockNow;
 
   setUp(() {
+    clockNow = nowFixed;
     gate = Gate();
     db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
   });
@@ -423,6 +427,22 @@ void main() {
     expect(chartData(tester).startDate, '2026-10-14');
     expect(chartData(tester).endDate, '2026-11-12');
     expect(chartData(tester).trend.length, 30);
+    // The trend at the left edge carries the whole history: the 10% rule over
+    // all five weigh-ins, as of Sep 1, the last one before the range starts.
+    // A trend computed only over the visible days would start at 183.0.
+    final full = weightTrend([
+      (localDate: '2025-06-01', kg: lbToKg(190.0)),
+      (localDate: '2026-03-01', kg: lbToKg(186.0)),
+      (localDate: '2026-09-01', kg: lbToKg(184.0)),
+      (localDate: '2026-10-20', kg: lbToKg(183.0)),
+      (localDate: '2026-11-12', kg: lbToKg(182.0)),
+    ]);
+    final beforeStart = full.firstWhere((p) => p.localDate == '2026-09-01');
+    final edge = kgToWeight(beforeStart.trendKg, UnitSystem.imperial);
+    expect(chartData(tester).trend.first.date, '2026-10-14');
+    expect(chartData(tester).trend.first.value, edge);
+    expect(edge, isNot(183.0));
+    expect(edge, greaterThan(186.0)); // still pulled up by the older weights
 
     await tester.tap(chip('3 months'));
     await tester.pump();
@@ -451,6 +471,63 @@ void main() {
     expect(find.text('Sun, Jun 1, 2025, 7:00 am'), findsOneWidget);
     // The trend number does not depend on the range.
     expect(chartData(tester).trend.last.date, '2026-11-12');
+  });
+
+  /// The whole app, with a clock a test can move.
+  Future<void> openShell(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      DaybookApp(db: db, clock: () => clockNow, foodsPath: Future.value('')),
+    );
+    await settle(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Weight'));
+    await settle(tester);
+  }
+
+  appTest('the Weight tab follows the clock when the app resumes', (
+    tester,
+  ) async {
+    await seed(tester, 181.8, '2026-11-12', 7, 2);
+    await seed(tester, 182.4, '2026-11-11', 6, 55);
+    await openShell(tester);
+    expect(find.text('Today, Nov 12, 7:02 am'), findsOneWidget);
+    expect(chartData(tester).endDate, '2026-11-12');
+    expect(chartData(tester).startDate, '2026-10-14');
+
+    clockNow = at('2026-11-13', 0, 30, -360);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.text('Thu, Nov 12, 7:02 am'), findsOneWidget);
+    expect(find.text('Today, Nov 12, 7:02 am'), findsNothing);
+    expect(chartData(tester).endDate, '2026-11-13');
+    expect(chartData(tester).startDate, '2026-10-15');
+  });
+
+  appTest('the delete message does not follow the user to another tab', (
+    tester,
+  ) async {
+    await seedWireframe(tester);
+    await openShell(tester);
+    await tapRow(tester, 'Wed, Nov 11, 6:55 am');
+    await tester.tap(find.text('Delete'));
+    await settle(tester);
+    expect(find.text('Deleted 182.4 lb from Wed, Nov 11'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
+    await settle(tester);
+    expect(find.text('Deleted 182.4 lb from Wed, Nov 11'), findsNothing);
+    expect(find.byType(SnackBar), findsNothing);
+    // Home's action bar is not covered: the Weight button opens the sheet.
+    await tester.tap(find.widgetWithText(FilledButton, 'Weight'));
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
   });
 
   appTest('the chart says in words what it shows', (tester) async {
