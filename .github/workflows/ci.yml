@@ -183,7 +183,9 @@ jobs:
       # the Dart VM service can start after the app has already printed its
       # address. Flutter then waits forever (seen in run 43378321995: the app
       # printed "The Dart VM service is listening" 0.1 s before the stream
-      # started). So the first attempt has a time limit and one retry follows.
+      # started). Seen with Flutter 3.47.7 and Xcode 26.6; remove the retry after
+      # an upgrade if it never triggers. So the first attempt has a time limit and
+      # one retry follows, only when the tool never connected to the app.
       # The retry finds the build cached and the simulator warm.
       - name: Run the integration test
         id: attempt1
@@ -197,7 +199,14 @@ jobs:
         if: steps.attempt1.outcome != 'success'
         timeout-minutes: 12
         run: |
-          echo "::warning::The first integration test try failed, trying once more."
+          # Retry only for the hang, where the tool never connected to the app.
+          # Once it has connected, the test ran and a failure is real.
+          if grep -q 'connected to test device, now awaiting test result' flutter-test-1.log; then
+            echo "::error::The first try connected to the app and the test failed. Not retrying."
+            exit 1
+          fi
+          pkill -f flutter_tools.snapshot || true
+          echo "::warning::The first integration test try never started the test, trying once more."
           xcrun simctl terminate "$UDID" io.github.bartbasi.daybook || true
           set -o pipefail
           flutter test integration_test -d "$UDID" --timeout 10m --verbose 2>&1 | tee flutter-test-2.log
