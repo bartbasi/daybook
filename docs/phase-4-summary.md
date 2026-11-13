@@ -79,6 +79,8 @@ Each is the recommended option from the plan's open questions, or a small call m
 47. **Deleting a food frees its barcode.** Undo puts it back unless another food took that barcode in between, and says so if it did.
 48. **A number typed like "1,000" is refused in the food editor**, with a request to type it without the comma, because it could mean one thousand or one. "1,5" and "0,125" are read as decimals.
 49. **Saved meals keep their own copy of each item's numbers.** Editing or deleting a food does not change a saved meal that contains it.
+50. **While the keyboard is up, a message on the food entry screen takes the place of the totals line.** On the cover screen at double text size there are 500 dp above the keyboard: the top row, the text box, the totals and Save already fill them, so a message had nowhere to go without cutting something off. The Save button stays, and the totals come back when the message goes or the keyboard goes down. With the keyboard down both show, and every message shows in full. With the keyboard up a message takes at most two fifths of the height above the keyboard; a longer one scrolls, with a scrollbar that is always shown, and never shows less than two full lines. In the tests' wide font the longest message scrolls at double text size; on a phone it should fit in full, which is on the checklist below.
+51. **The offer after a barcode is not found reads "No product found for (number). Add it as your own food?" with a button that says "Add it".** The wireframe has the question in the message. The short button always fits without shrinking its text; a screen reader says "Add it as your own food". The message goes after 10 seconds like any other, except when a screen reader is on, when it stays until used.
 
 ## Open questions from the plan: answered
 
@@ -194,6 +196,7 @@ Barcode scanning (step 2), on the Z Fold 5. None of this has run on a real camer
 - Look at how the amount reads for products whose serving is written like "30 g" or "2 biscuits (25 g)".
 - Fold and unfold while the camera is open.
 - Type a not found food, tap its line, and use "Scan its barcode" there.
+- On the cover screen with the largest font size and the keyboard up, scan something in airplane mode: the message should be readable in full or scroll with a visible scrollbar, the text box and Save should stay in view, and the totals should come back when the message goes.
 
 Weight (step 1), on the iPhone, once there is a signed build (see docs/ios-widget.md for the Apple Developer steps):
 - The widget appears in the widget gallery, in the small and medium sizes.
