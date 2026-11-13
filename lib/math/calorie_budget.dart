@@ -170,15 +170,14 @@ CalorieWorking calorieWorking({
   );
 }
 
-/// True when a calorie goal (calculated or the user's own number) is under
-/// 1,500 kcal for men or 1,200 for women. Exactly at the line is not low.
-/// This is a condition for the screen to state. It never blocks anything.
-/// With no sex known there is no line to compare with, so it is false.
-bool isLowIntake(num calories, Sex? sex) => switch (sex) {
-  Sex.male => calories < 1500,
-  Sex.female => calories < 1200,
-  null => false,
-};
+/// True when a calorie goal is under 1,500 kcal for men or 1,200 for women.
+/// Exactly at the line is not low. Pass the whole number that is shown or
+/// stored (use [roundForDisplay] on a live goal), so the warning never
+/// disagrees with the number on screen. With no sex known (an own number and
+/// no profile) the lower line, 1,200, is used. This is a condition for the
+/// screen to state. It never blocks anything.
+bool isLowIntake(int calories, Sex? sex) =>
+    calories < (sex == Sex.male ? 1500 : 1200);
 
 /// Percents that do not add to 100 (or one is below 0). Never carries values.
 class PercentsDontAddUp implements Exception {
@@ -210,8 +209,10 @@ class MacroBreakdown {
   double get totalKcal => proteinKcal + carbsKcal + fatKcal;
 
   /// How far the macros are from the calorie goal: positive when they add up
-  /// to more, negative when to less, 0 when they match.
-  double differenceFrom(double goalKcal) => totalKcal - goalKcal;
+  /// to more, negative when to less, 0 when they match. Pass the whole number
+  /// that is shown or stored (use [roundForDisplay] on a live goal), so a
+  /// goal of 2,138.04 shown as 2,138 gives 0.
+  double differenceFrom(int goalKcal) => totalKcal - goalKcal;
 }
 
 /// Percent mode: whole percents of the calorie goal. They must add to 100 or
@@ -273,6 +274,16 @@ class DayBudget {
   final double addBack;
   final double foodKcal;
 
-  /// The goal + add-back - food. The line under the big number on Home.
+  /// The goal + add-back - food. Unrounded: use it for logic, never to show.
   double get left => goal + addBack - foodKcal;
+
+  // What the screens show. Each part is rounded on its own and the total is
+  // built from the rounded parts, so the line under the big number always
+  // adds up: shownGoal + shownAddBack - shownFood == shownLeft. Screens must
+  // show only these four, never a rounded [left] next to rounded parts (they
+  // can differ by 1).
+  int get shownGoal => roundForDisplay(goal);
+  int get shownAddBack => roundForDisplay(addBack);
+  int get shownFood => roundForDisplay(foodKcal);
+  int get shownLeft => shownGoal + shownAddBack - shownFood;
 }

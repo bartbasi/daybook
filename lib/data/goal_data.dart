@@ -47,6 +47,9 @@ enum GoalProblem {
   /// The rate is not one of the ten offered rates.
   badRate,
 
+  /// A stored goal's activity factor is not one of the five (Recalculate).
+  badActivity,
+
   /// Recalculate was asked for before any goals were saved.
   noGoals,
 }
@@ -145,7 +148,12 @@ class GoalsForDay {
 
   ActivityLevel? get activity => ActivityLevel.fromFactor(row.activityFactor);
   WeeklyRate? get rate => WeeklyRate.fromKgPerWeek(row.targetKgPerWeek);
-  int get addBackPercent => row.exerciseAddBackPercent;
+
+  /// The stored add-back. A stored value that is not 0, 50 or 100 (an import
+  /// can bring one in) reads as 100, the default, so the budget never fails.
+  int get addBackPercent => addBackChoices.contains(row.exerciseAddBackPercent)
+      ? row.exerciseAddBackPercent
+      : 100;
   MacroMode get macroMode =>
       row.macroMode == 'percent' ? MacroMode.percent : MacroMode.grams;
 
@@ -248,7 +256,8 @@ extension GoalData on AppDatabase {
       if (!addBackChoices.contains(input.addBackPercent)) {
         throw const GoalRefused(GoalProblem.badAddBack);
       }
-      if (WeeklyRate.fromKgPerWeek(input.rate.kgPerWeek) == null) {
+      if (!WeeklyRate.amounts(input.rate.units).contains(input.rate.amount) &&
+          input.rate.target != Target.stay) {
         throw const GoalRefused(GoalProblem.badRate);
       }
       final macros = [input.protein, input.carbs, input.fat];
@@ -351,10 +360,14 @@ extension GoalData on AppDatabase {
     if (current == null) throw const GoalRefused(GoalProblem.noGoals);
     if (current.isOwnNumber) return current;
     final r = current.row;
+    final activity = current.activity;
+    if (activity == null) throw const GoalRefused(GoalProblem.badActivity);
+    final rate = current.rate;
+    if (rate == null) throw const GoalRefused(GoalProblem.badRate);
     return saveGoals(
       GoalInput(
-        activity: current.activity ?? ActivityLevel.sedentary,
-        rate: current.rate ?? WeeklyRate.stay,
+        activity: activity,
+        rate: rate,
         addBackPercent: current.addBackPercent,
         macroMode: current.macroMode,
         protein: r.proteinTarget,

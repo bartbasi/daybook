@@ -180,25 +180,25 @@ void main() {
       expect(await db.getProfile(), isNull);
     });
 
+    test(
+      'with two weigh-ins on one day the later one by time is used',
+      () async {
+        await db.saveWeight(190, imp, at('2026-11-12', 6, 0, -6));
+        await db.saveWeight(181.8, imp, at('2026-11-12', 7, 30, -6));
+        await db.saveWeight(170, imp, at('2026-11-12', 6, 30, -6));
+        final g = await db.saveGoals(sampleInput(), nov12);
+        expect(g.calories, 2138);
+      },
+    );
+
     test('a deleted weigh-in is not used', () async {
       await weigh(190, '2026-11-10');
       final w = await db.saveWeight(181.8, imp, at('2026-11-12', 7, 0, -6));
       await db.deleteWeight(w.id, nov12);
       final g = await db.saveGoals(sampleInput(), nov12);
-      // 190 lb, not 181.8
-      final kg = lbToKg(190);
-      final expected = roundForDisplay(
-        calorieWorking(
-          sex: Sex.male,
-          birthDate: '1982-05-14',
-          day: '2026-11-12',
-          weightKg: kg,
-          heightCm: inToCm(71),
-          activity: ActivityLevel.lightlyActive,
-          rate: lose05,
-        ).goal,
-      );
-      expect(g.calories, expected);
+      // By hand, 190 lb = 86.18255 kg: 861.8255 + 1,127.125 - 220 + 5
+      // = 1,773.9505; x 1.375 = 2,439.1819; - 250 = 2,189.18, so 2,189.
+      expect(g.calories, 2189);
       expect(g.calories, isNot(2138));
     });
 
@@ -372,6 +372,55 @@ void main() {
     });
   });
 
+  group('Recalculate with a row it cannot read', () {
+    Future<void> badRow({double factor = 1.375, double kg = -0.5}) => db
+        .into(db.goals)
+        .insert(
+          GoalsCompanion.insert(
+            effectiveFrom: '2026-11-08',
+            calorieMode: 'calculated',
+            calories: const Value(2138),
+            activityFactor: factor,
+            targetKgPerWeek: kg,
+            macroMode: 'grams',
+          ),
+        )
+        .then((_) {});
+
+    test('an unreadable rate is refused and nothing is written', () async {
+      await weigh(181.8, '2026-11-08');
+      await badRow(kg: -0.3);
+      await expectLater(
+        db.recalculateGoals(nov12),
+        throwsA(
+          isA<GoalRefused>().having(
+            (e) => e.problem,
+            'problem',
+            GoalProblem.badRate,
+          ),
+        ),
+      );
+      expect(await goalRows(), 1);
+      expect((await db.goalsForDay('2026-11-12'))!.calories, 2138);
+    });
+
+    test('an unreadable activity is refused and nothing is written', () async {
+      await weigh(181.8, '2026-11-08');
+      await badRow(factor: 1.3, kg: -lbToKg(0.5));
+      await expectLater(
+        db.recalculateGoals(nov12),
+        throwsA(
+          isA<GoalRefused>().having(
+            (e) => e.problem,
+            'problem',
+            GoalProblem.badActivity,
+          ),
+        ),
+      );
+      expect(await goalRows(), 1);
+    });
+  });
+
   group('Recalculate', () {
     test(
       'uses the latest weigh-in, from today, and past days keep theirs',
@@ -384,18 +433,9 @@ void main() {
         expect(first.calories, 2138);
         await weigh(170, '2026-11-12');
         final again = await db.recalculateGoals(nov12);
-        final expected = roundForDisplay(
-          calorieWorking(
-            sex: Sex.male,
-            birthDate: '1982-05-14',
-            day: '2026-11-12',
-            weightKg: lbToKg(170),
-            heightCm: inToCm(71),
-            activity: ActivityLevel.lightlyActive,
-            rate: lose05,
-          ).goal,
-        );
-        expect(again.calories, expected);
+        // By hand, 170 lb = 77.11070 kg: 771.1070 + 1,127.125 - 220 + 5
+        // = 1,683.2320; x 1.375 = 2,314.4440; - 250 = 2,064.44, so 2,064.
+        expect(again.calories, 2064);
         expect(again.calories, lessThan(2138));
         expect(again.effectiveFrom, '2026-11-12');
         // Everything but the number is kept.
@@ -467,7 +507,30 @@ void main() {
         ),
         nov12,
       );
-      expect(stay.calories! - g.calories!, closeTo(275, 1));
+      // 2,388.04 stays at 2,388. Less 275 is 2,113.04, stored as 2,113.
+      expect(stay.calories, 2388);
+      expect(g.calories, 2113);
+      expect(stay.calories! - g.calories!, 275);
+    });
+
+    test('a metric amount that is really a pound count is refused', () async {
+      await weigh(181.8, '2026-11-12');
+      await expectLater(
+        db.saveGoals(
+          sampleInput(
+            rate: const WeeklyRate(Target.lose, 0.45359237, UnitSystem.metric),
+          ),
+          nov12,
+        ),
+        throwsA(
+          isA<GoalRefused>().having(
+            (e) => e.problem,
+            'problem',
+            GoalProblem.badRate,
+          ),
+        ),
+      );
+      expect(await goalRows(), 0);
     });
 
     test('every activity level round-trips', () async {
@@ -519,7 +582,7 @@ void main() {
         final m = g.macros!;
         expect([m.proteinKcal, m.carbsKcal, m.fatKcal], [600, 908, 630]);
         expect(m.totalKcal, 2138);
-        expect(m.differenceFrom(g.calories!.toDouble()), 0);
+        expect(m.differenceFrom(g.calories!), 0);
       },
     );
 
@@ -841,6 +904,73 @@ void main() {
             ),
           );
       expect((await db.budgetForDay('2026-11-12'))!.foodKcal, 300);
+    });
+
+    test(
+      'a stored add-back of 75 reads as 100 and the budget still works',
+      () async {
+        await db
+            .into(db.goals)
+            .insert(
+              GoalsCompanion.insert(
+                effectiveFrom: '2026-11-08',
+                calorieMode: 'fixed',
+                calories: const Value(2138),
+                activityFactor: 1.375,
+                targetKgPerWeek: 0,
+                macroMode: 'grams',
+                exerciseAddBackPercent: const Value(75),
+              ),
+            );
+        await run('2026-11-12', estimate: 383);
+        final b = (await db.budgetForDay('2026-11-12'))!;
+        expect(b.addBackPercent, 100);
+        expect(b.left, 2138 + 383);
+      },
+    );
+
+    test('cardio and a workout on one day are added together', () async {
+      await sampleGoals();
+      await run('2026-11-12', estimate: 383);
+      await db
+          .into(db.workouts)
+          .insert(
+            WorkoutsCompanion.insert(
+              localDate: '2026-11-12',
+              startedAtMs: 0,
+              tzOffsetMinutes: -360,
+              kcalEstimated: const Value(150),
+            ),
+          );
+      expect((await db.budgetForDay('2026-11-12'))!.exerciseKcal, 533);
+    });
+
+    test('the budget stream re-emits when goals or a workout change', () async {
+      await sampleGoals();
+      final seen = <double?>[];
+      final sub = db
+          .watchBudgetForDay('2026-11-12')
+          .listen((b) => seen.add(b?.left));
+      Future<void> settle() =>
+          Future<void>.delayed(const Duration(milliseconds: 50));
+      await settle();
+      await db.saveGoals(sampleInput(ownCalories: 1800), nov12);
+      await settle();
+      await db
+          .into(db.workouts)
+          .insert(
+            WorkoutsCompanion.insert(
+              localDate: '2026-11-12',
+              startedAtMs: 0,
+              tzOffsetMinutes: -360,
+              kcalOverride: const Value(250),
+            ),
+          );
+      await settle();
+      await sub.cancel();
+      expect(seen.first, 2138);
+      expect(seen, contains(1800));
+      expect(seen.last, 2050);
     });
 
     test('the stream follows goals, exercise and food', () async {

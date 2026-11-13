@@ -72,9 +72,12 @@ class Nutrients {
   ];
 
   /// FDA Daily Values for adults and children 4 years and over, in each
-  /// nutrient's own unit above. Source: 21 CFR 101.9(c)(8)(iv) for the
-  /// nutrients with a quantity, and 21 CFR 101.9(c)(9) for the vitamins and
-  /// minerals (as amended in 2016, 81 FR 33742). Total sugars and trans fat
+  /// nutrient's own unit above. Source: 21 CFR 101.9(c)(8)(iv), the Reference
+  /// Daily Intakes for vitamins and minerals, and 21 CFR 101.9(c)(9), the Daily
+  /// Reference Values for fat, saturated fat, cholesterol, carbohydrate,
+  /// sodium, fiber, protein and added sugars, as set by the 2016 Nutrition
+  /// Facts label final rule. The 2,000 kcal is the reference calorie intake
+  /// in the footnote to the (c)(9) table. Total sugars and trans fat
   /// have no Daily Value, so they are not here. The first four are listed for
   /// completeness: the calorie and macro goals come from the goals row, not
   /// from here.

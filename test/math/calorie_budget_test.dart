@@ -221,7 +221,6 @@ void main() {
     test('men: under 1,500, not at 1,500', () {
       expect(isLowIntake(1499, Sex.male), isTrue);
       expect(isLowIntake(1500, Sex.male), isFalse);
-      expect(isLowIntake(1499.9, Sex.male), isTrue);
       expect(isLowIntake(1501, Sex.male), isFalse);
     });
 
@@ -236,8 +235,17 @@ void main() {
       expect(isLowIntake(1300, Sex.female), isFalse);
     });
 
-    test('with no sex known there is nothing to warn about', () {
-      expect(isLowIntake(500, null), isFalse);
+    test('with no sex known the lower line, 1,200, is used', () {
+      expect(isLowIntake(800, null), isTrue);
+      expect(isLowIntake(1199, null), isTrue);
+      expect(isLowIntake(1200, null), isFalse);
+      expect(isLowIntake(1499, null), isFalse);
+    });
+
+    test('a live goal of 1,499.6 shows as 1,500 and does not warn', () {
+      final shown = roundForDisplay(1499.6);
+      expect(shown, 1500);
+      expect(isLowIntake(shown, Sex.male), isFalse);
     });
 
     test('the sample at 2 lb a week is 1,388, which is low for a man', () {
@@ -315,6 +323,11 @@ void main() {
       expect(m.differenceFrom(2138), 0);
     });
 
+    test('a live goal of 2,138.04 shown as 2,138 gives a difference of 0', () {
+      const m = MacroBreakdown(proteinG: 150, carbsG: 227, fatG: 70);
+      expect(m.differenceFrom(roundForDisplay(2138.04)), 0);
+    });
+
     test('grams mode says how far off the goal is, over or under', () {
       const m = MacroBreakdown(proteinG: 150, carbsG: 227, fatG: 70);
       expect(m.differenceFrom(2038), 100);
@@ -377,6 +390,29 @@ void main() {
         foodKcal: 2100.4,
       );
       expect(b.left, closeTo(-100.4, 1e-9));
+    });
+
+    test('the shown parts always add up to the shown total', () {
+      final b = DayBudget(
+        goal: 2138,
+        exerciseKcal: 382.5,
+        addBackPercent: 100,
+        foodKcal: 1265.4,
+      );
+      expect(b.shownGoal, 2138);
+      expect(b.shownAddBack, 383);
+      expect(b.shownFood, 1265);
+      expect(b.shownLeft, 1256);
+      // The rounded unrounded total would disagree with its parts.
+      expect(roundForDisplay(b.left), 1255);
+    });
+
+    test('the sample day shows 2,138 + 383 - 1,266 = 1,255', () {
+      final b = day(100);
+      expect(
+        [b.shownGoal, b.shownAddBack, b.shownFood, b.shownLeft],
+        [2138, 383, 1266, 1255],
+      );
     });
 
     test('a bad add-back percent is refused', () {
