@@ -255,9 +255,36 @@ class S {
       'Your pick is remembered when you save the meal.';
   static const sheetSearchHint = 'Search all foods';
   static const sheetNoResults = 'No foods found.';
-  static String sheetNothingMatches(String words) =>
+  static String sheetNothingMatches(String words, {bool canScan = false}) =>
       'Nothing in the food list or your own foods matches "$words". '
-      'Search with other words.';
+      'Search with other words${canScan ? ', or scan the package' : ''}.';
+  static const sheetScan = 'Scan its barcode';
+
+  // Barcode scanning (food-entry frames 9, 10 and 7).
+  static const scanButton = 'Scan';
+  static const scanButtonLabel = 'Scan a barcode';
+  static const scanTitle = 'Scan a barcode';
+  static const scanHelp = 'Point the camera at the barcode.';
+  static const scanPrivacy =
+      'The number is looked up on Open Food Facts. Nothing else is sent.';
+  static const scanTypeNumber = 'Type the number instead';
+  static const scanUseCamera = 'Use the camera instead';
+  static const scanNumberLabel = 'Barcode number';
+  static const scanLookUp = 'Look up';
+  static const scanNumberBad =
+      'Enter the 8 to 14 digits printed under the barcode.';
+  static const scanLooking = 'Looking it up on Open Food Facts...';
+  static const scanNoPermission =
+      'Camera access is off, so Daybook cannot scan. To scan a barcode, '
+      'allow the camera for Daybook in your phone\'s settings. You can also '
+      'type the number instead.';
+  static const scanCameraFailed =
+      'The camera could not start. You can type the number instead.';
+  static String scanNotFound(String code) => 'No product found for $code.';
+  static const scanNoConnection =
+      'Could not reach Open Food Facts. Check the connection and try again.';
+  static const scanSaveFailed =
+      'Could not save that product. Nothing was added. Try again.';
   static const sheetRemove = 'Remove from meal';
   static const sheetForget = 'Forget this match';
   static const sheetDone = 'Done';
@@ -277,6 +304,7 @@ class S {
     'sr_legacy' => 'USDA SR Legacy',
     'foundation' => 'USDA Foundation',
     'local' => 'My food',
+    'off' => 'Open Food Facts (ODbL)',
     _ => 'USDA',
   };
 

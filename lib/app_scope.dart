@@ -8,7 +8,9 @@ import 'package:flutter/widgets.dart';
 import 'clock.dart';
 import 'data/database.dart';
 import 'data/food_data.dart';
+import 'data/off_client.dart';
 import 'parser/parse_worker.dart';
+import 'platform/barcode.dart';
 import 'parser/user_snapshot_data.dart';
 
 /// Makes a worker for the USDA file at the given path. The app uses
@@ -116,6 +118,8 @@ class AppScope extends InheritedWidget {
     required this.clock,
     required this.foodsPath,
     this.parser,
+    this.camera = const ZxingCamera(),
+    this.off,
     required super.child,
   });
 
@@ -129,6 +133,13 @@ class AppScope extends InheritedWidget {
   /// AppScope by hand and never opens the food screen.
   final ParserHost? parser;
 
+  /// The camera for scanning a barcode. Tests put a fake here.
+  final BarcodeCamera camera;
+
+  /// The Open Food Facts client, the only network code. Null in a test that
+  /// never scans (a scan then reports no connection).
+  final OffClient? off;
+
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
     assert(scope != null, 'No AppScope above this widget');
@@ -140,5 +151,7 @@ class AppScope extends InheritedWidget {
       db != old.db ||
       clock != old.clock ||
       foodsPath != old.foodsPath ||
-      parser != old.parser;
+      parser != old.parser ||
+      camera != old.camera ||
+      off != old.off;
 }

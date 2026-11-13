@@ -179,6 +179,25 @@ void main() {
     );
   });
 
+  test('the barcode plugin image download is never called', () {
+    // flutter_zxing can fetch a barcode image from a web address. Daybook
+    // fetches no product image, so the name must not appear in lib/.
+    final found = <String>[];
+    for (final file in _libFiles()) {
+      final lines = _codeLines(file.readAsStringSync());
+      for (var n = 0; n < lines.length; n++) {
+        if (lines[n].contains('readBarcodeImageUrl')) {
+          found.add('${_name(file)}:${n + 1} uses readBarcodeImageUrl');
+        }
+      }
+    }
+    expect(
+      found,
+      isEmpty,
+      reason: 'No product image is ever fetched:\n${found.join('\n')}',
+    );
+  });
+
   test('every allow-listed file still exists', () {
     for (final path in {..._logAllowed, ..._httpAllowed}) {
       expect(

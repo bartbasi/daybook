@@ -14,9 +14,12 @@ const _energyId = 1008;
 
 /// One of the user's foods, ready for amounts and nutrients.
 class LocalFood {
-  const LocalFood(this.name, this.food);
+  const LocalFood(this.name, this.food, {this.dataset = 'local'});
   final String name;
   final PortionFood food;
+
+  /// 'off' for a cached Open Food Facts product, else 'local'.
+  final String dataset;
 }
 
 class UserSnapshot {
@@ -45,13 +48,14 @@ class UserSnapshot {
           portions: [for (final p in f.portions) (p.label, p.baseQuantity)],
           nutrients: Map.unmodifiable(f.nutrients),
         ),
+        dataset: f.kind == 'off' ? 'off' : 'local',
       );
       final kcal = f.nutrients[_energyId];
       indexFoods.add(
         IndexFood(
           ref: f.ref,
           description: f.name,
-          dataset: 'local',
+          dataset: f.kind == 'off' ? 'off' : 'local',
           kind: f.kind,
           energy: kcal != null && f.baseUnit != 'serving'
               ? kcal * 100 / f.baseAmount

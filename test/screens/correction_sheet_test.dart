@@ -610,7 +610,7 @@ void main() {
 
   group('a line that was not found', () {
     appTest('opens with the typed words in a search that already shows '
-        'results, no list, and no scan or create', (tester) async {
+        'results, no list, a scan button and no create', (tester) async {
       await openApp(tester);
       await openFood(tester);
       await type(tester, '2 eggs, 1 zorbo, 1 apple');
@@ -621,10 +621,14 @@ void main() {
       expect(inSheet(find.text('Which food?')), findsNothing);
       expect(inSheet(find.byIcon(Icons.radio_button_checked)), findsNothing);
       expect(inSheet(find.text('Remove from meal')), findsOneWidget);
-      expect(inSheet(find.text('Scan its barcode')), findsNothing);
+      expect(inSheet(find.text('Scan its barcode')), findsOneWidget);
       expect(inSheet(find.textContaining('Create a food')), findsNothing);
       expect(
         inSheet(find.textContaining('Nothing in the food list')),
+        findsOneWidget,
+      );
+      expect(
+        inSheet(find.textContaining('Search with other words, or scan the')),
         findsOneWidget,
       );
     });

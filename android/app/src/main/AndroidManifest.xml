@@ -8,6 +8,19 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
+    <!-- The camera is for scanning barcodes. The camera plugin adds
+         RECORD_AUDIO, WRITE_EXTERNAL_STORAGE and READ_EXTERNAL_STORAGE, which
+         Daybook never uses (it records no sound, saves no photo and opens no
+         files), so all three are removed. CAMERA is
+         kept. A phone with no camera can still run the app, so the camera
+         features are not required. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" tools:node="replace"/>
     <application
         android:label="Daybook"
         android:name="${applicationName}"

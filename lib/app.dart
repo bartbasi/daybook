@@ -5,11 +5,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_info.dart';
 import 'app_scope.dart';
 import 'clock.dart';
 import 'data/database.dart';
+import 'data/off_client.dart';
 import 'data/settings_data.dart';
 import 'data/weight_data.dart';
+import 'platform/barcode.dart';
 import 'platform/weight_widget.dart';
 import 'screens/food/food_entry_screen.dart' show FoodEntryScreenState;
 import 'screens/home/home_screen.dart';
@@ -26,6 +29,8 @@ class DaybookApp extends StatefulWidget {
     required this.clock,
     required this.foodsPath,
     this.workerFactory,
+    this.camera = const ZxingCamera(),
+    this.offClient,
   });
 
   final AppDatabase db;
@@ -38,6 +43,13 @@ class DaybookApp extends StatefulWidget {
   /// is fine for a test that never opens the food screen.
   final WorkerFactory? workerFactory;
 
+  /// The barcode camera. A test passes a fake, so no camera is ever opened.
+  final BarcodeCamera camera;
+
+  /// The Open Food Facts client. Left out, the app makes the real one; a test
+  /// passes one over a mock HTTP client.
+  final OffClient? offClient;
+
   @override
   State<DaybookApp> createState() => _DaybookAppState();
 }
@@ -48,6 +60,10 @@ class _DaybookAppState extends State<DaybookApp> {
     foodsPath: widget.foodsPath,
     factory: widget.workerFactory,
   );
+
+  late final OffClient _off =
+      widget.offClient ??
+      OffClient.network(userAgent: offUserAgent(appVersion));
 
   @override
   void initState() {
@@ -69,6 +85,8 @@ class _DaybookAppState extends State<DaybookApp> {
       clock: widget.clock,
       foodsPath: widget.foodsPath,
       parser: _parser,
+      camera: widget.camera,
+      off: _off,
       child: MaterialApp(
         title: S.title,
         theme: ThemeData(colorSchemeSeed: Colors.teal),

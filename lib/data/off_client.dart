@@ -55,6 +55,11 @@ class OffClient {
   OffClient(this._client, {required this.userAgent, Uri? baseUri})
     : _base = baseUri ?? Uri.parse('https://world.openfoodfacts.org');
 
+  /// The client the app uses, over the phone's network. Made here so that
+  /// this file stays the only one that imports package:http.
+  factory OffClient.network({required String userAgent}) =>
+      OffClient(http.Client(), userAgent: userAgent);
+
   final http.Client _client;
   final String userAgent;
   final Uri _base;

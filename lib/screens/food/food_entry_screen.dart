@@ -20,6 +20,7 @@ import '../../strings.dart';
 import '../../util/dates.dart';
 import '../../util/units.dart';
 import '../weight/weight_sheet.dart';
+import 'barcode_scan_screen.dart';
 import 'confirm_bar.dart';
 import 'correction_sheet.dart';
 import 'food_line_tile.dart';
@@ -42,8 +43,9 @@ import 'meal_chips.dart';
 //   2.10 The chips row ([MealChips], first in the lines area, under the box).
 //        A whole-meal chip logs at once when the screen is empty, and otherwise
 //        adds lines with [FoodEntryScreenState.addLines].
-//   2.11 [_scanSeam] in the top bar: the Scan button, which also adds lines
-//        with [FoodEntryScreenState.addLines].
+//   2.11 The Scan button in the top bar ([_scanButton]) adds a scanned product
+//        as an added line; "Scan its barcode" in the not found sheet makes it
+//        that item's food ([sheetScan]).
 //   3.2  [_leftTodaySeam] in the totals bar: the "left today" line.
 
 /// A line that is not typed: it holds its food and amount itself (grammar 9.3).
@@ -715,7 +717,12 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         isScrollControlled: true,
         useSafeArea: true,
         constraints: const BoxConstraints(maxWidth: 600),
-        builder: (_) => CorrectionSheet(host: this, tap: tap, handle: _handle),
+        builder: (_) => CorrectionSheet(
+          host: this,
+          tap: tap,
+          handle: _handle,
+          scan: sheetScan,
+        ),
       );
     } finally {
       _sheetOpen = false;
@@ -1123,6 +1130,101 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       addLines([fresh]);
     }
     if (priced.reset) sheetNote(S.foodSheetAmountReset);
+  }
+
+  // Barcode scanning (task 2.11).
+
+  /// True from the tap on Scan until the product is a line (or nothing was
+  /// found): a scan while one is running does nothing.
+  var _scanning = false;
+
+  /// The versions of the user data this screen sends itself after saving a
+  /// scanned product. They start high so they never meet the versions of the
+  /// app's own stream (1, 2, 3, ...); a version only names the data.
+  var _sentSnapshots = 1000000;
+
+  /// Task 2.12 adds "Add it as your own food" next to the message, with
+  /// [barcode] filled in. For now there is only the message.
+  void _productNotFound(String barcode) {}
+
+  /// Sends the user data that holds a product just saved, and waits for this
+  /// box's result for it (plan rule 7), so the product can be priced or
+  /// picked. False when it could not be sent.
+  Future<bool> _publishUserData() async {
+    final w = await sheetWorker();
+    if (w == null) return false;
+    final data = await _guard(
+      () => _db.loadUserSnapshot(version: ++_sentSnapshots),
+    );
+    if (data == null) return false;
+    final id = await _guard(() async => w.setSnapshot(data));
+    if (id == null) return false;
+    final h = _handle;
+    if (h != null && !h.isClosed && !_dead) {
+      try {
+        await _waitFor(id, _controller.text);
+      } catch (_) {
+        // The box moved on or the worker stopped. The asks that follow say so.
+      }
+    }
+    return true;
+  }
+
+  /// Opens the scan screen, looks the product up and saves it. The ref of its
+  /// food when it is saved and known to the parser; a plain message when not;
+  /// both null when the user cancelled or a scan was already running.
+  Future<({String? ref, String? message})> _scanFood() async {
+    const none = (ref: null, message: null);
+    if (_scanning || _busy || _closed) return none;
+    setState(() => _scanning = true);
+    final hadFocus = _focus.hasFocus;
+    try {
+      final out = await scanBarcode(context);
+      if (!mounted || _closed || out == null) return none;
+      switch (out) {
+        case ScanMessage():
+          final code = out.barcode;
+          if (code != null) _productNotFound(code);
+          return (ref: null, message: out.message);
+        case ScanFound():
+          if (!await _publishUserData()) {
+            return (ref: null, message: S.foodSheetRefusedFood);
+          }
+          return (ref: 'local:${out.foodId}', message: null);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _scanning = false);
+        if (hadFocus && !_sheetOpen) _focus.requestFocus();
+      }
+    }
+  }
+
+  /// "Scan its barcode" in the not found sheet.
+  Future<({String? ref, String? message})> sheetScan() => _scanFood();
+
+  /// The Scan button: a scanned product becomes one added line, 1 serving,
+  /// marked Scanned (grammar 9.3).
+  Future<void> _scanLine() async {
+    final r = await _scanFood();
+    if (!mounted) return;
+    final message = r.message;
+    if (message != null) return _showNotice(_Notice(message));
+    final ref = r.ref;
+    if (ref == null) return;
+    setState(() => _foodsPricing++);
+    final ({Line line, bool reset})? priced;
+    try {
+      priced = await _priceFood(ref);
+    } finally {
+      if (mounted) setState(() => _foodsPricing--);
+    }
+    if (!mounted || _closed) return;
+    if (priced == null) return _refused(S.foodSheetRefusedFood);
+    final line = priced.line;
+    addLines([
+      AddedLine(line.copyWith(markers: {...line.markers, Marker.scanned})),
+    ]);
   }
 
   /// Tests make picks through the handle until the correction sheet (task
@@ -1592,8 +1694,19 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     );
   }
 
-  /// A seam for task 2.11: the Scan button goes here, after the date.
-  static const _scanSeam = SizedBox.shrink();
+  /// The Scan button, after the date (frame 1).
+  Widget _scanButton() => OutlinedButton(
+    style: OutlinedButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+    ),
+    onPressed: _scanning || _busy ? null : _scanLine,
+    child: Semantics(
+      label: S.scanButtonLabel,
+      excludeSemantics: true,
+      child: const Text(S.scanButton),
+    ),
+  );
 
   /// A seam for task 3.2: the "left today" line goes under the totals.
   static const _leftTodaySeam = SizedBox.shrink();
@@ -1664,7 +1777,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
             ? null
             : () => setState(() => _date = addDays(_date, 1)),
       ),
-      _scanSeam,
+      _scanButton(),
       PopupMenuButton<String>(
         tooltip: S.foodMenu,
         enabled: !_busy,

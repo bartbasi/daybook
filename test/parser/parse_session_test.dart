@@ -1378,6 +1378,15 @@ void main() {
       expect(s.search('egg').first.kcal, isNull);
       expect(s.search('protein bar').first.dataset, 'local');
     });
+
+    test('a cached Open Food Facts product has the dataset off', () {
+      final s = newSession()..setText('2 slices toast', 14);
+      expect(s.search('cola').first.dataset, 'off');
+      expect(s.search('protein bar').first.dataset, 'local');
+      s.pickFood(s.lines[0].span!, 'local:2');
+      expect(s.alternatives(s.lines[0].span!).current!.ref, 'local:2');
+      expect(s.alternatives(s.lines[0].span!).current!.dataset, 'off');
+    });
   });
 
   group('rewriting the amount (8.3)', () {

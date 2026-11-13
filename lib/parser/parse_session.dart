@@ -903,7 +903,7 @@ class ParseSession {
   // Foods and the sheet.
 
   String _dataset(String ref) => ref.startsWith('local:')
-      ? 'local'
+      ? (_snapshot.foods[ref]?.dataset ?? 'local')
       : (parser.usdaFood(ref)?.dataset ?? '');
 
   FoodChoice _choice(Candidate c, ItemDraft d, List<String> words) {

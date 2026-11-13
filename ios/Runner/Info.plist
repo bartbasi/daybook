@@ -24,6 +24,12 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Daybook uses the camera only to read the barcode on a food package. It takes no photos and records no video.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Daybook never records sound. This text is here only because a library inside the app mentions the microphone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Daybook never opens your photos. This text is here only because a library inside the app mentions the photo library.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
