@@ -605,7 +605,7 @@ Learning happens **when the meal is saved**, for each line the user corrected in
 | The user... | Then on Save |
 |---|---|
 | picked a food (including picking the guess itself, which confirms it) | Upsert the row for the key: `food_ref`, `food_name`, `updated_at_ms` = now. `times_used` is +1 if the row already pointed to this food, otherwise 1. If the food changed, `unit_label` and `quantity` are cleared, unless an amount was also set in this correction. |
-| set an amount in the sheet on a line that was amount assumed | Store `quantity` and `unit_label` on the row for the key, creating the row with the current food if there is none. |
+| set an amount in the sheet on a line that was amount assumed, because no amount was typed or because the food could not convert the typed unit | Store `quantity` and `unit_label` on the row for the key, creating the row with the current food if there is none. This does not cover a typed range (`2-3 eggs`): a range is the user's own amount, and setting a number in the sheet for it teaches nothing. |
 | set an amount on a line whose amount was typed | Nothing is learned. Typed amounts are not defaults. |
 | saved a line that came from a learned row, unchanged | `times_used` +1 and `updated_at_ms` = now. |
 
@@ -680,7 +680,7 @@ For a line that has a food:
   - grams and ounces for any food measured in grams, which is every USDA food. A food of the user's that is measured in servings or milliliters with no weight does not offer them, because a weight cannot be converted for it (4.5). `oz` is not offered when, for that food, it would be read as a fluid ounce (4.2); `fl oz` is offered instead;
   - the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion;
   - each of the food's own portions that can be typed, meaning that writing that unit into the item and re-parsing it gives the same food and that portion's grams;
-  - a bare count and `serving`, whenever they re-parse to the same food, so a food of the user's with no portions can still have its amount changed.
+  - a bare count and `serving`, whenever they re-parse to the same food, so a food of the user's with no portions can still have its amount changed. Each is listed only when no other listed choice has the same weight, so the same amount is not offered twice (coffee shows "small" once).
 
   A portion whose label cannot be typed back (for example "drink (12 fl oz)", or "medium or regular slice" when typing it would pick another portion or another food) is not offered, and neither is any portion whose label starts with "Quantity not specified".
 - **Forget this match**: only when a learned match produced the line (7.4).
@@ -727,12 +727,12 @@ So:
 - `2 slices toast` with the last word backspaced and typed again: the pick is suspended while the word is incomplete and back once `toast` is whole.
 
 A suspended pick is dropped for good when:
-- an edit changes a different item and leaves the pick's item as it was (the user has moved on);
+- any edit leaves the pick's item as it was (the user has moved on), except an edit of blanks only with nothing but blanks between it and the item. So a comma typed right after the item, or text typed elsewhere, both count as moving on;
 - its item disappears entirely, for example when it is backspaced to nothing. Typing the same words again later does not bring the pick back;
 - a new pick is made on that item;
 - the screen is closed.
 
-A pick that applies is never dropped by typing elsewhere, never restored onto an item that an edit left unchanged, and never applied to two items.
+A pick that applies is never dropped by typing elsewhere, never restored onto an item that an edit left unchanged, and never applied to two items. When two picks would claim the same item, the one whose span overlaps it most keeps it. A pick is never applied to a saved meal header.
 
 Sticky corrections live in memory until Save. The phone's undo does not bring back a dropped correction. Added lines (9.3) are not tied to the text, so typing never changes them.
 
