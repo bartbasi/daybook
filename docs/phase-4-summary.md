@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row and saved meals are done, reviewed and pushed. Still to do: barcode scanning, the food and recipe editors, the speed tests |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals and barcode scanning are done, reviewed and pushed. Still to do: the food and recipe editors, the speed tests |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -18,7 +18,9 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 
 ## On your phone now
 
-A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It was replaced the same day with a build of commit b4775a4, installed over the first one, so anything you had logged is still there. It has weight entry, the Weight tab, the weight widget, and food entry: type a meal, tap a line to fix the food or the amount, save, edit or delete a logged meal from Home. There are no chips, saved meals list, barcode scanning or food editor yet. The app started cleanly with no errors in its own log.
+A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It was replaced the same day with a build of commit b4775a4, installed over the first one, so anything you had logged is still there. It has weight entry, the Weight tab, the weight widget, and food entry: type a meal, tap a line to fix the food or the amount, save, edit or delete a logged meal from Home. There are no chips, saved meals list, barcode scanning or food editor in that build. The app started cleanly with no errors in its own log.
+
+A newer build with the chips, saved meals and barcode scanning (commit 5b643d5) was made on 2026-11-13, but the phone was no longer connected, so it is not installed. Plug the phone in and say so, and it will be installed.
 
 ## Before you install the Phase 4 build
 
@@ -140,6 +142,8 @@ Two more behaviors to know about:
 
 - **Text typed in the food box is lost if Android kills the app in the background** (for example after switching to another app for a while). The text is kept through folding, rotation and a failed save, and closing the screen offers Undo, but it is not written to disk until Save. Saving a draft when the app is paused would cover it.
 
+- **A phone that reports no camera at all shows an empty camera area on the scan screen**, with no words. The scanner library says nothing in that case. "Type the number instead" and the X still work.
+- **Licence notices for the scanner's built-in code** (zxing-cpp, zint, CameraX) are not collected automatically. They are added to the licence list in About in step 8; docs/dependencies.md carries the note.
 - **The saved meal editor does not scroll the line you are typing into view**, as the food entry screen does. With many items and the keyboard up you may have to scroll by hand.
 - **Chips look the same for the moment a save is running.** They do nothing then, and the screen closes right after, so no word or shape was added.
 
