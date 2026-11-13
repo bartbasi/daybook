@@ -1,12 +1,15 @@
 # Daybook. Copyright 2026 Play, Inc.
 # Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 """Run with: python -I -m unittest discover -s tools"""
+import json
 import os
 import sys
+import tempfile
 import unittest
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_food_db import apply_fallbacks  # noqa: E402
+from build_food_db import Collector, apply_fallbacks, read_fndds  # noqa: E402
 
 
 class FallbackTests(unittest.TestCase):
@@ -37,6 +40,31 @@ class FallbackTests(unittest.TestCase):
         b = {1062: 418.4}
         apply_fallbacks(b)
         self.assertAlmostEqual(b[1008], 100.0)
+
+
+class FnddsPortionTests(unittest.TestCase):
+    def test_quantity_not_specified_is_kept_and_guideline_amount_is_not(self):
+        item = {
+            "fdcId": 1,
+            "description": "Egg, whole, cooked",
+            "foodNutrients": [],
+            "foodPortions": [
+                {"sequenceNumber": 1, "portionDescription": "1 egg", "gramWeight": 46},
+                {"sequenceNumber": 2, "portionDescription": "Guideline amount per cup",
+                 "gramWeight": 243},
+                {"sequenceNumber": 3, "portionDescription": "Quantity not specified",
+                 "gramWeight": 50},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "fndds.zip")
+            with zipfile.ZipFile(path, "w") as z:
+                z.writestr("survey.json", json.dumps({"SurveyFoods": [item]}))
+            c = Collector()
+            read_fndds(path, c)
+        self.assertEqual(
+            c.portions[1], [(1, "1 egg", 46), (3, "Quantity not specified", 50)]
+        )
 
 
 if __name__ == "__main__":

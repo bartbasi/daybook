@@ -53,4 +53,36 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('the portion menu does not list the default amount label', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('daybook_test');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final path = await tester.runAsync(() => installFoodReference(dir: dir));
+    final ref = FoodReference.open(path!);
+    final egg = ref.food(2707153)!; // FNDDS egg, has "Quantity not specified"
+    ref.close();
+    expect(egg.portions.map((p) => p.label), contains(defaultPortionLabel));
+    final others = egg.portions.where((p) => p.label != defaultPortionLabel);
+    expect(others, isNotEmpty);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NutrientScreen(
+          title: egg.description,
+          subtitle: '',
+          baseLabel: 'per 100 g',
+          per100: egg.nutrients,
+          portions: egg.portions,
+          credit: '',
+        ),
+      ),
+    );
+    await tester.tap(find.byType(DropdownButton<UsdaPortion?>));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining(defaultPortionLabel), findsNothing);
+    expect(find.textContaining(others.first.label), findsWidgets);
+  });
 }

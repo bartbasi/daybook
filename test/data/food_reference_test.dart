@@ -98,13 +98,45 @@ void main() {
     expect(ref.search('egg, whole, raw').map((h) => h.id), contains(171287));
   });
 
+  test('FNDDS foods keep the default amount portion', () {
+    final dir = Directory.systemTemp.createTempSync('daybook_usda');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final path = '${dir.path}/usda.sqlite';
+    File(path).writeAsBytesSync(
+      gzip.decode(File('assets/food/usda.sqlite.gz').readAsBytesSync()),
+    );
+    final ref = FoodReference.open(path);
+    addTearDown(ref.close);
+
+    void expectDefault(int id, double grams) {
+      final match = ref
+          .food(id)!
+          .portions
+          .where((p) => p.label == defaultPortionLabel);
+      expect(match, hasLength(1), reason: 'usda:$id');
+      expect(match.single.grams, grams, reason: 'usda:$id');
+    }
+
+    expectDefault(2707153, 50); // egg
+    expectDefault(2710373, 360); // coffee
+    expectDefault(2705594, 20); // half and half
+
+    final db = sqlite3.open(path, mode: OpenMode.readOnly);
+    addTearDown(db.close);
+    expect(db.select('SELECT COUNT(*) AS n FROM food').first['n'], 13598);
+  });
+
   test('usda_version.txt changes with the asset content', () {
+    final version = File('assets/food/usda_version.txt')
+        .readAsStringSync()
+        .trim();
+    expect(version, isNot('2026-10-29-b4d69b0012dd000'));
+
     final gz = File('assets/food/usda.sqlite.gz').readAsBytesSync();
     // The gzip trailer holds the CRC-32 and the size of the uncompressed data.
     final t = ByteData.sublistView(gz, gz.length - 8);
     final crc = t.getUint32(0, Endian.little).toRadixString(16).padLeft(8, '0');
     final size = t.getUint32(4, Endian.little).toRadixString(16);
-    final version = File('assets/food/usda_version.txt').readAsStringSync().trim();
     expect(version, matches(RegExp(r'^\d{4}-\d{2}-\d{2}-[0-9a-f]+$')));
     expect(version, endsWith('-$crc$size'));
   });

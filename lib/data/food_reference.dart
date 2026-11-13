@@ -14,6 +14,11 @@ import 'package:sqlite3/sqlite3.dart';
 
 const _assetDb = 'assets/food/usda.sqlite.gz';
 const _assetVersion = 'assets/food/usda_version.txt';
+
+/// The FNDDS portion used as the default amount. It stays in the portion
+/// table but is never offered as a choice.
+const defaultPortionLabel = 'Quantity not specified';
+
 const _fileName = 'usda.sqlite';
 const _versionFileName = 'usda_version.txt';
 

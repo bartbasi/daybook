@@ -225,10 +225,11 @@ class _NutrientScreenState extends State<NutrientScreen> {
             items: [
               DropdownMenuItem(value: null, child: Text(widget.baseLabel)),
               for (final p in widget.portions)
-                DropdownMenuItem(
-                  value: p,
-                  child: Text('${p.label} (${_grams(p.grams)} g)'),
-                ),
+                if (p.label != defaultPortionLabel)
+                  DropdownMenuItem(
+                    value: p,
+                    child: Text('${p.label} (${_grams(p.grams)} g)'),
+                  ),
             ],
             onChanged: (p) => setState(() => _portion = p),
           ),

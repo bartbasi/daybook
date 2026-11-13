@@ -29,7 +29,7 @@ The user database is defined in `lib/data/database.dart` (drift). The reference 
 
 ## Tables (schema version 1)
 
-Version 1 was amended before any release (`goals.fixed_calories` became `calories`, and `meals.saved_meal_id` was added), so there is no migration for it. Every later schema change is version 2, with a migration.
+Version 1 was amended before any release (`goals.fixed_calories` became `calories`, and `meals.saved_meal_id` was added), so there is no migration for it. The next schema change is version 2, with a migration.
 
 ### Food
 
@@ -124,17 +124,17 @@ We chose (a). The zip is one file, the JSON gives a lossless restore, and the CS
 **Decision: bundle the USDA data in the app.** No download.
 
 What ships:
-- `assets/food/usda.sqlite.gz`: 7.1 MB. Uncompressed it is 19.8 MB.
+- `assets/food/usda.sqlite.gz`: 7.1 MB. Uncompressed it is 20.0 MB.
 - 13,598 foods:
   - SR Legacy: 7,793
   - FNDDS 2021-2023: 5,431
   - Foundation Foods 10/2026: 374
-- Every nutrient USDA gives, and 30,000+ household portions.
+- Every nutrient USDA gives, and 36,444 household portions. That includes 5,362 FNDDS rows labelled "Quantity not specified", kept as the default amount for a food typed with no amount.
 - It is built by `tools/build_food_db.py` from pinned USDA files, and the script checks their SHA-256.
 
 | Option | App download | First run | Works offline at once | Network calls |
 |---|---|---|---|---|
-| Bundle (chosen) | +7.1 MB (+4.7 MB without FNDDS) | Unzips 19.8 MB to app storage, about 0.1 s on a PC; on a phone it is expected to stay well under a second (not measured on a phone yet) | Yes | None |
+| Bundle (chosen) | +7.1 MB (+4.7 MB without FNDDS) | Unzips 20.0 MB to app storage, about 0.1 s on a PC; on a phone it is expected to stay well under a second (not measured on a phone yet) | Yes | None |
 | Download on first run | +0 | Needs a connection; food logging waits for the download | No | One more host to call and to host the file on |
 | Both | +7.1 MB | Same as bundle | Yes | Optional update call |
 
@@ -144,7 +144,7 @@ Why bundle:
 - there is no file to host;
 - updates arrive with app updates, about twice a year when USDA releases.
 
-The cost is 7.1 MB on the download, plus 19.8 MB on the phone once installed.
+The cost is 7.1 MB on the download, plus 20.0 MB on the phone once installed.
 
 Why include FNDDS (+2.4 MB):
 - it has foods as people eat them: mixed dishes, prepared foods, more "toast" and "oatmeal" variants;
@@ -152,6 +152,7 @@ Why include FNDDS (+2.4 MB):
 
 Building it:
 - Foods with no energy value at all are skipped (50 unfinished Foundation entries, 1 FNDDS entry). SR Legacy still covers those foods.
+- FNDDS portions: "Guideline amount per ..." rows are survey coding aids and are skipped. "Quantity not specified" is kept with its label and sequence number. The app never lists it as a choice and uses it only as the default amount.
 - The build fills a few standard nutrient ids from close equivalents, so the app reads one id per nutrient. The rules are also stored in the database's `meta` table:
 
   | Nutrient | Filled from, in order |
@@ -166,7 +167,7 @@ Building it:
 
 Installing it:
 - On first launch, and after an app update with a new data version, the app unzips the asset to a temporary file and renames it into place, so a crash cannot leave half a file.
-- `assets/food/usda_version.txt` holds the data version: the USDA release plus a checksum of the database (for example `2026-10-29-b4d69b0012dd000`). Any rebuild changes it, so a fixed asset always reaches existing installs.
+- `assets/food/usda_version.txt` holds the data version: the USDA release plus a checksum of the database (for example `2026-10-29-5000bc2f130d000`). Any rebuild changes it, so a fixed asset always reaches existing installs.
 - If the installed file is missing or does not open as a food database, the app installs it again.
 
 Reference database tables:

@@ -200,8 +200,8 @@ def read_fndds(path, c):
         for p in item.get("foodPortions", []):
             label = (p.get("portionDescription") or "").strip()
             # "Guideline amount per ..." rows are survey coding aids, not portions.
-            if (label and label != "Quantity not specified"
-                    and not label.startswith("Guideline amount")):
+            # "Quantity not specified" is kept: the app uses it as the default amount.
+            if label and not label.startswith("Guideline amount"):
                 c.portion(fid, p.get("sequenceNumber"), label, p.get("gramWeight"))
 
 
