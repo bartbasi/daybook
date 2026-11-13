@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer and live re-parsing are done, reviewed and pushed. Screens not started |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen and the correction sheet are done, reviewed and pushed. Still to do: the chips row and saved meals, barcode scanning, the food and recipe editors, the speed tests |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -18,7 +18,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 
 ## On your phone now
 
-A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It has weight entry, the Weight tab, the weight widget and a preview of the food entry screen (typing and saving a meal; tapping a line does nothing yet).
+A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It was replaced the same day with a build of commit b4775a4, installed over the first one, so anything you had logged is still there. It has weight entry, the Weight tab, the weight widget, and food entry: type a meal, tap a line to fix the food or the amount, save, edit or delete a logged meal from Home. There are no chips, saved meals list, barcode scanning or food editor yet. The app started cleanly with no errors in its own log.
 
 ## Before you install the Phase 4 build
 
@@ -143,6 +143,16 @@ Weight (step 1), on the Z Fold 5:
 - Reopen the app from Recents after swiping it away: the weight sheet should not open by itself.
 - Fold and unfold with a number typed in the sheet: the number stays.
 - TalkBack reads the widget once, as one button.
+
+Food entry (step 2, what is built so far), on the Z Fold 5:
+- From Home tap + Food, type "2 eggs and toast with butter", and watch the lines appear as you type. They should keep up with your typing, with no stutter.
+- Tap a line, pick another food, and save. Type the same words another day: your pick should come first.
+- Tap a line and change the amount. Only the numbers and unit in the text should change.
+- Type something Daybook cannot know (a brand name, say). The line should say it was not found, and Save should ask you to fix it first.
+- Fold and unfold, and rotate, with text typed and with the sheet open. Nothing typed should be lost.
+- Close the screen with text typed: Home should offer Undo and bring the text back.
+- With the largest font size, every line should wrap and nothing should be cut off.
+- TalkBack reads each line as one item with its food, amount and calories.
 
 Weight (step 1), on the iPhone, once there is a signed build (see docs/ios-widget.md for the Apple Developer steps):
 - The widget appears in the widget gallery, in the small and medium sizes.
