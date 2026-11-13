@@ -1078,18 +1078,10 @@ void main() {
       );
     });
 
-    // Last in the file: it loads the real Roboto, because the test font has
-    // letters as wide as tall and would make any message look too long. Every
-    // test before it runs with the test font.
+    // The test font's letters are as wide as they are tall, wider than any
+    // phone font, so a message that fits here fits on a phone.
     appTest('both number errors are shown in full at 344 dp and text scale 2 '
         'with the keyboard up', (tester) async {
-      final roboto = File(
-        '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/'
-        'material_fonts/roboto-regular.ttf',
-      ).readAsBytesSync();
-      await (FontLoader(
-        'Roboto',
-      )..addFont(Future.value(ByteData.sublistView(roboto)))).load();
       tester.platformDispatcher.textScaleFactorTestValue = 2.0;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       await openApp(tester, size: const Size(344, 800));

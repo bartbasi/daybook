@@ -241,7 +241,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           decoration: InputDecoration(
             labelText: S.scanNumberLabel,
             errorText: _numberError,
-            errorMaxLines: 5,
+            errorMaxLines: 12,
             border: const OutlineInputBorder(),
           ),
         ),
