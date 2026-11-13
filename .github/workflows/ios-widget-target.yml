@@ -10,8 +10,6 @@ name: iOS widget target
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ios-widget]
 
 env:
   FLUTTER_VERSION: 3.47.7
