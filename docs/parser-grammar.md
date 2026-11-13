@@ -338,7 +338,7 @@ For a food F and an item with quantity q:
 
 **No unit (a bare count, such as `2 eggs`)**: the first rule that finds a portion wins:
 1. a size word was typed: the first portion whose unit phrase contains it;
-2. a portion whose unit phrase is exactly one word, and that word (singular) is one of the item's food words after typo correction (5.2): "1 egg", "1 banana", "1 sandwich", "1 breast". So `2 bananna` uses "1 banana". "1 Bagel Thin" does not count for "bagel" because its unit phrase has two words;
+2. a portion whose unit phrase is exactly one word, and that word is one of the item's query words (its food words normalized as in 5.2, after typo correction), compared using the same plural rule (5.2 step 6): "1 egg", "1 banana", "1 sandwich", "1 breast". So `2 cookies` meets a "1 cookie" portion, and `2 bananna` uses "1 banana". "1 Bagel Thin" does not count for "bagel" because its unit phrase has two words;
 3. the default portion from FNDDS (only the exact label "Quantity not specified", so a local food goes on to rules 4 and 5);
 4. the first portion whose unit phrase contains "medium" or "regular";
 5. the first portion whose unit is neither mass nor volume ("1 large", "1 pat");
@@ -346,7 +346,7 @@ For a food F and an item with quantity q:
 
 Grams = q × the grams per unit of that portion. A bare count that found its portion by rule 1 has the size word as its unit label (`1 large`); one that found it by rules 2 to 5 has an empty unit label.
 
-**Local foods** (user foods, recipes, cached Open Food Facts products) use the same rules with their `food_portions` rows. Their base unit adds one rule: when it is `ml`, volume units convert directly and mass units do not; when it is `serving`, `serving` and bare counts convert directly and mass and volume units do not.
+**Local foods** (user foods, recipes, cached Open Food Facts products) use the same rules with their `food_portions` rows. A local food's base amount must be above zero; a food that breaks this is left out of matching and can never be a line's food. Their base unit adds one rule: when it is `ml`, volume units convert directly and mass units do not; when it is `serving`, `serving` and bare counts convert directly and mass and volume units do not.
 
 **When the unit cannot be converted**, the line gets the default amount (4.6) and the "Assumed" marker. The typed amount stays visible in the text. This is common in the data:
 - 578 foods have no usable portion at all;
@@ -364,9 +364,14 @@ Used when no amount was typed, or the typed unit cannot be converted. The first 
 5. The first portion.
 6. 100 g.
 
-For a local food: learned amount, then 1 serving if the base unit is `serving`, then its first portion, then its base amount and unit.
+For a local food: learned amount, then 1 serving if the base unit is `serving`, then its first portion, then its base amount and unit. The base amount is always above zero (4.5).
 
-**How a default is stored and shown**: if a portion of the food has exactly the default's gram weight and an amount of 1, the line shows and stores quantity 1 with that portion's label as shown in 4.4 ("1 small", 360 g, for coffee). Likewise, when a default rule picks a portion whose amount is 1, the line shows quantity 1 of that portion ("1 drink (12 fl oz)" in example 73). Otherwise it shows and stores the amount in the food's base unit: grams ("20 g" for half and half), or `ml` for a local food measured by volume. A learned amount (rule 1) is shown with the quantity and unit label that were learned, as example 52 prints it ("2 slice (learned)").
+**How a default is stored and shown**, using the portion's label as shown in 4.4. The first of these that applies wins:
+1. The default rule picked a portion whose amount is 1: the line shows and stores quantity 1 of that portion ("1 drink (12 fl oz)" in example 73). For a food whose rule picks "1 leek", it shows "1 leek", not another portion of the same weight.
+2. Some portion with an amount of 1 has exactly the default's gram weight: the line shows and stores quantity 1 of the first such portion in USDA order. This is how the "Quantity not specified" default shows as "1 small" (360 g) for coffee.
+3. Otherwise it shows and stores the amount in the food's base unit: grams ("20 g" for half and half), or `ml` for a local food measured by volume.
+
+A learned amount (default rule 1) is not covered by these three: it is shown with the quantity and unit label that were learned, as example 52 prints it ("2 slice (learned)").
 
 For typed items, amounts are not copied from past logs. Only an explicit amount correction is remembered (section 7). Added lines are different: a recent or frequent chip uses the amount last logged for that food, because the user picked that food on purpose ([9.3](#93-added-lines)).
 
@@ -392,7 +397,7 @@ For each item, after its amount is read, the remaining food text is looked up in
 
 1. **Alias or saved meal**: exact phrase match ([section 6](#6-aliases-and-saved-meals)).
 2. **Learned match**: exact key match ([section 7](#7-learning-from-corrections)). The line is matched.
-3. **Ranked search** over one pool of candidates: the user's local foods (custom foods, recipes, cached Open Food Facts products, not archived) and all USDA foods. The user's own foods come first whenever they fit the typed words (5.4 key 2). The user's history is part of the ranking (5.4 key 4), not a separate source, so a weak history match never beats a strong USDA match.
+3. **Ranked search** over one pool of candidates: the user's local foods (custom foods, recipes, cached Open Food Facts products, not archived, with a base amount above zero as 4.5 requires) and all USDA foods. The user's own foods come first whenever they fit the typed words (5.4 key 2). The user's history is part of the ranking (5.4 key 4), not a separate source, so a weak history match never beats a strong USDA match.
 
 ### 5.2 Normalizing text
 
@@ -400,7 +405,7 @@ The same steps are applied to typed food words and to food descriptions:
 
 1. Lower case. Accents removed (é becomes e). Apostrophes removed.
 2. Split into words made of letters, digits and `%`. Descriptions are also split into **segments** at commas and opening brackets.
-3. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box.
+3. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box. An item whose words are all removed by this cut gives no line at all (8.1): `coffee with no sugar` splits at "with", and the second item, "no sugar", gives no line, so it cannot block Save.
 4. **Synonyms** (5.3) are applied to typed text. This comes before filler words are removed, because "pb and j" needs its "and".
 5. **Filler words** are dropped from typed text: `a an the of and or with in on for to my i im had have ate eaten drank then also just made prepared topped plus about around approximately roughly`.
 6. **Plurals**: words of 4 letters or more lose a plural ending, in this order:
@@ -466,7 +471,7 @@ A food is **generic** if its description contains "NFS" or a segment starting wi
 Candidates are sorted by these keys, in order:
 
 1. More query words matched.
-2. **The user's own food that fits** first. A food fits when every query word is in its name and the last word of its name (singular) is one of the query words. Only these local foods can fit: custom foods and recipes, and cached Open Food Facts products that the user has logged at least once. A product that was only scanned and never logged does not fit, so one scanned yogurt does not take over every later "yogurt". It is still a candidate, ranked by the other keys.
+2. **The user's own food that fits** first. A food fits when every query word is in its name and the last word of its name (singular) is one of the query words. Trailing words of the name that contain a digit are skipped when finding that last word, because product names often end in a size or a percentage: a scanned "Fage Greek yogurt 0%" fits for `greek yogurt` once it has been logged. This applies to custom foods and recipes too. Only these local foods can fit: custom foods and recipes, and cached Open Food Facts products that the user has logged at least once. A product that was only scanned and never logged does not fit, so one scanned yogurt does not take over every later "yogurt". It is still a candidate, ranked by the other keys.
 3. Fewer extra words.
 4. More times logged by this user (count of `meal_entries` rows with this food ref). The count is kept per food ref, for USDA and local foods alike.
 5. Generic before not generic.
@@ -636,7 +641,7 @@ Two more markers describe where a food came from rather than a state:
 
 A line can carry "Guess" and "Assumed" together, or "Your pick" and "Assumed". Precedence for the single state name used in prose and tests: not found, then alias or saved meal, then guess, then amount assumed, then matched.
 
-An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`. The same goes for any item with neither food words nor an amount: a vague word alone (`some`), or a lone `a` or `an`, which on its own is not an amount (2.6 rule 5). So `vitamin a` gives one line, for "vitamin". An item that has an amount but no food words is still not found, as in the table above and example 61.
+An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`. The same goes for any item with neither food words nor an amount: a vague word alone (`some`), or a lone `a` or `an`, which on its own is not an amount (2.6 rule 5). So `vitamin a` gives one line, for "vitamin". An item that has an amount but no food words is still not found, as in the table above and example 61. An item whose words are all removed by the negation cut (5.2 step 3) also gives no line: in `coffee with no sugar`, "no sugar" gives no line.
 
 ### 8.2 Not by color alone
 
@@ -746,8 +751,9 @@ soft_sep      = "and" | "with" ;                  (* "&" and "w/" were replaced 
 piece         = item , { item } ;                 (* split by rule 2.6 *)
 
 item          = { lead_filler } , [ amount ] , { lead_filler } , food , [ post_amount ] , [ negation ]
-              | { lead_filler } , amount ;        (* no food words: not found. A vague word or a
+              | { lead_filler } , amount          (* no food words: not found. A vague word or a
                                                      lone "a" alone is no amount and gives no line: 8.1 *)
+              | { lead_filler } , negation ;      (* every word cut by negation: no line, 8.1 *)
 lead_filler   = filler - ( "a" | "an" ) ;         (* "a" before any food word is the quantity 1 *)
 
 amount        = [ lead_mult ] , measure , [ trail_mult ] ;
@@ -954,6 +960,7 @@ User food fixtures for examples 74 and 75:
 - "Same as yesterday" typed as text. It is a button on the screen.
 - Imperial (UK) pints and the 250 ml metric cup.
 - Learning a gram weight for a household unit the food lacks ("my scoop is 31 g"). The workaround is to enter grams once, which teaches the amount for that item text.
+- A lone describing word after a separator. `coffee, black` reads "black" as an item of its own, which may match a food as a guess. This is a known limit.
 
 ### 12.2 Locale
 
@@ -1104,3 +1111,9 @@ In these places the document was silent or two of its rules disagreed. The lead 
 - The antipasto food gets 1 cup as its default, because its two "Quantity not specified" labels are not the exact default label (4.4).
 - The portion pickers hide every label that starts with "Quantity not specified" (4.4, 8.3, 13).
 - A learned match's key leaves out the negation cut and synonyms, so `coffee without sugar` and `coffee` have different keys (7.1).
+- An item whose words are all cut by negation gives no line: in `coffee with no sugar`, "no sugar" gives no line and cannot block Save (5.2 step 3, 8.1).
+- A lone describing word after a separator is not handled specially: `coffee, black` reads "black" as its own item, which may match a food as a guess (12.1).
+- A product name ending in a size or percentage still fits the typed words: a logged "Fage Greek yogurt 0%" comes first for `greek yogurt` (5.4 key 2).
+- A user food with a base amount of zero or less is never matched (4.5).
+- A default shows the portion its rule picked when that portion's amount is 1 ("1 leek"), and only otherwise a portion of the same weight ("1 small" for coffee) (4.6).
+- A bare count compares the portion's word with the plural rule, so `2 cookies` uses a "1 cookie" portion (4.5 rule 2).
