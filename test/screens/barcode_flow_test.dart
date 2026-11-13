@@ -371,8 +371,13 @@ void main() {
       await scan(tester, '0123456789012');
       expect(scanScreen(), findsNothing);
       expect(tiles(), findsNothing);
-      expect(find.text('No product found for 0123456789012.'), findsOneWidget);
-      expect(find.text('Add it as your own food'), findsOneWidget);
+      expect(
+        find.text(
+          'No product found for 0123456789012. Add it as your own food?',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Add it'), findsOneWidget);
       expect(await foodRows(tester), isEmpty);
       expect(requests, hasLength(1));
     });
@@ -385,7 +390,12 @@ void main() {
         await openFood(tester);
         await scan(tester, yogurtCode);
         expect(tiles(), findsNothing);
-        expect(find.text('No product found for $yogurtCode.'), findsOneWidget);
+        expect(
+          find.text(
+            'No product found for $yogurtCode. Add it as your own food?',
+          ),
+          findsOneWidget,
+        );
         expect(await foodRows(tester), isEmpty);
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(milliseconds: 10));
@@ -667,7 +677,11 @@ void main() {
       );
       expect(sheet(), findsOneWidget);
       expect(
-        inSheet(find.text('No product found for 0123456789012.')),
+        inSheet(
+          find.text(
+            'No product found for 0123456789012. Add it as your own food?',
+          ),
+        ),
         findsOneWidget,
       );
       expect(find.text('Not found'), findsOneWidget);
@@ -698,15 +712,17 @@ void main() {
     Finder field(String label) => find.byWidgetPredicate(
       (w) => w is TextField && w.decoration?.labelText == label,
     );
-    Finder addOwn() =>
-        find.widgetWithText(TextButton, 'Add it as your own food');
+    Finder addOwn() => find.widgetWithText(TextButton, 'Add it');
 
     Future<void> notFound(WidgetTester tester) async {
       answer = (_) async => http.Response('{"status":0}', 404);
       await openApp(tester);
       await openFood(tester);
       await scan(tester, code);
-      expect(find.text('No product found for $code.'), findsOneWidget);
+      expect(
+        find.text('No product found for $code. Add it as your own food?'),
+        findsOneWidget,
+      );
     }
 
     Future<void> tap(WidgetTester tester, Finder f) async {
@@ -745,14 +761,20 @@ void main() {
     appTest('tapping the button clears the message, so a return from the '
         'editor does not offer the same barcode again', (tester) async {
       await notFound(tester);
-      expect(find.text('No product found for $code.'), findsOneWidget);
+      expect(
+        find.text('No product found for $code. Add it as your own food?'),
+        findsOneWidget,
+      );
       await tap(tester, addOwn());
       expect(editor(), findsOneWidget);
       await tester.pageBack();
       await settle(tester);
       expect(editor(), findsNothing);
       expect(addOwn(), findsNothing);
-      expect(find.text('No product found for $code.'), findsNothing);
+      expect(
+        find.text('No product found for $code. Add it as your own food?'),
+        findsNothing,
+      );
     });
 
     appTest('the message with the button goes after ten seconds, like any '
@@ -781,6 +803,7 @@ void main() {
     appTest('at 344 dp, text scale 2 and the keyboard up, the message with '
         'its button fits: no overflow, the box keeps its height, Save and '
         'the message do not overlap', (tester) async {
+      final semantics = tester.ensureSemantics();
       tester.platformDispatcher.textScaleFactorTestValue = 2.0;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       answer = (_) async => http.Response('{"status":0}', 404);
@@ -793,18 +816,42 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull);
       expect(tester.getSize(box()).height, greaterThanOrEqualTo(48));
-      final notice = tester.getRect(
-        find.ancestor(
-          of: find.byType(ConfirmBar),
-          matching: find.byType(SingleChildScrollView),
-        ),
-      );
+      final notice = tester.getRect(find.byType(ConfirmBar));
       final save = tester.getRect(saveButton());
       expect(notice.bottom, lessThanOrEqualTo(save.top + 0.5));
       expect(save.bottom, lessThanOrEqualTo(500.5));
-      // The button can still be reached.
-      await tester.ensureVisible(addOwn());
-      expect(tester.takeException(), isNull);
+      // The button is fully in view with no scrolling, and a 48 dp target.
+      final button = tester.getRect(addOwn());
+      expect(button.height, greaterThanOrEqualTo(48));
+      expect(button.top, greaterThanOrEqualTo(notice.top - 0.5));
+      expect(button.bottom, lessThanOrEqualTo(notice.bottom + 0.5));
+      expect(button.left, greaterThanOrEqualTo(0));
+      expect(button.right, lessThanOrEqualTo(344));
+      // The words are not scaled down to fit, and are the short ones; the
+      // spoken label is the long one.
+      expect(
+        find.descendant(
+          of: find.byType(ConfirmBar),
+          matching: find.byType(FittedBox),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: addOwn(), matching: find.text('Add it')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: addOwn(),
+          matching: find.bySemanticsLabel('Add it as your own food'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('No product found for $code. Add it as your own food?'),
+        findsOneWidget,
+      );
+      semantics.dispose();
     });
 
     appTest('a message with no button still goes after ten seconds', (
@@ -899,9 +946,7 @@ void main() {
         ),
       );
       expect(sheet(), findsOneWidget);
-      final button = inSheet(
-        find.widgetWithText(OutlinedButton, 'Add it as your own food'),
-      );
+      final button = inSheet(find.widgetWithText(OutlinedButton, 'Add it'));
       expect(button, findsOneWidget);
       await tap(tester, button);
       expect(editor(), findsOneWidget);
@@ -937,14 +982,16 @@ void main() {
           find.widgetWithText(OutlinedButton, 'Scan its barcode'),
         ),
       );
-      await tap(
-        tester,
-        inSheet(find.widgetWithText(OutlinedButton, 'Add it as your own food')),
-      );
+      await tap(tester, inSheet(find.widgetWithText(OutlinedButton, 'Add it')));
       await tester.pageBack();
       await settleMore(tester);
       expect(sheet(), findsOneWidget);
-      expect(inSheet(find.text('No product found for $code.')), findsOneWidget);
+      expect(
+        inSheet(
+          find.text('No product found for $code. Add it as your own food?'),
+        ),
+        findsOneWidget,
+      );
       expect(await foodRows(tester), isEmpty);
     });
   });
@@ -1230,9 +1277,7 @@ void main() {
       await lookUpTyped(tester, '00010054');
       await settleMore(tester);
       expect(requests, hasLength(1));
-      await tester.tap(
-        find.widgetWithText(TextButton, 'Add it as your own food'),
-      );
+      await tester.tap(find.widgetWithText(TextButton, 'Add it'));
       await settle(tester);
       final barcode = find.byWidgetPredicate(
         (w) =>

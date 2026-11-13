@@ -760,6 +760,55 @@ void main() {
       });
     }
 
+    h.appTest('a per serving food that becomes per 100 g with only a slice '
+        'portion is not read as 2 servings of the slice', (tester) async {
+      final food = await h.real(
+        tester,
+        () => h.db.createCustomFood(
+          const CustomFoodInput(
+            name: 'Zorbo',
+            basis: FoodBasis.perServing,
+            nutrients: {Nutrients.energy: 50},
+          ),
+          nowFixed,
+        ),
+      );
+      await makeRecipe(
+        tester,
+        ingredients: [
+          MealLineInput(
+            foodRef: 'local:${food.food.id}',
+            foodName: 'Zorbo',
+            quantity: 2,
+            unitLabel: 'serving',
+            baseQuantity: 2,
+            baseUnit: 'serving',
+            nutrients: const {Nutrients.energy: 100},
+          ),
+        ],
+      );
+      await h.real(
+        tester,
+        () => h.db.editCustomFood(
+          food.food.id,
+          const CustomFoodInput(
+            name: 'Zorbo',
+            basis: FoodBasis.per100g,
+            nutrients: {Nutrients.energy: 400},
+            portions: [PortionInput('1 slice', 30)],
+          ),
+          nowFixed,
+        ),
+      );
+      await h.openApp(tester);
+      await openRecipe(tester, 'Turkey chili');
+      final line = tester.widget<FoodLineTile>(tiles()).line;
+      // The food's usual amount is now one slice, 30 g of 400 kcal per 100 g.
+      expect(line.nutrients[Nutrients.energy], closeTo(120, 1e-6));
+      expect(line.baseQuantity, 30);
+      expect(find.text(S.recipeAmountReset(const ['Zorbo'])), findsOneWidget);
+    });
+
     h.appTest('a food that changed meaning between two openings is not '
         'priced silently at a new amount', (tester) async {
       final food = await h.real(

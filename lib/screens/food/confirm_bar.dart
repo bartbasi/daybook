@@ -16,7 +16,13 @@ class ConfirmBar extends StatelessWidget {
     this.onUndo,
     this.actionLabel,
     this.onAction,
+    this.actionSpoken,
+    this.maxMessageHeight,
   });
+
+  /// When set, a long message scrolls inside this height while the buttons
+  /// stay in view.
+  final double? maxMessageHeight;
 
   final String message;
 
@@ -27,6 +33,19 @@ class ConfirmBar extends StatelessWidget {
   /// forward ("Add it as your own food"). Both or neither.
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// What a screen reader says for the action button, when it is longer than
+  /// the visible [actionLabel].
+  final String? actionSpoken;
+
+  Widget _scrolling(Widget child) {
+    final max = maxMessageHeight;
+    if (max == null) return child;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: max),
+      child: SingleChildScrollView(child: child),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,9 +62,11 @@ class ConfirmBar extends StatelessWidget {
                   Expanded(
                     child: Semantics(
                       liveRegion: true,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(message),
+                      child: _scrolling(
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(message),
+                        ),
                       ),
                     ),
                   ),
@@ -67,7 +88,11 @@ class ConfirmBar extends StatelessWidget {
                       minimumSize: const Size(48, 48),
                     ),
                     onPressed: onAction,
-                    child: Text(actionLabel!, textAlign: TextAlign.center),
+                    child: Semantics(
+                      label: actionSpoken,
+                      excludeSemantics: actionSpoken != null,
+                      child: Text(actionLabel!, textAlign: TextAlign.center),
+                    ),
                   ),
                 ),
             ],

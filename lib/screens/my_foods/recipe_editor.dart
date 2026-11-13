@@ -198,9 +198,10 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
   }
 
   /// The base unit a re-priced ingredient must still come out in, or null when
-  /// any will do. An amount in servings is kept whenever the food still has a
-  /// serving, whatever happened to its base unit; an amount in weight, volume
-  /// or a bare count must come out in the unit it was stored in.
+  /// any will do. An amount in servings is kept (null) only while the food
+  /// still has a serving: its base unit is 'serving' or one of its portion
+  /// labels contains "serving". Otherwise, and for an amount in weight, volume
+  /// or a bare count, the line must come out in the unit it was stored in.
   Future<String?> _keepBaseUnit(Line stored) async {
     final unit = (stored.unitLabel ?? '').trim().toLowerCase();
     if (unit != 'serving' && unit != 'servings') return stored.baseUnit;
@@ -210,7 +211,8 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
     final food = id == null ? null : await _guard(() => _db.loadFood(id));
     if (food == null) return stored.baseUnit;
     final hasServing =
-        food.food.baseUnit == 'serving' || food.portions.isNotEmpty;
+        food.food.baseUnit == 'serving' ||
+        food.portions.any((p) => p.label.toLowerCase().contains('serving'));
     return hasServing ? null : stored.baseUnit;
   }
 

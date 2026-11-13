@@ -276,6 +276,7 @@ class S {
   static const sheetScan = 'Scan its barcode';
   static String sheetCreate(String name) => 'Create a food called "$name"';
   static const sheetAddOwn = 'Add it as your own food';
+  static const sheetAddOwnShort = 'Add it';
 
   // Barcode scanning (food-entry frames 9, 10 and 7).
   static const scanButton = 'Scan';
@@ -300,7 +301,8 @@ class S {
       'type the number instead.';
   static const scanCameraFailed =
       'The camera could not start. You can type the number instead.';
-  static String scanNotFound(String code) => 'No product found for $code.';
+  static String scanNotFound(String code) =>
+      'No product found for $code. Add it as your own food?';
   static const scanNoConnection =
       'Could not reach Open Food Facts. Check the connection and try again.';
   static const scanSaveFailed =

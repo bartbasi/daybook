@@ -296,7 +296,13 @@ class FoodEntryScreen extends StatefulWidget {
 }
 
 class _Notice {
-  const _Notice(this.text, [this.undo, this.actionLabel, this.onAction]);
+  const _Notice(
+    this.text, [
+    this.undo,
+    this.actionLabel,
+    this.onAction,
+    this.actionSpoken,
+  ]);
   final String text;
   final Future<void> Function()? undo;
 
@@ -304,6 +310,9 @@ class _Notice {
   /// own food" after a barcode is not found.
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// What a screen reader says for the button, when the words are short.
+  final String? actionSpoken;
 }
 
 class _Signal extends ChangeNotifier {
@@ -1288,8 +1297,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
             : _Notice(
                 message,
                 null,
-                S.sheetAddOwn,
+                S.sheetAddOwnShort,
                 () => unawaited(_addOwnLine(code)),
+                S.sheetAddOwn,
               ),
       );
     }
@@ -1770,24 +1780,17 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                       _topBar(context),
                       if (!largeText) header,
                       if (_notice != null)
-                        // At most under a fifth of what is left above the
-                        // keyboard; a longer message scrolls inside.
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight: _noticeMaxHeight(context),
-                          ),
-                          child: SingleChildScrollView(
-                            child: ConfirmBar(
-                              message: _notice!.text,
-                              onUndo: _notice!.undo == null
-                                  ? null
-                                  : _undoNotice,
-                              actionLabel: _notice!.actionLabel,
-                              onAction: _notice!.onAction == null
-                                  ? null
-                                  : _noticeAction,
-                            ),
-                          ),
+                        // The message scrolls inside a limited height; its
+                        // buttons stay in view.
+                        ConfirmBar(
+                          maxMessageHeight: _noticeMaxHeight(context),
+                          message: _notice!.text,
+                          onUndo: _notice!.undo == null ? null : _undoNotice,
+                          actionLabel: _notice!.actionLabel,
+                          actionSpoken: _notice!.actionSpoken,
+                          onAction: _notice!.onAction == null
+                              ? null
+                              : _noticeAction,
                         ),
                       // What is left is shared by the box and the lines. The
                       // box stays in a fixed area, outside the scrolling
@@ -1821,7 +1824,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
 
   double _noticeMaxHeight(BuildContext context) {
     final m = MediaQuery.of(context);
-    return ((m.size.height - m.viewInsets.bottom) * 0.18).clamp(72.0, 1e9);
+    return ((m.size.height - m.viewInsets.bottom) * 0.07).clamp(40.0, 1e9);
   }
 
   /// The Scan button, after the date (frame 1).

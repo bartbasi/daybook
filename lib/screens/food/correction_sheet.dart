@@ -470,7 +470,14 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
                   minimumSize: const Size(48, 48),
                 ),
                 onPressed: () => _create(barcode: _scanBarcode),
-                child: const Text(S.sheetAddOwn, textAlign: TextAlign.center),
+                child: Semantics(
+                  label: S.sheetAddOwn,
+                  excludeSemantics: true,
+                  child: const Text(
+                    S.sheetAddOwnShort,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
             ),
         ],
