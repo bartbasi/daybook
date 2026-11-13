@@ -39,10 +39,14 @@ Flutter's `LicenseRegistry` collects all of these notices, so the License screen
 | drift_dev | MIT | Generates database code and schema snapshots |
 | build_runner | BSD-3-Clause | Runs code generation |
 | flutter_test (SDK) | BSD-3-Clause | Tests |
+| integration_test (SDK) | BSD-3-Clause | Part of the Flutter SDK. Runs the app on the Android emulator and iOS simulator in CI |
 | flutter_lints | BSD-3-Clause | Lint rules |
 | Python 3 standard library | PSF-2.0 | `tools/build_food_db.py` builds the USDA asset |
 | actions/checkout, actions/setup-java, actions/upload-artifact | MIT | GitHub Actions CI |
 | subosito/flutter-action | MIT | Installs Flutter in CI |
+| flutter_driver (SDK), fuchsia_remote_debug_protocol (SDK), process, sync_http (pulled in by integration_test) | BSD-3-Clause | Dev only |
+| webdriver (pulled in by integration_test) | Apache-2.0 | Dev only |
+| reactivecircus/android-emulator-runner | Apache-2.0 | Android emulator for the integration test job in CI |
 
 ## Data
 

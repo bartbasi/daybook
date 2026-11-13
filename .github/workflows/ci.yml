@@ -6,6 +6,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 env:
   FLUTTER_VERSION: 3.47.7
@@ -50,11 +51,36 @@ jobs:
 
       - run: flutter build apk --release
 
+      # The release APK may declare only the permissions in
+      # tools/allowed_permissions.txt (the promises in BRIEF.md).
+      - name: Release APK permissions match the allowed list
+        run: |
+          AAPT2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)aapt2"
+          echo "Using $AAPT2"
+          "$AAPT2" dump permissions build/app/outputs/flutter-apk/app-release.apk > aapt2-permissions.txt
+          cat aapt2-permissions.txt
+          sed -n "s/^uses-permission[a-z0-9-]*: name='\([^']*\)'.*/\1/p" aapt2-permissions.txt | sort -u > actual-permissions.txt
+          grep -v -e '^#' -e '^[[:space:]]*$' tools/allowed_permissions.txt | sort -u > allowed-permissions.txt
+          if ! diff -u allowed-permissions.txt actual-permissions.txt; then
+            echo "::error::The APK permissions differ from tools/allowed_permissions.txt. Lines starting with - are allowed but missing, lines starting with + are declared but not allowed."
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: daybook-android
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14
+
+      # One APK per phone type, to watch the installed size. The fat APK above
+      # is the one uploaded for installing.
+      - name: Print the per-ABI APK sizes
+        run: |
+          flutter build apk --release --split-per-abi
+          ls -l build/app/outputs/flutter-apk/*-release.apk
+          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "$f $(du -h "$f" | cut -f1)"
+          done
 
   ios:
     name: iOS build
@@ -72,3 +98,68 @@ jobs:
 
       # Unsigned for now. Signing and TestFlight upload come in Phase 6.
       - run: flutter build ios --release --no-codesign
+
+  # The two integration test jobs run on pushes to main and on manual runs
+  # only, not on pull requests or other branches.
+  android-integration:
+    name: Integration test on Android emulator
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Lets the emulator use hardware acceleration on the ubuntu runner.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Plain AOSP image, no Google services. The first emulator is emulator-5554.
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          script: flutter test integration_test -d emulator-5554
+
+  ios-integration:
+    name: Integration test on iOS simulator
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Boot an iPhone simulator and run the tests
+        run: |
+          xcrun simctl list devices available
+          UDID="$(xcrun simctl list devices available iPhone | grep -Eo '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | tail -n 1)"
+          if [ -z "$UDID" ]; then
+            echo "::error::No iPhone simulator is available on this runner image."
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          flutter test integration_test -d "$UDID"

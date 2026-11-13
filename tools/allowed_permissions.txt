@@ -1,0 +1,5 @@
+# Android permissions the release APK may declare, one per line. CI compares this list
+# with the APK's merged manifest (aapt2 dump permissions) and fails on any difference.
+# Add a line here in the same change that adds a permission, and say why in the commit.
+android.permission.INTERNET
+io.github.bartbasi.daybook.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
