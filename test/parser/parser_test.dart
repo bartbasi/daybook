@@ -1,7 +1,6 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
-import 'package:daybook/data/food_data.dart' show normalizePhrase;
 import 'package:daybook/parser/grams.dart';
 import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/parser.dart';
@@ -513,24 +512,24 @@ void main() {
       for (final c in [8, 10, 12]) {
         final l = last(c);
         expect(l.state, LineState.notFound);
-        expect((l as ParsedLine).plain, isTrue, reason: 'cursor $c');
+        expect(l.plain, isTrue, reason: 'cursor $c');
       }
     });
 
     test('the cursor elsewhere leaves it not found', () {
       for (final c in [-1, 0, 3, 6, 7]) {
-        expect((last(c) as ParsedLine).plain, isFalse, reason: 'cursor $c');
+        expect(last(c).plain, isFalse, reason: 'cursor $c');
       }
     });
 
     test('only a not found line is ever plain', () {
       for (final l in _parse('2 eggs, 2 slices', cursor: 4)) {
-        expect((l as ParsedLine).plain, isFalse);
+        expect(l.plain, isFalse);
       }
     });
 
     test('plain keeps the food words and the span', () {
-      final l = last(12) as ParsedLine;
+      final l = last(12);
       expect(l.foodText, 'zzzz');
       expect(l.span, const Span(8, 12));
     });
@@ -538,7 +537,7 @@ void main() {
 
   group('what a typed line carries', () {
     test('span, amount spans, key and food words', () {
-      final l = _one('2 slices rye toast') as ParsedLine;
+      final l = _one('2 slices rye toast');
       expect(l.span, const Span(0, 18));
       expect(l.amountSpans, [const Span(0, 8)]);
       expect(l.learnedKey, 'rye toast');
@@ -597,19 +596,6 @@ void main() {
       expect(() => s.foods.clear(), throwsUnsupportedError);
       expect(() => s.learned.clear(), throwsUnsupportedError);
       expect(() => s.mealsByName.clear(), throwsUnsupportedError);
-    });
-
-    test('normalizeName agrees with normalizePhrase', () {
-      for (final t in [
-        'Usual Breakfast',
-        '  my   oatmeal ',
-        'Café au lait',
-        "Mom's pie!",
-        'Eggs & Toast, 2%',
-        'jalapeño',
-      ]) {
-        expect(normalizeName(t), normalizePhrase(t), reason: t);
-      }
     });
   });
 

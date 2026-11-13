@@ -668,7 +668,7 @@ void main() {
           if (a.foodRef != e.ref) {
             problems.add('$w: ref ${a.foodRef} but expected ${e.ref}');
           }
-          final plain = a is ParsedLine && a.plain;
+          final plain = a.plain;
           if (plain != e.plain) {
             problems.add('$w: plain $plain but expected ${e.plain}');
           }

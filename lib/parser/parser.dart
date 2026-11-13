@@ -10,6 +10,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'grams.dart';
 import 'learned_key.dart';
 import 'line.dart';
+import 'name_key.dart';
 import 'normalize.dart';
 import 'rank.dart';
 import 'search_index.dart';
@@ -50,59 +51,6 @@ UsdaFoodLoader sqliteUsdaFoods(Database db) {
       },
     );
   });
-}
-
-/// A line made from typed text. Adds to [Line] what the screen needs and
-/// [Line] has no field for.
-class ParsedLine extends Line {
-  const ParsedLine({
-    required super.state,
-    super.foodRef,
-    super.foodName,
-    super.quantity,
-    super.unitLabel,
-    super.baseQuantity,
-    super.baseUnit,
-    super.nutrients,
-    super.markers,
-    super.learnedKey,
-    super.span,
-    super.multiplier,
-    super.items,
-    super.savedMealId,
-    super.amountSpans,
-    this.foodText = '',
-    this.plain = false,
-  });
-
-  /// The item's food words as typed, for the not found sheet's search box
-  /// (8.3).
-  final String foodText;
-
-  /// True for a not found line that has the cursor in it (9.2): the screen
-  /// draws it as plain typing with no marker and does not count it for "Fix N
-  /// items" (8.4).
-  final bool plain;
-
-  ParsedLine asPlain() => ParsedLine(
-    state: state,
-    foodRef: foodRef,
-    foodName: foodName,
-    quantity: quantity,
-    unitLabel: unitLabel,
-    baseQuantity: baseQuantity,
-    baseUnit: baseUnit,
-    nutrients: nutrients,
-    markers: markers,
-    learnedKey: this.learnedKey,
-    span: span,
-    multiplier: multiplier,
-    items: items,
-    savedMealId: savedMealId,
-    amountSpans: amountSpans,
-    foodText: foodText,
-    plain: true,
-  );
 }
 
 class Parser {
@@ -152,9 +100,9 @@ class Parser {
   /// One item to its line (grammar 5.1 order): an alias or saved meal, then a
   /// learned match, then ranking. Does not look at the cursor. Null when the
   /// item gives no line (R36: all its words were cut by a negation).
-  ParsedLine? parseItem(ItemDraft d, UserSnapshot s) {
+  Line? parseItem(ItemDraft d, UserSnapshot s) {
     if (!d.hasFoodWords) {
-      return ParsedLine(
+      return Line(
         state: LineState.notFound,
         span: d.span,
         amountSpans: d.amountSpans,
@@ -166,7 +114,7 @@ class Parser {
 
     final key = learnedKey(d.foodText);
     final typedKey = key.isEmpty ? null : key;
-    ParsedLine notFound() => ParsedLine(
+    Line notFound() => Line(
       state: LineState.notFound,
       learnedKey: typedKey,
       span: d.span,
@@ -199,7 +147,7 @@ class Parser {
       final m = _rankerOf(s).match(d.foodText);
       if (m.state == LineState.notFound || m.top == null) {
         // R36: every word was removed by the negation cut ("no sugar").
-        if (m.words.isEmpty && _allNegated(d.foodText)) {
+        if (m.allNegated) {
           return null;
         }
         return notFound();
@@ -220,7 +168,7 @@ class Parser {
       markers.add(Marker.assumed);
       if (state == LineState.matched) state = LineState.amountAssumed;
     }
-    return ParsedLine(
+    return Line(
       state: state,
       foodRef: ref,
       foodName: name,
@@ -252,14 +200,14 @@ class Parser {
     if (d.size != null || (u != null && u != 'serving' && u != 'portion')) {
       return null;
     }
-    return s.mealsByName[normalizeName(d.foodText)];
+    return s.mealsByName[nameKey(d.foodText)];
   }
 
   /// 6.4: the header and its item lines. The item lines are already multiplied
   /// by the header's multiplier (quantity, base quantity and nutrients), as
   /// `expandSavedMeal` in lib/data/food_library_data.dart returns them. The
   /// header's own nutrients are their sum, a subtotal.
-  ParsedLine _header(ItemDraft d, SavedMealData meal) {
+  Line _header(ItemDraft d, SavedMealData meal) {
     final m = d.quantity ?? 1;
     final items = [
       for (final i in meal.items)
@@ -280,7 +228,7 @@ class Parser {
         sum[e.key] = (sum[e.key] ?? 0) + e.value;
       }
     }
-    return ParsedLine(
+    return Line(
       state: LineState.aliasOrSavedMeal,
       foodName: meal.name,
       nutrients: sum,
@@ -292,13 +240,5 @@ class Parser {
       savedMealId: meal.id,
       foodText: d.foodText,
     );
-  }
-
-  /// True when the item had food words and the negation cut removed all of
-  /// them ("no sugar", "without sugar").
-  bool _allNegated(String foodText) {
-    final w = rawWords(foldText(foodText));
-    final i = w.indexWhere((x) => x == 'no' || x == 'without');
-    return i >= 0 && queryWords(w.sublist(0, i).join(' ')).isEmpty;
   }
 }

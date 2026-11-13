@@ -112,9 +112,41 @@ class Line {
     this.items = const [],
     this.savedMealId,
     this.amountSpans = const [],
+    this.foodText,
+    this.plain = false,
   });
 
   final LineState state;
+
+  /// For a typed line: the item's food words as typed, for the not found
+  /// sheet's search box (8.3).
+  final String? foodText;
+
+  /// True for a not found line that has the cursor in it (9.2): the screen
+  /// draws it as plain typing with no marker and does not count it for "Fix N
+  /// items" (8.4).
+  final bool plain;
+
+  /// The same line with [plain] set.
+  Line asPlain() => Line(
+    state: state,
+    foodRef: foodRef,
+    foodName: foodName,
+    quantity: quantity,
+    unitLabel: unitLabel,
+    baseQuantity: baseQuantity,
+    baseUnit: baseUnit,
+    nutrients: nutrients,
+    markers: markers,
+    learnedKey: learnedKey,
+    span: span,
+    multiplier: multiplier,
+    items: items,
+    savedMealId: savedMealId,
+    amountSpans: amountSpans,
+    foodText: foodText,
+    plain: true,
+  );
 
   /// For a saved meal header: the id of the saved meal it expands.
   final int? savedMealId;

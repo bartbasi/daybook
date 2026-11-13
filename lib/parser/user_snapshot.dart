@@ -5,29 +5,12 @@
 // Built once per snapshot version, immutable afterwards.
 
 import 'grams.dart';
+import 'name_key.dart';
 import 'search_index.dart';
 import 'split.dart';
 import 'user_snapshot_data.dart';
 
 const _energyId = 1008;
-
-/// A phrase as aliases and saved meal names are compared (grammar 6.1): lower
-/// case, accents and apostrophes removed, other punctuation read as a space,
-/// words separated by single spaces. Same result as `normalizePhrase` in
-/// lib/data/food_data.dart, which this folder cannot import.
-String normalizeName(String text) {
-  const from = 'àáâãäåāçèéêëìíîïñòóôõöøùúûüýÿ';
-  const to = 'aaaaaaaceeeeiiiinoooooouuuuyy';
-  final word = RegExp(r'[\p{L}\p{N}%]', unicode: true);
-  final out = StringBuffer();
-  for (final ch in text.toLowerCase().split('')) {
-    final i = from.indexOf(ch);
-    final c = i >= 0 ? to[i] : ch;
-    if (c == "'" || c == '’') continue;
-    out.write(word.hasMatch(c) ? c : ' ');
-  }
-  return out.toString().split(' ').where((w) => w.isNotEmpty).join(' ');
-}
 
 /// One of the user's foods, ready for amounts and nutrients.
 class LocalFood {
@@ -83,14 +66,14 @@ class UserSnapshot {
     final byId = {for (final m in meals) m.id: m};
     final byName = <String, SavedMealData>{};
     for (final m in meals) {
-      final n = normalizeName(m.name);
+      final n = nameKey(m.name);
       if (n.isNotEmpty) byName[n] = m;
     }
     final aliases = [...d.aliases]
       ..sort((a, b) => a.savedMealId.compareTo(b.savedMealId));
     for (final a in aliases) {
       final m = byId[a.savedMealId];
-      final n = normalizeName(a.phrase);
+      final n = nameKey(a.phrase);
       if (m != null && n.isNotEmpty) byName[n] = m;
     }
 

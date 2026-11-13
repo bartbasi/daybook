@@ -1,8 +1,6 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
-// ignore_for_file: avoid_print
-
 import 'dart:io';
 
 import 'package:daybook/parser/parser.dart';
@@ -126,11 +124,11 @@ void main() {
     index = SearchIndex.build(foods);
     final total = sw.elapsedMilliseconds;
     buildMs = total - readMs;
-    print(
-      'index: ${foods.length} foods, read $readMs ms, build $buildMs ms, '
-      'total $total ms (budget $_indexBudgetMs ms)',
-    );
-    expect(total, lessThan(_indexBudgetMs));
+    final msg =
+        'index: ${foods.length} foods, read $readMs ms, build $buildMs ms, '
+        'total $total ms (budget $_indexBudgetMs ms)';
+    printOnFailure(msg);
+    expect(total, lessThan(_indexBudgetMs), reason: msg);
   });
 
   test('re-parsing after a keystroke, p95 under $_keystrokeP95Ms ms', () {
@@ -151,13 +149,13 @@ void main() {
     }
     times.sort();
     final p95 = _percentile(times, 0.95);
-    print(
-      'keystroke: ${times.length} parses, median '
-      '${_percentile(times, 0.5).toStringAsFixed(2)} ms, p95 '
-      '${p95.toStringAsFixed(2)} ms, max ${times.last.toStringAsFixed(2)} ms '
-      '(budget $_keystrokeP95Ms ms)',
-    );
-    expect(p95, lessThan(_keystrokeP95Ms));
+    final msg =
+        'keystroke: ${times.length} parses, median '
+        '${_percentile(times, 0.5).toStringAsFixed(2)} ms, p95 '
+        '${p95.toStringAsFixed(2)} ms, max ${times.last.toStringAsFixed(2)} ms '
+        '(budget $_keystrokeP95Ms ms)';
+    printOnFailure(msg);
+    expect(p95, lessThan(_keystrokeP95Ms), reason: msg);
   });
 
   test('a parse of 10 items takes under $_tenItemsMs ms', () {
@@ -175,19 +173,11 @@ void main() {
     }
     times.sort();
     final p95 = _percentile(times, 0.95);
-    print(
-      '10 items: median ${_percentile(times, 0.5).toStringAsFixed(2)} ms, '
-      'p95 ${p95.toStringAsFixed(2)} ms, max ${times.last.toStringAsFixed(2)} ms '
-      '(budget $_tenItemsMs ms)',
-    );
-    expect(p95, lessThan(_tenItemsMs));
-  });
-
-  test('preparing the user snapshot (not a budget, for the record)', () {
-    final data = _plausibleData();
-    UserSnapshot.from(data);
-    final sw = Stopwatch()..start();
-    UserSnapshot.from(data);
-    print('snapshot prepare: ${sw.elapsedMilliseconds} ms');
+    final msg =
+        '10 items: median ${_percentile(times, 0.5).toStringAsFixed(2)} ms, '
+        'p95 ${p95.toStringAsFixed(2)} ms, max ${times.last.toStringAsFixed(2)} ms '
+        '(budget $_tenItemsMs ms)';
+    printOnFailure(msg);
+    expect(p95, lessThan(_tenItemsMs), reason: msg);
   });
 }
