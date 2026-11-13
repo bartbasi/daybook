@@ -12,6 +12,7 @@ App code license for comparison: GPL-3.0 with additional attribution terms under
 | Open Food Facts | Barcode lookups, packaged foods | ODbL 1.0 (database), DbCL 1.0 (contents), CC BY-SA (images) | Yes, with conditions |
 | wger exercise data | Exercise library | Creative Commons, set per entry (mostly CC BY-SA 4.0, images CC BY-SA 3.0) | Yes, with conditions |
 | 2024 Adult Compendium of Physical Activities | MET values for cardio | Free for commercial use, with conditions on the website | Yes, with conditions |
+| FDA Daily Values | Default goals for nutrients the user has not set | US federal regulation, public domain | Yes |
 
 Rejected: ExerciseDB (paid subscription license with a storage ban), free-exercise-db images (unknown origin).
 
@@ -173,6 +174,16 @@ Usable: yes, with conditions.
 
 About screen text:
 > MET values from the 2024 Adult Compendium of Physical Activities (https://pacompendium.com). Herrmann SD, Willis EA, Ainsworth BE, Barreira TV, Hastert M, Kracht CL, Schuna JM Jr, Cai Z, Quan M, Tudor-Locke C, Whitt-Glover MC, Jacobs DR Jr. 2024 Adult Compendium of Physical Activities: A third update of the energy costs of human activities. J Sport Health Sci. 2024;13(1):6-12. doi:10.1016/j.jshs.2023.10.010.
+
+---
+
+## FDA Daily Values
+
+Primary source: 21 CFR 101.9(c)(8)(iv) (reference daily intakes and Daily Reference Values) and 21 CFR 101.9(c)(9), as amended by the 2016 final rule (81 FR 33742), at https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9
+
+Used for: the default goal of each tracked nutrient that has a Daily Value, for adults and children 4 years and over. The values are in `Nutrients.dailyValues` in `lib/data/nutrients.dart`. Total sugars and trans fat have no Daily Value, so they get no default goal.
+
+License: a federal regulation is a US government work and is not copyrighted.
 
 ---
 

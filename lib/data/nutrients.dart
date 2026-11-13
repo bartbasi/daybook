@@ -71,6 +71,41 @@ class Nutrients {
     Nutrient(folate, 'Folate', 'µg', offKey: 'vitamin-b9'),
   ];
 
+  /// FDA Daily Values for adults and children 4 years and over, in each
+  /// nutrient's own unit above. Source: 21 CFR 101.9(c)(8)(iv) for the
+  /// nutrients with a quantity, and 21 CFR 101.9(c)(9) for the vitamins and
+  /// minerals (as amended in 2016, 81 FR 33742). Total sugars and trans fat
+  /// have no Daily Value, so they are not here. The first four are listed for
+  /// completeness: the calorie and macro goals come from the goals row, not
+  /// from here.
+  static const dailyValues = <int, double>{
+    energy: 2000,
+    protein: 50,
+    carbs: 275,
+    fat: 78,
+    fiber: 28,
+    addedSugar: 50,
+    saturatedFat: 20,
+    cholesterol: 300,
+    sodium: 2300,
+    potassium: 4700,
+    calcium: 1300,
+    iron: 18,
+    magnesium: 420,
+    zinc: 11,
+    vitaminA: 900,
+    vitaminC: 90,
+    vitaminD: 20,
+    vitaminE: 15,
+    vitaminK: 120,
+    vitaminB6: 1.7,
+    vitaminB12: 2.4,
+    folate: 400,
+  };
+
+  /// The Daily Value of a nutrient, or null when it has none.
+  static double? dailyValueOf(int id) => dailyValues[id];
+
   static Nutrient? byId(int id) {
     for (final n in tracked) {
       if (n.id == id) return n;
