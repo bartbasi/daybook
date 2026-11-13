@@ -741,6 +741,34 @@ void main() {
       expect(tester.widget<TextField>(field('Name')).controller!.text, '');
     });
 
+    appTest('the message with the button stays until the button is tapped; '
+        'tapping it clears the message, so a return from the editor does not '
+        'offer the same barcode again', (tester) async {
+      await notFound(tester);
+      await tester.pump(const Duration(seconds: 30));
+      expect(addOwn(), findsOneWidget);
+      expect(find.text('No product found for $code.'), findsOneWidget);
+      await tap(tester, addOwn());
+      expect(editor(), findsOneWidget);
+      await tester.pageBack();
+      await settle(tester);
+      expect(editor(), findsNothing);
+      expect(addOwn(), findsNothing);
+      expect(find.text('No product found for $code.'), findsNothing);
+    });
+
+    appTest('a message with no button still goes after ten seconds', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      answer = (_) async => http.Response('', 500);
+      await scan(tester, code);
+      expect(find.text(S.scanNoConnection), findsOneWidget);
+      await tester.pump(const Duration(seconds: 11));
+      expect(find.text(S.scanNoConnection), findsNothing);
+    });
+
     appTest('a 12 digit scan is filled in as its 13 digit form', (
       tester,
     ) async {
@@ -1134,6 +1162,61 @@ void main() {
       await settleMore(tester);
       expect(requests, hasLength(1));
       expect(requests.single.url.path, '/api/v2/product/96385074.json');
+    });
+
+    appTest('a typed UPC-E that also passes the EAN-8 check is looked up as '
+        'its UPC-A form', (tester) async {
+      await openTyping(tester);
+      await lookUpTyped(tester, '00010054');
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      expect(requests.single.url.path, '/api/v2/product/0000100000054.json');
+    });
+
+    appTest('a food saved in the editor with such a barcode is found by a '
+        'camera scan of the same UPC-E, with no request', (tester) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openTyping(tester);
+      await lookUpTyped(tester, '00010054');
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Add it as your own food'),
+      );
+      await settle(tester);
+      final barcode = find.byWidgetPredicate(
+        (w) =>
+            w is TextField && w.decoration?.labelText == 'Barcode (optional)',
+      );
+      expect(
+        tester.widget<TextField>(barcode).controller!.text,
+        '0000100000054',
+      );
+      // The same number typed in the editor by hand is kept as its 13 digit
+      // form too.
+      await tester.enterText(barcode, '00010054');
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (w) => w is TextField && w.decoration?.labelText == 'Name',
+        ),
+        'Zorbo bar',
+      );
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (w) => w is TextField && w.decoration?.labelText == 'Calories',
+        ),
+        '210',
+      );
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await settleMore(tester);
+      final rows = await foodRows(tester);
+      expect(rows.single.barcode, '0000100000054');
+      expect(tiles(), findsOneWidget);
+      await scan(tester, '00010054', upcE: true);
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(2));
+      expect(lineOf(tester, 1).foodName, 'Zorbo bar');
     });
 
     appTest('an 8 digit number that is neither EAN-8 nor UPC-E is refused '

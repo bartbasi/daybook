@@ -42,10 +42,23 @@ class MyFoodRemoved extends MyFoodResult {
 
 final _plainNumber = RegExp(r'^(\d+\.?\d*|\.\d+)$');
 
+// A whole part that is not 0, a comma, and exactly three digits: "1,000" reads
+// as a thousand in some places and as 1 in others, so it is refused.
+final _thousandsComma = RegExp(r'^0*[1-9]\d*,\d{3}$');
+
+/// True when [text] looks like a number written with a thousands comma.
+bool hasThousandsComma(String text) => _thousandsComma.hasMatch(text.trim());
+
+/// The message for a typed number that [parseFoodNumber] refused: [plain] for
+/// anything wrong, or a note about the comma when that is the reason.
+String foodNumberProblem(String text, String plain) =>
+    hasThousandsComma(text) ? S.foodEditNumberComma : plain;
+
 /// Reads a typed number the way the weight sheet does (a comma counts as the
 /// decimal point), without its rounding. Null when it is not a plain number
-/// from 0 to 100,000.
+/// from 0 to 100,000, and for a number with a thousands comma such as "1,000".
 double? parseFoodNumber(String text) {
+  if (hasThousandsComma(text)) return null;
   final t = text.trim().replaceAll(',', '.');
   if (!_plainNumber.hasMatch(t)) return null;
   final v = double.parse(t);
@@ -193,7 +206,7 @@ class _FoodEditorState extends State<FoodEditor> {
 
   FocusNode _node(Object key) => _nodes.putIfAbsent(key, FocusNode.new);
 
-  String get _weightSuffix => _unit == _Unit.ml ? 'ml' : 'g';
+  String get _weightSuffix => _unit == _Unit.ml ? S.unitMl : S.unitG;
 
   /// Portions need a weight: the base is grams or ml, or a serving that has a
   /// weight. Without one the base is "serving" and nothing can be weighed.
@@ -230,13 +243,15 @@ class _FoodEditorState extends State<FoodEditor> {
     }
 
     final qty = parseFoodNumber(_amount.text);
-    if (qty == null || qty <= 0) errors['amount'] = S.foodEditAmountBad;
+    if (qty == null || qty <= 0) {
+      errors['amount'] = foodNumberProblem(_amount.text, S.foodEditAmountBad);
+    }
 
     double? serving;
     if (_weight.text.trim().isNotEmpty) {
       serving = parseFoodNumber(_weight.text);
       if (serving == null || serving <= 0) {
-        errors['weight'] = S.foodEditWeightBad;
+        errors['weight'] = foodNumberProblem(_weight.text, S.foodEditWeightBad);
         serving = null;
       }
     }
@@ -250,18 +265,53 @@ class _FoodEditorState extends State<FoodEditor> {
       }
       final v = parseFoodNumber(text);
       if (v == null) {
-        errors[n.id] = S.foodEditNumberBad;
+        errors[n.id] = foodNumberProblem(text, S.foodEditNumberBad);
       } else {
         typed[n.id] = v;
       }
     }
 
+    // What the typed values come to in 100 g or 100 ml, when that can be
+    // worked out: a serving with no weight has no such check.
+    if (qty != null && qty > 0) {
+      final per100 = switch (_unit) {
+        _Unit.serving => serving == null ? null : 100 / (qty * serving),
+        _ => 100 / qty,
+      };
+      if (per100 != null) {
+        final unit = _unit == _Unit.ml ? S.unitMl : S.unitG;
+        for (final n in Nutrients.tracked) {
+          final v = typed[n.id];
+          if (v == null || errors.containsKey(n.id)) continue;
+          if (n.id == Nutrients.energy) {
+            if (v * per100 > 900) errors[n.id] = S.foodEditKcalTooHigh(unit);
+          } else {
+            final grams =
+                v /
+                switch (n.unit) {
+                  'mg' => 1000,
+                  'µg' => 1000000,
+                  _ => 1,
+                };
+            if (grams * per100 > 100) {
+              errors[n.id] = S.foodEditNutrientTooHigh(unit);
+            }
+          }
+        }
+      }
+    }
+
     final portions = <PortionInput>[];
     var portionBad = false;
-    for (final p in _portions) {
+    for (var i = 0; i < _portions.length; i++) {
+      final p = _portions[i];
       final label = p.name.text.trim();
       final w = parseFoodNumber(p.weight.text);
-      if (label.isEmpty || w == null || w <= 0) {
+      if (label.toLowerCase() == 'serving') {
+        errors['portionName$i'] = S.foodEditPortionServing;
+      } else if (RegExp(r'^\d').hasMatch(label)) {
+        errors['portionName$i'] = S.foodEditPortionDigit;
+      } else if (label.isEmpty || w == null || w <= 0) {
         portionBad = true;
       } else {
         portions.add(PortionInput('1 $label', w));
@@ -319,6 +369,7 @@ class _FoodEditorState extends State<FoodEditor> {
       'amount',
       'weight',
       for (final n in Nutrients.tracked) n.id,
+      for (var i = 0; i < _portions.length; i++) 'portionName$i',
     ];
     for (final k in order) {
       if (keys.contains(k)) {
@@ -560,9 +611,9 @@ class _FoodEditorState extends State<FoodEditor> {
         keyboardType: _numberKeys,
         onChanged: (_) => setState(() {}),
         decoration: _decoration(
-          n.name,
+          S.nutrientName(n.id),
           errorKey: n.id,
-          suffix: n.unit,
+          suffix: S.nutrientUnit(n.unit),
           hint: required ? null : S.notListed,
         ),
       ),
@@ -612,8 +663,12 @@ class _FoodEditorState extends State<FoodEditor> {
         children: [
           TextField(
             controller: p.name,
+            focusNode: _node('portionName$i'),
             textCapitalization: TextCapitalization.none,
-            decoration: _decoration(S.foodEditPortionName),
+            decoration: _decoration(
+              S.foodEditPortionName,
+              errorKey: 'portionName$i',
+            ),
           ),
           const SizedBox(height: 8),
           Row(

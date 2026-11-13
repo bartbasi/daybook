@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:daybook/app_info.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
@@ -8,11 +9,16 @@ import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/data/off_client.dart';
 import 'package:daybook/screens/my_foods/food_editor.dart';
 import 'package:daybook/screens/my_foods/my_foods_screen.dart';
+import 'package:daybook/screens/food/food_line_tile.dart';
 import 'package:daybook/screens/my_foods/recipe_editor.dart';
+import 'package:daybook/strings.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
+import 'barcode_flow_test.dart' show FakeCamera, yogurt;
 import 'my_foods_harness.dart';
 
 // My foods and recipes under More (task 2.12): the list, the way into each
@@ -82,9 +88,7 @@ void main() {
 
   group('the list', () {
     h.appTest('shows foods and recipes by name, each with what it is and its '
-        'calories; cached products and archived foods are not listed', (
-      tester,
-    ) async {
+        'calories; archived foods are not listed', (tester) async {
       await makeFood(tester, 'Zorbo bar', brand: 'Mill', kcal: 450);
       await makeFood(
         tester,
@@ -125,7 +129,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Old thing'), findsNothing);
-      expect(find.text('Scanned yogurt'), findsNothing);
+      expect(find.text('Scanned yogurt'), findsOneWidget);
       // By name.
       final ys = [
         for (final n in [
@@ -325,6 +329,176 @@ void main() {
       expect(now.entries.single.entry.foodName, 'Zorbo bar');
       expect(now.entries.single.nutrients, logged.entries.single.nutrients);
       expect(now.totals, logged.totals);
+    });
+  });
+
+  group('scanned products', () {
+    const yogurtCode = '5000000000012';
+
+    Future<int> scannedProduct(WidgetTester t) => h.real(
+      t,
+      () => saveOffProduct(
+        h.db,
+        OffProduct(
+          barcode: yogurtCode,
+          name: 'Scanned yogurt',
+          brand: 'Test Dairy',
+          baseUnit: 'g',
+          nutrients: const {Nutrients.energy: 60},
+          servingQuantity: 150,
+          servingLabel: '1 container',
+          rawNutrimentsJson: '{}',
+        ),
+      ),
+    );
+
+    Finder deleteButton() => find.widgetWithText(TextButton, 'Delete');
+
+    h.appTest('a scanned product is listed, marked as scanned, with the '
+        'Open Food Facts credit, and a tap opens nothing', (tester) async {
+      await scannedProduct(tester);
+      await h.openApp(tester);
+      await h.goToList(tester);
+      expect(find.text('Scanned yogurt'), findsOneWidget);
+      expect(
+        find.text('Scanned product, Test Dairy, 60 kcal per 100 g'),
+        findsOneWidget,
+      );
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsOneWidget);
+      await tester.tap(find.text('Scanned yogurt'));
+      await settle(tester);
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(find.byType(RecipeEditor), findsNothing);
+      expect(find.byType(MyFoodsScreen), findsOneWidget);
+      final del = tester.getSize(deleteButton());
+      expect(del.height, greaterThanOrEqualTo(48));
+      expect(del.width, greaterThanOrEqualTo(48));
+    });
+
+    h.appTest('Delete takes it off the list with Undo; Undo brings it back '
+        'with its barcode, once', (tester) async {
+      final id = await scannedProduct(tester);
+      await h.openApp(tester);
+      await h.goToList(tester);
+      await h.tap(tester, deleteButton());
+      expect(find.text('"Scanned yogurt" deleted.'), findsOneWidget);
+      expect(find.text('Scanned yogurt'), findsNothing);
+      var d = await reload(tester, id);
+      expect(d.food.archived, isTrue);
+      expect(d.food.barcode, isNull);
+      expect(
+        await h.real(tester, () => findFoodByBarcode(h.db, yogurtCode)),
+        isNull,
+      );
+      await tester.tap(find.text('Undo'));
+      await tester.tap(find.text('Undo'), warnIfMissed: false);
+      await settle(tester);
+      d = await reload(tester, id);
+      expect(d.food.archived, isFalse);
+      expect(d.food.barcode, yogurtCode);
+      expect(find.text('Scanned yogurt'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+    });
+
+    h.appTest('after Delete a new scan sends one request and adds the '
+        'product again', (tester) async {
+      await scannedProduct(tester);
+      final requests = <http.Request>[];
+      final camera = FakeCamera();
+      await h.openApp(
+        tester,
+        camera: camera,
+        offClient: OffClient(
+          MockClient((r) async {
+            requests.add(r);
+            return http.Response(yogurt(), 200);
+          }),
+          userAgent: offUserAgent(appVersion),
+        ),
+      );
+      await h.goToList(tester);
+      await h.tap(tester, deleteButton());
+      expect(find.text('Scanned yogurt'), findsNothing);
+      await tester.pageBack();
+      await settle(tester);
+      await h.tap(tester, find.widgetWithText(NavigationDestination, 'Today'));
+      await h.tap(tester, find.widgetWithText(FilledButton, '+ Food'));
+      await h.tap(tester, find.widgetWithText(OutlinedButton, 'Scan'));
+      camera.emit(yogurtCode);
+      for (var i = 0; i < 4; i++) {
+        await settle(tester);
+      }
+      expect(requests, hasLength(1));
+      expect(find.byType(FoodLineTile), findsOneWidget);
+      final rows = await h.real(tester, () => h.db.select(h.db.foods).get());
+      expect(rows.where((f) => f.barcode == yogurtCode), hasLength(1));
+      expect(rows.where((f) => f.kind == 'off' && !f.archived), hasLength(1));
+      expect(rows, hasLength(2));
+    });
+
+    h.appTest('a logged meal that used the product is unchanged by Delete and '
+        'by Undo', (tester) async {
+      final id = await scannedProduct(tester);
+      final slot = (await h.real(
+        tester,
+        () => h.db.select(h.db.mealSlots).get(),
+      )).first.id;
+      final logged = await h.real(
+        tester,
+        () => h.db.saveMeal(
+          now: nowFixed,
+          localDate: '2026-11-12',
+          slotId: slot,
+          lines: [
+            MealLineInput(
+              foodRef: 'local:$id',
+              foodName: 'Scanned yogurt',
+              quantity: 1,
+              unitLabel: '1 container',
+              baseQuantity: 150,
+              baseUnit: 'g',
+              nutrients: const {Nutrients.energy: 90},
+            ),
+          ],
+        ),
+      );
+      await h.openApp(tester);
+      await h.goToList(tester);
+      await h.tap(tester, deleteButton());
+      Future<StoredMeal> reread() async {
+        final StoredMeal? m = await h.real(
+          tester,
+          () => h.db.loadMeal(logged.meal.id),
+        );
+        return m!;
+      }
+
+      var now = await reread();
+      expect(now.entries.single.entry.foodName, 'Scanned yogurt');
+      expect(now.entries.single.nutrients, logged.entries.single.nutrients);
+      expect(now.totals, logged.totals);
+      await h.tap(tester, find.text('Undo'));
+      now = await reread();
+      expect(now.entries.single.nutrients, logged.entries.single.nutrients);
+      expect(now.totals, logged.totals);
+    });
+  });
+
+  group('the row words', () {
+    h.appTest('a row is read as its name and what it is, with no added '
+        '"Double tap to edit"', (tester) async {
+      await makeFood(tester, 'Zorbo bar', brand: 'Mill', kcal: 450);
+      await h.openApp(tester);
+      await h.goToList(tester);
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Semantics &&
+              w.properties.label == 'Zorbo bar. Mill, 450 kcal per 100 g.',
+        ),
+        findsOneWidget,
+      );
+      expect(S.myFoodRowLabel('A', 'b'), 'A. b.');
     });
   });
 

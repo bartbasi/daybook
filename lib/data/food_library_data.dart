@@ -190,6 +190,16 @@ class FoodDetail {
   }
 }
 
+/// A recipe saved with an ingredient that is, or holds further down, the recipe
+/// itself. [index] is the ingredient's place in the list (0 is the first).
+class RecipeCycleException implements Exception {
+  const RecipeCycleException(this.index);
+  final int index;
+
+  @override
+  String toString() => 'RecipeCycleException';
+}
+
 /// The label of the portion that holds a serving's weight.
 const servingLabel = '1 serving';
 
@@ -593,7 +603,7 @@ extension FoodLibraryData on AppDatabase {
   /// of its ingredient lines. The ingredients are stored in order.
   Future<FoodDetail> createRecipe(RecipeInput r, Now now) =>
       transaction(() async {
-        _checkRecipe(r);
+        await _checkRecipe(r);
         final id = await into(foods).insert(
           FoodsCompanion.insert(
             kind: 'recipe',
@@ -610,7 +620,7 @@ extension FoodLibraryData on AppDatabase {
 
   Future<FoodDetail> editRecipe(int id, RecipeInput r, Now now) =>
       transaction(() async {
-        _checkRecipe(r);
+        await _checkRecipe(r, selfId: id);
         final old = await loadFood(id);
         if (old == null || old.food.kind != 'recipe') {
           throw StateError('No such recipe');
@@ -627,12 +637,43 @@ extension FoodLibraryData on AppDatabase {
         return (await loadFood(id))!;
       });
 
-  void _checkRecipe(RecipeInput r) {
+  /// Refuses a recipe that cannot be saved. For a recipe being changed
+  /// ([selfId]), any ingredient `local:<id>` that is that recipe, or holds it
+  /// at any depth, throws [RecipeCycleException] (a cycle would add the recipe
+  /// to its own totals on every save). Called inside the transaction, so the
+  /// recipes it reads are the ones the write then replaces.
+  Future<void> _checkRecipe(RecipeInput r, {int? selfId}) async {
     if (r.ingredients.any((i) => i.nutrients.isEmpty)) {
       throw ArgumentError('Every ingredient needs its nutrients');
     }
     if (r.name.trim().isEmpty) throw ArgumentError('A recipe needs a name');
     if (!(r.servings > 0)) throw ArgumentError('A recipe makes some servings');
+    if (selfId == null) return;
+    final seen = <int>{};
+    for (var k = 0; k < r.ingredients.length; k++) {
+      final id = _localId(r.ingredients[k].foodRef);
+      if (id != null && await _reaches(id, selfId, seen)) {
+        throw RecipeCycleException(k);
+      }
+    }
+  }
+
+  int? _localId(String ref) =>
+      ref.startsWith('local:') ? int.tryParse(ref.substring(6)) : null;
+
+  /// True when recipe [from] is [target] or holds it, followed all the way
+  /// down. [seen] keeps a loop already stored from being followed forever.
+  Future<bool> _reaches(int from, int target, Set<int> seen) async {
+    if (from == target) return true;
+    if (!seen.add(from)) return false;
+    final rows = await (select(
+      recipeIngredients,
+    )..where((i) => i.recipeFoodId.equals(from))).get();
+    for (final row in rows) {
+      final id = _localId(row.foodRef);
+      if (id != null && await _reaches(id, target, seen)) return true;
+    }
+    return false;
   }
 
   Future<void> _writeRecipeBody(int id, RecipeInput r) async {
@@ -732,14 +773,14 @@ extension FoodLibraryData on AppDatabase {
     ];
   }
 
-  /// The user's custom foods and recipes by name, for the "My foods and
-  /// recipes" screen. Cached Open Food Facts products are not listed.
-  /// Archived ones only with [includeArchived].
+  /// The user's custom foods and recipes and the Open Food Facts products
+  /// scanned on this phone (kind 'off'), by name, for the "My foods and
+  /// recipes" screen. Archived ones only with [includeArchived].
   Future<List<FoodDetail>> myFoods({bool includeArchived = false}) async {
     final rows =
         await (select(foods)..where(
               (f) =>
-                  f.kind.isIn(const ['custom', 'recipe']) &
+                  f.kind.isIn(const ['custom', 'recipe', 'off']) &
                   (includeArchived
                       ? const Constant(true)
                       : f.archived.equals(false)),

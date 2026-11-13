@@ -130,7 +130,7 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
     _clock = scope.clock;
     _parser = scope.parser;
     _attach();
-    if (_pricing) unawaited(_priceStored());
+    if (_pricing) unawaited(_priceAgain());
   }
 
   @override
@@ -147,37 +147,44 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
 
   // Pricing a reopened recipe's ingredients again.
 
-  /// Each stored ingredient priced again from the food data: its own amount
-  /// first, then the same weight. One that cannot be priced stays as it is,
-  /// with no numbers, and Save refuses until it is removed or changed.
-  Future<void> _priceStored() async {
-    final r = widget.recipe!;
-    final w = await sheetWorker();
-    final lines = <AddedLine>[];
-    for (var k = 0; k < r.ingredients.length; k++) {
-      final i = r.ingredients[k];
-      Line? l;
-      if (w != null) {
-        for (final (q, u) in [
-          (i.quantity, i.unitLabel),
-          (i.baseQuantity, i.baseUnit == 'serving' ? '' : i.baseUnit),
-        ]) {
-          final got = await _guard<Line?>(
-            () => w.foodLine(i.foodRef, quantity: q, unit: u),
-          );
-          if (got != null && !got.markers.contains(Marker.assumed)) {
-            l = got;
-            break;
-          }
-        }
+  /// Each ingredient that has no numbers is priced again from the food data,
+  /// by the rules of the food screen ([_price]): its own amount, then the same
+  /// weight in grams, then the food's usual amount (with the reset note). One
+  /// that cannot be priced stays as it is, marked in words, and Save refuses
+  /// until it is removed or changed. Taps and changes to the ingredients are
+  /// ignored while this runs (`_pricing`), so the list is the one this started
+  /// with when it ends.
+  Future<void> _priceAgain() async {
+    final start = _items;
+    final out = <AddedLine>[];
+    var reset = false;
+    for (final a in start) {
+      final old = a.line;
+      final ref = old.foodRef;
+      if (old.nutrients.isNotEmpty || ref == null) {
+        out.add(a);
+        continue;
       }
-      lines.add(l == null ? _items[k] : AddedLine(l));
+      final q = old.quantity;
+      final priced = await _price(
+        ref,
+        tries: [if (q != null) AmountTry(q, old.unitLabel ?? '')],
+        grams: old.baseUnit == 'g' ? old.baseQuantity : null,
+        keepBaseUnit: old.baseUnit,
+      );
+      if (priced == null) {
+        out.add(a);
+        continue;
+      }
+      reset = reset || priced.reset;
+      out.add(AddedLine(priced.line));
     }
     if (!mounted) return;
     setState(() {
-      _items = lines;
+      if (identical(_items, start)) _items = out;
       _pricing = false;
     });
+    if (reset) sheetNote(S.foodSheetAmountReset);
     _changes.fire();
   }
 
@@ -254,6 +261,12 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
       _dead = false;
     });
     _attach(picks: picks);
+    // A worker that was dead, or food data that failed, when the recipe
+    // opened left ingredients with no numbers: price them again.
+    if (!_pricing && _items.any((a) => a.line.nutrients.isEmpty)) {
+      setState(() => _pricing = true);
+      unawaited(_priceAgain());
+    }
   }
 
   int _cursor() {
@@ -424,7 +437,12 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
         bad = true;
       }
       if (servings == null) {
-        setState(() => _servingsError = S.recipeServingsBad);
+        setState(
+          () => _servingsError = foodNumberProblem(
+            _servings.text,
+            S.recipeServingsBad,
+          ),
+        );
         bad = true;
       }
       if (bad) return;
@@ -452,8 +470,11 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
         setState(() => _error = S.recipeNeedsIngredients);
         return;
       }
-      if (ingredients.any((i) => i.nutrients.isEmpty)) {
-        setState(() => _error = S.recipeIngredientUnpriced);
+      final unpriced = ingredients.where((i) => i.nutrients.isEmpty);
+      if (unpriced.isNotEmpty) {
+        setState(
+          () => _error = S.recipeIngredientUnpriced(unpriced.first.foodName),
+        );
         return;
       }
       final FoodDetail saved;
@@ -468,6 +489,14 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
         saved = old == null
             ? await _db.createRecipe(input, _clock())
             : await _db.editRecipe(old.food.id, input, _clock());
+      } on RecipeCycleException catch (e) {
+        if (mounted) {
+          setState(
+            () =>
+                _error = S.recipeContainsItself(ingredients[e.index].foodName),
+          );
+        }
+        return;
       } catch (_) {
         if (mounted) setState(() => _error = S.recipeFailed);
         return;
@@ -509,13 +538,13 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
   // The correction sheet.
 
   void _onTap(LineTap tap) {
-    if (_busy) return;
+    if (_busy || _pricing) return;
     if (tap.text != null && tap.text != _box.text) return;
     unawaited(_openSheet(tap));
   }
 
   Future<void> _openSheet(LineTap tap) async {
-    if (_sheetOpen || !mounted) return;
+    if (_sheetOpen || !mounted || _pricing) return;
     final hadFocus = _focus.hasFocus;
     _note = null;
     _sheetOpen = true;
@@ -602,23 +631,26 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
 
   /// Prices [ref] keeping the amount: each of [tries], then the same weight,
   /// then the food's usual amount (reset is then true). A line that comes back
-  /// Assumed is a refusal in the first two steps.
+  /// Assumed is a refusal in the first two steps. With [keepBaseUnit] (the
+  /// unit an ingredient was stored in), so is a line in another base unit:
+  /// the food no longer means by that amount what it meant.
   Future<({Line line, bool reset})?> _price(
     String ref, {
     List<AmountTry> tries = const [],
     double? grams,
+    String? keepBaseUnit,
   }) async {
+    bool taken(Line? l) =>
+        l != null &&
+        !l.markers.contains(Marker.assumed) &&
+        (keepBaseUnit == null || l.baseUnit == keepBaseUnit);
     for (final t in tries) {
       final l = await _foodLine(ref, quantity: t.quantity, unit: t.unit);
-      if (l != null && !l.markers.contains(Marker.assumed)) {
-        return (line: l, reset: false);
-      }
+      if (taken(l)) return (line: l!, reset: false);
     }
     if (grams != null) {
       final l = await _foodLine(ref, quantity: grams, unit: 'g');
-      if (l != null && !l.markers.contains(Marker.assumed)) {
-        return (line: l, reset: false);
-      }
+      if (taken(l)) return (line: l!, reset: false);
     }
     final l = await _foodLine(ref);
     if (l == null) return null;
@@ -643,7 +675,7 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
   /// Replaces an ingredient with [newLine], or removes it when null.
   bool _applyToItem(LineTap tap, Line? newLine) {
     final i = _items.indexWhere((a) => identical(a, tap.added));
-    if (i < 0) {
+    if (_pricing || i < 0) {
       _stale();
       return false;
     }
@@ -764,6 +796,7 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
       tries: [if (m != null && m != 1) AmountTry(m, '')],
     );
     if (priced == null) return _refused(S.foodSheetRefusedFood);
+    if (_pricing) return _stale();
     final t = _typedTarget(tap);
     if (t == null) return;
     final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
@@ -848,6 +881,17 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
           header: true,
           child: Text(S.recipeIngredients, style: theme.textTheme.titleSmall),
         ),
+        if (_pricing)
+          Semantics(
+            liveRegion: true,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                S.recipePricing,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
         if (_items.isEmpty && typed.isEmpty)
           const Text(S.recipeIngredientsEmpty),
         for (var i = 0; i < _items.length; i++) _itemTile(i),
@@ -880,9 +924,15 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
 
   Widget _itemTile(int i) {
     final a = _items[i];
+    // An ingredient with no numbers (after pricing) is drawn as a line that
+    // was not found: its outline, its words, and "Not counted".
+    final unpriced = !_pricing && a.line.nutrients.isEmpty;
     return FoodLineTile(
-      line: a.line,
-      onTap: () => _onTap(LineTap(line: a.line, addedIndex: i, added: a)),
+      line: unpriced ? a.line.copyWith(state: LineState.notFound) : a.line,
+      typed: a.line.foodName ?? '',
+      onTap: _pricing
+          ? null
+          : () => _onTap(LineTap(line: a.line, addedIndex: i, added: a)),
     );
   }
 

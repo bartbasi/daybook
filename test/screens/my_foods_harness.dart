@@ -4,6 +4,8 @@
 import 'dart:io';
 
 import 'package:daybook/app.dart';
+import 'package:daybook/data/off_client.dart';
+import 'package:daybook/platform/barcode.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/parser/parser.dart';
@@ -33,6 +35,10 @@ class MyFoodsHarness {
   late List<FakeLink> links;
   var useLink = false;
 
+  /// How many of the next linked workers stop at once, as if the food data
+  /// could not be read.
+  var crashStarts = 0;
+
   void register() {
     driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
     setUpAll(() {
@@ -55,6 +61,7 @@ class MyFoodsHarness {
       db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
       links = [];
       useLink = false;
+      crashStarts = 0;
     });
   }
 
@@ -81,6 +88,8 @@ class MyFoodsHarness {
   Future<void> openApp(
     WidgetTester tester, {
     Size size = const Size(400, 800),
+    BarcodeCamera? camera,
+    OffClient? offClient,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -91,9 +100,12 @@ class MyFoodsHarness {
         db: db,
         clock: () => nowFixed,
         foodsPath: Future.value('unused'),
+        camera: camera ?? const ZxingCamera(),
+        offClient: offClient,
         workerFactory: (_) {
           if (!useLink) return ParseWorker.inlineWith(parser);
-          final link = FakeLink(parser);
+          final link = FakeLink(parser)..crashOnStart = crashStarts > 0;
+          if (crashStarts > 0) crashStarts--;
           links.add(link);
           return ParseWorker.linked(link);
         },

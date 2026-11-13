@@ -1549,7 +1549,7 @@ void main() {
       expect((await db.myFoods()).length, 1);
     });
 
-    test('the My foods list has custom foods and recipes by name, not cached products', () async {
+    test('the My foods list has custom foods, recipes and scanned products by name', () async {
       Future<void> custom(String name) => db.createCustomFood(
         CustomFoodInput(
           name: name,
@@ -1581,10 +1581,16 @@ void main() {
         (l) => seen.add([for (final f in l) f.food.name]),
       );
       await pumpEventQueue();
-      expect(seen.last, ['Apple pie', 'banana bread', 'Chili']);
+      expect(seen.last, ['Apple pie', 'banana bread', 'Chili', 'Scanned']);
       await custom('Cherry');
       await pumpEventQueue();
-      expect(seen.last, ['Apple pie', 'banana bread', 'Cherry', 'Chili']);
+      expect(seen.last, [
+        'Apple pie',
+        'banana bread',
+        'Cherry',
+        'Chili',
+        'Scanned',
+      ]);
       await sub.cancel();
     });
   });
@@ -1728,6 +1734,83 @@ void main() {
       final back = (await db.loadFood(r.food.id))!;
       expect(back.food.name, 'R');
       expect(back.nutrients, {kcal: 400});
+    });
+
+    MealLineInput recipeLine(int id) =>
+        ml('local:$id', name: 'Chili', n: {kcal: 100});
+
+    test('a recipe cannot contain itself: refused, nothing changes', () async {
+      final r = await db.createRecipe(
+        RecipeInput(name: 'Chili', servings: 4, ingredients: ingredients),
+        today,
+      );
+      await expectLater(
+        db.editRecipe(
+          r.food.id,
+          RecipeInput(
+            name: 'Chili',
+            servings: 4,
+            ingredients: [ingredients.first, recipeLine(r.food.id)],
+          ),
+          today,
+        ),
+        throwsA(isA<RecipeCycleException>().having((e) => e.index, 'index', 1)),
+      );
+      final back = (await db.loadFood(r.food.id))!;
+      expect(back.ingredients, hasLength(5));
+      expect(back.nutrients, r.nutrients);
+    });
+
+    test('a cycle two or more steps down is refused, a plain nesting is '
+        'allowed', () async {
+      final a = await db.createRecipe(
+        RecipeInput(name: 'A', servings: 1, ingredients: ingredients),
+        today,
+      );
+      final b = await db.createRecipe(
+        RecipeInput(
+          name: 'B',
+          servings: 1,
+          ingredients: [recipeLine(a.food.id)],
+        ),
+        today,
+      );
+      final c = await db.createRecipe(
+        RecipeInput(
+          name: 'C',
+          servings: 1,
+          ingredients: [recipeLine(b.food.id)],
+        ),
+        today,
+      );
+      // B holds A, so A may not hold B (two steps), nor C (three steps).
+      for (final other in [b, c]) {
+        await expectLater(
+          db.editRecipe(
+            a.food.id,
+            RecipeInput(
+              name: 'A',
+              servings: 1,
+              ingredients: [ingredients.first, recipeLine(other.food.id)],
+            ),
+            today,
+          ),
+          throwsA(
+            isA<RecipeCycleException>().having((e) => e.index, 'index', 1),
+          ),
+        );
+        expect((await db.loadFood(a.food.id))!.ingredients, hasLength(5));
+      }
+      // Holding both of two recipes that share an ingredient is no cycle.
+      final d = await db.createRecipe(
+        RecipeInput(
+          name: 'D',
+          servings: 1,
+          ingredients: [recipeLine(a.food.id), recipeLine(b.food.id)],
+        ),
+        today,
+      );
+      expect(d.ingredients, hasLength(2));
     });
 
     test('servings must be more than zero, a recipe needs a name', () {

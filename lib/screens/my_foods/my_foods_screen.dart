@@ -16,11 +16,12 @@ import '../food/confirm_bar.dart';
 import 'food_editor.dart';
 import 'recipe_editor.dart';
 
-/// The foods and recipes the user made, under More. One row for each, by name,
-/// with its calories. A tap opens the right editor; "+ New" asks for a food or
-/// a recipe. A delete from an editor comes back here with Undo for 10
-/// seconds. Products scanned from Open Food Facts are not listed: the frames
-/// draw no list, and these are not the user's to edit.
+/// The foods and recipes the user made, and the products scanned from Open
+/// Food Facts, under More. One row for each, by name, with its calories. A tap
+/// opens the right editor; "+ New" asks for a food or a recipe. A scanned
+/// product is read only: it says it is scanned, carries the Open Food Facts
+/// credit, and has a Delete (the next scan of its barcode fetches it again).
+/// A delete comes back here with Undo for 10 seconds.
 class MyFoodsScreen extends StatefulWidget {
   const MyFoodsScreen({super.key});
 
@@ -43,6 +44,7 @@ class _MyFoodsScreenState extends State<MyFoodsScreen> {
   _Notice? _notice;
   Timer? _timer;
   var _opening = false;
+  var _deleting = false;
 
   @override
   void didChangeDependencies() {
@@ -105,19 +107,40 @@ class _MyFoodsScreenState extends State<MyFoodsScreen> {
         // From the row read back, not from what was typed.
         _show(_Notice(S.myFoodSaved(food.food.name)));
       case MyFoodRemoved(:final food, :final barcode):
-        _show(
-          _Notice(S.myFoodDeleted(food.food.name), () async {
-            final back = await _db.archiveFood(
-              food.food.id,
-              _clock(),
-              archived: false,
-              restoreBarcode: barcode,
-            );
-            if (mounted && barcode != null && back.food.barcode != barcode) {
-              _show(_Notice(S.myFoodBarcodeTaken(back.food.name)));
-            }
-          }),
+        _showRemoved(food, barcode);
+    }
+  }
+
+  /// The message after a delete, with Undo: it brings the food back and puts
+  /// its [barcode] back unless another food has it now.
+  void _showRemoved(FoodDetail food, String? barcode) {
+    _show(
+      _Notice(S.myFoodDeleted(food.food.name), () async {
+        final back = await _db.archiveFood(
+          food.food.id,
+          _clock(),
+          archived: false,
+          restoreBarcode: barcode,
         );
+        if (mounted && barcode != null && back.food.barcode != barcode) {
+          _show(_Notice(S.myFoodBarcodeTaken(back.food.name)));
+        }
+      }),
+    );
+  }
+
+  /// Delete on a scanned product. One at a time. The barcode is freed, so the
+  /// next scan of it fetches the product again.
+  Future<void> _deleteScanned(FoodDetail f) async {
+    if (_deleting) return;
+    _deleting = true;
+    try {
+      final gone = await _db.archiveFood(f.food.id, _clock());
+      if (mounted) _showRemoved(gone, f.food.barcode);
+    } catch (_) {
+      if (mounted) _show(const _Notice(S.myFoodDeleteFailed));
+    } finally {
+      _deleting = false;
     }
   }
 
@@ -197,14 +220,61 @@ class _MyFoodsScreenState extends State<MyFoodsScreen> {
         kcal == null || servings <= 0 ? null : kcal / servings,
       );
     }
-    return S.foodRowSub(f.food.brand, kcal, switch (f.basis) {
+    final basis = switch (f.basis) {
       FoodBasis.perServing => S.basisServing,
       FoodBasis.per100g => S.basisPer100g,
       FoodBasis.per100ml => S.basisPer100ml,
-    });
+    };
+    if (f.food.kind == 'off') return S.scannedRowSub(f.food.brand, kcal, basis);
+    return S.foodRowSub(f.food.brand, kcal, basis);
+  }
+
+  /// A scanned product: words and a Delete, nothing to open.
+  Widget _scannedRow(BuildContext context, FoodDetail f) {
+    final sub = _sub(f);
+    final small = Theme.of(context).textTheme.bodyMedium;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              container: true,
+              label: S.scannedRowLabel(f.food.name, sub),
+              excludeSemantics: true,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      f.food.name,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(sub, style: small),
+                    Text(S.offCredit, style: small),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Semantics(
+            label: S.scannedDeleteLabel(f.food.name),
+            excludeSemantics: true,
+            button: true,
+            child: TextButton(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              onPressed: () => _deleteScanned(f),
+              child: const Text(S.scannedDelete),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _row(BuildContext context, FoodDetail f) {
+    if (f.food.kind == 'off') return _scannedRow(context, f);
     final sub = _sub(f);
     return Semantics(
       container: true,

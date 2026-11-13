@@ -26,13 +26,15 @@ String barcodeForm(String code, {bool upcE = false}) {
   return c;
 }
 
-/// True when [code] is an 8 digit number that is not a valid EAN-8 but is a
-/// valid UPC-E: it starts with 0 or 1 and its UPC-A expansion has a good check
-/// digit. Submit such a number with `upcE: true`.
+/// True when [code] is an 8 digit number to be read as a UPC-E: it starts with
+/// 0 or 1 and its UPC-A expansion has a good check digit. A code starting with
+/// 0 is a UPC-E whether or not it also passes the EAN-8 check (more than half
+/// of them do), so it is an EAN-8 only when the expansion fails. A code
+/// starting with 1 is an EAN-8 first, and a UPC-E only when it is not a valid
+/// EAN-8. Any other 8 digit code is an EAN-8. Submit a UPC-E with `upcE: true`.
 bool isUpcE(String code) {
-  if (!RegExp(r'^[01]\d{7}$').hasMatch(code) || barcodeCheckOk(code)) {
-    return false;
-  }
+  if (!RegExp(r'^[01]\d{7}$').hasMatch(code)) return false;
+  if (code.startsWith('1') && barcodeCheckOk(code)) return false;
   return barcodeCheckOk(barcodeForm(code, upcE: true).substring(1));
 }
 

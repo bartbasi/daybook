@@ -65,6 +65,21 @@ class FakeLink implements WorkerLink {
   var hold = false;
   final held = <WorkerReply>[];
 
+  /// While true, the answer to a new user snapshot is kept, not given. Every
+  /// request that was sent is in [sent].
+  var holdSnapshots = false;
+  final heldSnapshots = <WorkerReply>[];
+  final sent = <WorkerRequest>[];
+
+  void releaseSnapshots() {
+    holdSnapshots = false;
+    final now = [...heldSnapshots];
+    heldSnapshots.clear();
+    for (final r in now) {
+      reply!(r);
+    }
+  }
+
   void release() {
     hold = false;
     final now = [...held];
@@ -91,6 +106,7 @@ class FakeLink implements WorkerLink {
 
   @override
   void send(WorkerRequest request) {
+    sent.add(request);
     if (refuseRewrite && request is RewriteRequest) {
       reply!(EditResult(request.id, null, request.cursor));
       return;
@@ -107,6 +123,8 @@ class FakeLink implements WorkerLink {
     if (r == null) return;
     if (hold && request is TextRequest) {
       held.add(r);
+    } else if (holdSnapshots && request is SnapshotRequest) {
+      heldSnapshots.add(r);
     } else if (holdPicks && request is PickRequest) {
       heldPicks.add(r);
     } else {
@@ -1800,6 +1818,32 @@ void main() {
       await tester.pump();
       await tap(tester, find.widgetWithText(FilledButton, 'Save'));
       await settle(tester);
+      expect(editor(), findsNothing);
+      expect(find.text('Your pick'), findsOneWidget);
+      expect(tileOf('zorbo'), findsOneWidget);
+    });
+
+    appTest('the pick waits for the snapshot that holds the new food: with its '
+        'answer held, no pick is sent; once it comes the line is Your pick', (
+      tester,
+    ) async {
+      useLink = true;
+      await toCreate(tester);
+      await tester.enterText(editorField('Calories'), '120');
+      await tester.pump();
+      links.single.holdSnapshots = true;
+      await tap(tester, find.widgetWithText(FilledButton, 'Save'));
+      await settle(tester);
+      expect(
+        links.single.sent.whereType<SnapshotRequest>(),
+        hasLength(greaterThan(0)),
+      );
+      expect(links.single.heldSnapshots, isNotEmpty);
+      expect(links.single.sent.whereType<PickRequest>(), isEmpty);
+      expect(find.text('Your pick'), findsNothing);
+      links.single.releaseSnapshots();
+      await settle(tester);
+      expect(links.single.sent.whereType<PickRequest>(), hasLength(1));
       expect(editor(), findsNothing);
       expect(find.text('Your pick'), findsOneWidget);
       expect(tileOf('zorbo'), findsOneWidget);

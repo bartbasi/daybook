@@ -604,7 +604,7 @@ class S {
 
   // My foods and recipes (food-editor frames 1 and 2).
   static const moreMyFoods = 'My foods and recipes';
-  static const moreMyFoodsSub = 'Foods you made and recipes';
+  static const moreMyFoodsSub = 'Foods you made, recipes, scanned products';
   static const myFoodsTitle = 'My foods and recipes';
   static const myFoodsNew = '+ New';
   static const myFoodsNewLabel = 'New food or recipe';
@@ -636,13 +636,21 @@ class S {
   static const basisPer100g = 'per 100 g';
   static const basisPer100ml = 'per 100 ml';
 
+  /// 'Scanned product, Brand, 60 kcal per 100 g'.
+  static String scannedRowSub(String? brand, double? kcalValue, String basis) =>
+      'Scanned product, ${brand == null ? '' : '$brand, '}${kcal(kcalValue)} '
+      '$basis';
+  static const scannedDelete = 'Delete';
+  static String scannedDeleteLabel(String name) => 'Delete $name';
+  static String scannedRowLabel(String name, String sub) =>
+      '$name. $sub. $offCredit.';
+
   /// 'Recipe, 4 servings, 309 kcal a serving'.
   static String recipeRowSub(double servings, double? kcalPerServing) =>
       'Recipe, ${servingsText(servings)}, ${kcal(kcalPerServing)} a serving';
   static String servingsText(double n) =>
       n == 1 ? '1 serving' : '${quantityText(n)} servings';
-  static String myFoodRowLabel(String name, String sub) =>
-      '$name. $sub. Double tap to edit.';
+  static String myFoodRowLabel(String name, String sub) => '$name. $sub.';
 
   /// A number typed back into a field: up to 4 decimals, no trailing zeros.
   static String numberText(double v) => _trimmed(v, 4);
@@ -667,6 +675,60 @@ class S {
   static const foodEditWeightBad = 'Enter a weight above 0, or leave it empty.';
   static const foodEditCaloriesEmpty = 'Enter the calories.';
   static const foodEditNumberBad = 'Enter a number, or leave it empty.';
+  static const foodEditNumberComma =
+      'Type it without the comma, for example 1000. A comma is read as a '
+      'decimal point.';
+  static String foodEditKcalTooHigh(String unit) =>
+      'That works out to more than 900 kcal in 100 $unit, which no food has. '
+      'Check the amount and the calories.';
+  static String foodEditNutrientTooHigh(String unit) =>
+      'That works out to more than 100 g in 100 $unit, which cannot be. '
+      'Check the amount and this number.';
+  static const foodEditPortionServing =
+      'Pick another name. A serving already has its own portion.';
+  static const foodEditPortionDigit =
+      'Start the name with a letter, for example "slice".';
+
+  // Nutrient names and unit words as the food editor shows them.
+  static const unitKcal = 'kcal';
+  static const unitG = 'g';
+  static const unitMl = 'ml';
+  static const unitMg = 'mg';
+  static const unitMcg = 'µg';
+  static String nutrientUnit(String unit) => switch (unit) {
+    'kcal' => unitKcal,
+    'g' => unitG,
+    'mg' => unitMg,
+    'µg' => unitMcg,
+    _ => unit,
+  };
+  static String nutrientName(int id) => switch (id) {
+    1008 => 'Calories',
+    1003 => 'Protein',
+    1005 => 'Carbs',
+    1004 => 'Fat',
+    1079 => 'Fiber',
+    2000 => 'Sugar',
+    1235 => 'Added sugar',
+    1258 => 'Saturated fat',
+    1257 => 'Trans fat',
+    1253 => 'Cholesterol',
+    1093 => 'Sodium',
+    1092 => 'Potassium',
+    1087 => 'Calcium',
+    1089 => 'Iron',
+    1090 => 'Magnesium',
+    1095 => 'Zinc',
+    1106 => 'Vitamin A',
+    1162 => 'Vitamin C',
+    1114 => 'Vitamin D',
+    1109 => 'Vitamin E',
+    1185 => 'Vitamin K',
+    1175 => 'Vitamin B6',
+    1178 => 'Vitamin B12',
+    1190 => 'Folate',
+    _ => '',
+  };
   static const foodEditFix =
       'Some fields need a look. Each one says what is wrong.';
   static const foodEditMore = 'More nutrients';
@@ -696,9 +758,13 @@ class S {
   static const recipeServingsBad =
       'Enter how many servings it makes, a number above 0.';
   static const recipeNeedsIngredients = 'Add at least one ingredient.';
-  static const recipeIngredientUnpriced =
-      'An ingredient could not be worked out. Tap it to remove it or pick '
-      'another food.';
+  static String recipeIngredientUnpriced(String name) =>
+      'Could not work out "$name". Tap it to remove it or pick another food.';
+  static const recipePricing =
+      'Working out the amounts again. You can change ingredients when that is '
+      'done.';
+  static String recipeContainsItself(String name) =>
+      'A recipe cannot contain itself. Take "$name" out of the ingredients.';
   static const recipeFailed = 'Could not save the recipe. Try again.';
   static String recipeKcalServing(double kcalValue) =>
       '${count(kcalValue.round())} kcal a serving';

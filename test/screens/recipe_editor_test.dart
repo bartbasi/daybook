@@ -12,6 +12,7 @@ import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
 import 'package:daybook/screens/my_foods/recipe_editor.dart';
+import 'package:daybook/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -372,16 +373,18 @@ void main() {
       );
       await h.openApp(tester);
       await openRecipe(tester, 'Turkey chili');
+      // The line says in words what is wrong with it, not only "- kcal".
+      expect(find.text('Not found'), findsOneWidget);
       await h.tap(tester, h.saveButton());
       expect(
         find.text(
-          'An ingredient could not be worked out. Tap it to remove it or '
-          'pick another food.',
+          'Could not work out "Gone food". Tap it to remove it or pick '
+          'another food.',
         ),
         findsOneWidget,
       );
       expect(find.byType(RecipeEditor), findsOneWidget);
-      await h.tap(tester, find.widgetWithText(FoodLineTile, 'Gone food'));
+      await h.tap(tester, tileNamed('Gone'));
       await h.tap(tester, inSheet(find.text('Remove from meal')));
       await h.tap(tester, h.saveButton());
       expect(find.byType(RecipeEditor), findsNothing);
@@ -567,6 +570,263 @@ void main() {
       h.gate.failInsert = false;
       await h.tap(tester, h.saveButton());
       expect(find.byType(RecipeEditor), findsNothing);
+    });
+  });
+
+  group('a recipe cannot contain itself', () {
+    h.appTest('typing the recipe into its own ingredients is refused on Save '
+        'with a plain message, and nothing is written', (tester) async {
+      final r = await makeRecipe(tester);
+      await h.openApp(tester);
+      await openRecipe(tester, 'Turkey chili');
+      final before = await reload(tester, r.food.id);
+      await type(tester, '1 serving chili');
+      await settle(tester);
+      expect(tiles(), findsNWidgets(3));
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(RecipeEditor), findsOneWidget);
+      expect(find.text(S.recipeContainsItself('Turkey chili')), findsOneWidget);
+      final after = await reload(tester, r.food.id);
+      expect(after.ingredients.length, before.ingredients.length);
+      expect(after.nutrients, before.nutrients);
+      expect(after.food.updatedAtMs, before.food.updatedAtMs);
+      // Taking the line out lets it save.
+      await h.tap(tester, find.widgetWithText(FoodLineTile, 'Turkey chili'));
+      await h.tap(tester, inSheet(find.text('Remove from meal')));
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(RecipeEditor), findsNothing);
+    });
+  });
+
+  group('pricing a reopened recipe', () {
+    Finder pricingWords() => find.text(S.recipePricing);
+
+    h.appTest('while the numbers are being worked out, taps and Save are '
+        'ignored and the screen says so; a removal cannot come back', (
+      tester,
+    ) async {
+      h.useLink = true;
+      final r = await makeRecipe(tester);
+      await h.openApp(tester);
+      h.links.single.holdFoodLines = true;
+      await openRecipe(tester, 'Turkey chili');
+      expect(pricingWords(), findsOneWidget);
+      expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNull);
+      await tester.tap(tileNamed('Egg'), warnIfMissed: false);
+      await settle(tester);
+      expect(sheet(), findsNothing);
+      h.links.single.release();
+      await settle(tester);
+      expect(pricingWords(), findsNothing);
+      expect(tiles(), findsNWidgets(2));
+      expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNotNull);
+      final e2 = await priced(tester, egg, 2);
+      final c1 = await priced(tester, coffee, 1, 'small');
+      expect(
+        find.textContaining(
+          'Whole: ${_n(kcalOf(e2) + kcalOf(c1))} kcal',
+          findRichText: true,
+        ),
+        findsOneWidget,
+      );
+      await h.tap(tester, h.saveButton());
+      expect((await reload(tester, r.food.id)).ingredients, hasLength(2));
+    });
+
+    h.appTest('an ingredient that cannot be priced: a tap on the first one '
+        'while pricing changes nothing, and Save works afterwards', (
+      tester,
+    ) async {
+      h.useLink = true;
+      await makeRecipe(
+        tester,
+        ingredients: [
+          stale('usda:999999999', 'Gone food', 1, '', 100),
+          stale(egg, 'Egg, whole, cooked', 2, '', 100),
+        ],
+      );
+      await h.openApp(tester);
+      h.links.single.holdFoodLines = true;
+      await openRecipe(tester, 'Turkey chili');
+      await tester.tap(tileNamed('Gone'), warnIfMissed: false);
+      await settle(tester);
+      expect(sheet(), findsNothing);
+      h.links.single.release();
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(pricingWords(), findsNothing);
+      expect(tiles(), findsNWidgets(2));
+      expect(find.text('Not found'), findsOneWidget);
+      // Removing the one that cannot be priced lets Save through.
+      await h.tap(tester, tileNamed('Gone'));
+      await h.tap(tester, inSheet(find.text('Remove from meal')));
+      expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNotNull);
+    });
+
+    h.appTest('a worker that could not start when the recipe opened: Try '
+        'again prices the ingredients again', (tester) async {
+      h.useLink = true;
+      await makeRecipe(tester);
+      await h.openApp(tester);
+      // The worker is gone, and every one made while the recipe opens stops
+      // at once.
+      h.links.single.crash();
+      await settle(tester);
+      h.crashStarts = 100;
+      await openRecipe(tester, 'Turkey chili');
+      expect(find.text('Try again'), findsOneWidget);
+      expect(find.text('Not found'), findsNWidgets(2));
+      expect(pricingWords(), findsNothing);
+      expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNull);
+      h.crashStarts = 0;
+      await h.tap(tester, find.text('Try again'));
+      await settle(tester);
+      expect(find.text('Try again'), findsNothing);
+      expect(find.text('Not found'), findsNothing);
+      final e2 = await priced(tester, egg, 2);
+      final c1 = await priced(tester, coffee, 1, 'small');
+      expect(
+        find.textContaining(
+          'Whole: ${_n(kcalOf(e2) + kcalOf(c1))} kcal',
+          findRichText: true,
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNotNull);
+    });
+
+    h.appTest('a food that changed meaning between two openings is not '
+        'priced silently at a new amount', (tester) async {
+      final food = await h.real(
+        tester,
+        () => h.db.createCustomFood(
+          const CustomFoodInput(
+            name: 'Zorbo bar',
+            basis: FoodBasis.perServing,
+            nutrients: {Nutrients.energy: 50},
+          ),
+          nowFixed,
+        ),
+      );
+      await makeRecipe(
+        tester,
+        ingredients: [
+          MealLineInput(
+            foodRef: 'local:${food.food.id}',
+            foodName: 'Zorbo bar',
+            quantity: 2,
+            unitLabel: 'serving',
+            baseQuantity: 2,
+            baseUnit: 'serving',
+            nutrients: const {Nutrients.energy: 100},
+          ),
+        ],
+      );
+      await h.openApp(tester);
+      await openRecipe(tester, 'Turkey chili');
+      expect(
+        find.textContaining('Whole: 100 kcal', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text(S.foodSheetAmountReset), findsNothing);
+      await tester.pageBack();
+      await settle(tester);
+      // Now 80 kcal per 100 g: a stored "2 serving" means nothing any more.
+      await h.real(
+        tester,
+        () => h.db.editCustomFood(
+          food.food.id,
+          const CustomFoodInput(
+            name: 'Zorbo bar',
+            basis: FoodBasis.per100g,
+            nutrients: {Nutrients.energy: 80},
+          ),
+          nowFixed,
+        ),
+      );
+      await settle(tester);
+      await h.tap(tester, find.text('Turkey chili'));
+      await settle(tester);
+      final line = tester.widget<FoodLineTile>(tiles()).line;
+      expect(line.nutrients[Nutrients.energy], 80);
+      expect(line.baseQuantity, 100);
+      expect(find.text(S.foodSheetAmountReset), findsOneWidget);
+      expect(
+        find.textContaining('Whole: 80 kcal', findRichText: true),
+        findsOneWidget,
+      );
+    });
+
+    h.appTest('a custom food deleted after it went into a recipe: the '
+        'ingredient is marked, and a logged meal of the recipe is unchanged', (
+      tester,
+    ) async {
+      final food = await h.real(
+        tester,
+        () => h.db.createCustomFood(
+          const CustomFoodInput(
+            name: 'Zorbo bar',
+            basis: FoodBasis.perServing,
+            nutrients: {Nutrients.energy: 50},
+          ),
+          nowFixed,
+        ),
+      );
+      final r = await makeRecipe(
+        tester,
+        ingredients: [
+          MealLineInput(
+            foodRef: 'local:${food.food.id}',
+            foodName: 'Zorbo bar',
+            quantity: 2,
+            unitLabel: 'serving',
+            baseQuantity: 2,
+            baseUnit: 'serving',
+            nutrients: const {Nutrients.energy: 100},
+          ),
+        ],
+      );
+      final slot = (await h.real(
+        tester,
+        () => h.db.select(h.db.mealSlots).get(),
+      )).first.id;
+      final logged = await h.real(
+        tester,
+        () => h.db.saveMeal(
+          now: nowFixed,
+          localDate: '2026-11-12',
+          slotId: slot,
+          lines: [
+            MealLineInput(
+              foodRef: 'local:${r.food.id}',
+              foodName: 'Turkey chili',
+              quantity: 1,
+              unitLabel: 'serving',
+              baseQuantity: 1,
+              baseUnit: 'serving',
+              nutrients: const {Nutrients.energy: 25},
+            ),
+          ],
+        ),
+      );
+      await h.real(tester, () => h.db.archiveFood(food.food.id, nowFixed));
+      await h.openApp(tester);
+      await openRecipe(tester, 'Turkey chili');
+      expect(find.text('Not found'), findsOneWidget);
+      await h.tap(tester, h.saveButton());
+      expect(
+        find.text(
+          'Could not work out "Zorbo bar". Tap it to remove it or pick '
+          'another food.',
+        ),
+        findsOneWidget,
+      );
+      final StoredMeal? now = await h.real(
+        tester,
+        () => h.db.loadMeal(logged.meal.id),
+      );
+      expect(now!.entries.single.entry.foodName, 'Turkey chili');
+      expect(now.totals, logged.totals);
     });
   });
 

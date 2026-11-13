@@ -7,6 +7,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_library_data.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/screens/my_foods/food_editor.dart';
+import 'package:daybook/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -404,6 +405,223 @@ void main() {
       final d = await h.real(tester, () => h.db.loadFood(a.food.id));
       expect(d!.food.barcode, '0036000291452');
       expect(d.nutrients[Nutrients.energy], 7);
+    });
+  });
+
+  group('conversion to the stored amount', () {
+    h.appTest('2 servings and 300 kcal store 150 a serving; a nutrient left '
+        'empty stays absent', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await h.enter(tester, 'Amount', '2');
+      await fill(tester, calories: '300');
+      await h.enter(tester, 'Protein', '8');
+      await h.tap(tester, h.saveButton());
+      final f = (await foodRows(tester)).single;
+      expect((f.baseAmount, f.baseUnit), (1.0, 'serving'));
+      expect(await nutrientsOf(tester, f.id), {
+        Nutrients.energy: 150,
+        Nutrients.protein: 4,
+      });
+    });
+
+    h.appTest('250 milliliters and 100 kcal store 40 per 100 ml', (
+      tester,
+    ) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'milliliters');
+      await h.enter(tester, 'Amount', '250');
+      await fill(tester, calories: '100');
+      await h.tap(tester, h.saveButton());
+      final f = (await foodRows(tester)).single;
+      expect((f.baseAmount, f.baseUnit), (100.0, 'ml'));
+      expect(await nutrientsOf(tester, f.id), {Nutrients.energy: 40});
+    });
+
+    h.appTest('a mg nutrient and a µg nutrient scale in their own unit', (
+      tester,
+    ) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'grams');
+      await h.enter(tester, 'Amount', '50');
+      await h.tap(tester, find.text('More nutrients'));
+      await h.enter(tester, 'Sodium', '200');
+      await h.enter(tester, 'Vitamin D', '2');
+      await fill(tester, calories: '90');
+      await h.tap(tester, h.saveButton());
+      final f = (await foodRows(tester)).single;
+      expect(await nutrientsOf(tester, f.id), {
+        Nutrients.energy: 180,
+        Nutrients.sodium: 400,
+        Nutrients.vitaminD: 4,
+      });
+    });
+  });
+
+  group('typed numbers', () {
+    test('a comma then exactly three digits after a whole part is not a '
+        'number; decimals with a comma are', () {
+      expect(parseFoodNumber('1,000'), isNull);
+      expect(parseFoodNumber('12,500'), isNull);
+      expect(parseFoodNumber('0,125'), 0.125);
+      expect(parseFoodNumber('1,5'), 1.5);
+      expect(parseFoodNumber('1,25'), 1.25);
+      expect(parseFoodNumber('1.000'), 1);
+    });
+
+    h.appTest('"1,000" is refused with plain words and nothing is written; '
+        '"0,125", "1,5" and "1,25" still work', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await fill(tester);
+      await h.enter(tester, 'Protein', '1,000');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditNumberComma), findsOneWidget);
+      expect(await foodRows(tester), isEmpty);
+      await h.enter(tester, 'Protein', '0,125');
+      await h.enter(tester, 'Carbs', '1,5');
+      await h.enter(tester, 'Fat', '1,25');
+      await h.tap(tester, h.saveButton());
+      final f = (await foodRows(tester)).single;
+      expect(await nutrientsOf(tester, f.id), {
+        Nutrients.energy: 120,
+        Nutrients.protein: 0.125,
+        Nutrients.carbs: 1.5,
+        Nutrients.fat: 1.25,
+      });
+    });
+
+    h.appTest('the amount and the weight refuse "1,000" too', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await fill(tester);
+      await h.enter(tester, 'Amount', '1,000');
+      await h.enter(tester, weightLabel, '2,500');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditNumberComma), findsNWidgets(2));
+      expect(await foodRows(tester), isEmpty);
+    });
+  });
+
+  group('a value that cannot be true after conversion', () {
+    h.appTest('0.001 g with 100 kcal is refused beside calories, and '
+        'nothing is written', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'grams');
+      await h.enter(tester, 'Amount', '0.001');
+      await fill(tester, calories: '100');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditKcalTooHigh(S.unitG)), findsOneWidget);
+      expect(await foodRows(tester), isEmpty);
+      await h.enter(tester, 'Amount', '100');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+    });
+
+    h.appTest('900 kcal in 100 ml is allowed, 901 is not', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'milliliters');
+      await fill(tester, calories: '901');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditKcalTooHigh(S.unitMl)), findsOneWidget);
+      await h.enter(tester, 'Calories', '900');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(await foodRows(tester), hasLength(1));
+    });
+
+    h.appTest('more than 100 g of a nutrient in 100 g is refused, in grams '
+        'and in mg and µg', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'grams');
+      // 0.01 g is a hundredth of 100 g, so every value is worked out times
+      // 10,000.
+      await h.enter(tester, 'Amount', '0.01');
+      await h.tap(tester, find.text('More nutrients'));
+      await fill(tester, calories: '0.05');
+      // 0.02 g is 200 g, 20 mg is 200 g and 100000 µg is 1000 g in 100 g.
+      await h.enter(tester, 'Protein', '0.02');
+      await h.enter(tester, 'Sodium', '20');
+      await h.enter(tester, 'Vitamin D', '100000');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditNutrientTooHigh(S.unitG)), findsNWidgets(3));
+      expect(await foodRows(tester), isEmpty);
+      // 0.005 g is 50 g, 5 mg is 50 g and 1000 µg is 10 g.
+      await h.enter(tester, 'Protein', '0.005');
+      await h.enter(tester, 'Sodium', '5');
+      await h.enter(tester, 'Vitamin D', '1000');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(await foodRows(tester), hasLength(1));
+    });
+
+    h.appTest('a serving with a weight is checked per 100 g; a serving with '
+        'no weight is not checked', (tester) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await fill(tester, calories: '5000');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(await foodRows(tester), hasLength(1));
+
+      await h.tap(tester, find.text('+ New'));
+      await h.tap(tester, find.text('New food').last);
+      await fill(tester, name: 'Dust', calories: '5000');
+      await h.enter(tester, weightLabel, '100');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditKcalTooHigh(S.unitG)), findsOneWidget);
+      await h.enter(tester, weightLabel, '600');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(await foodRows(tester), hasLength(2));
+    });
+  });
+
+  group('names and units come from the strings file', () {
+    test('every tracked nutrient has its name and unit word in S', () {
+      for (final n in Nutrients.tracked) {
+        expect(S.nutrientName(n.id), n.name, reason: '${n.id}');
+        expect(S.nutrientUnit(n.unit), n.unit, reason: n.unit);
+      }
+      expect(S.unitG, 'g');
+      expect(S.unitMl, 'ml');
+    });
+  });
+
+  group('portion names', () {
+    Future<void> portion(WidgetTester t, String name) async {
+      await h.openApp(t);
+      await newFood(t);
+      await pickUnit(t, 'grams');
+      await fill(t);
+      await h.tap(t, find.text('+ Add'));
+      await h.enter(t, 'Portion name', name);
+      await h.enter(t, 'Weight', '15');
+      await h.tap(t, h.saveButton());
+    }
+
+    h.appTest('a portion named serving is refused beside its field', (
+      tester,
+    ) async {
+      await portion(tester, 'Serving');
+      expect(find.text(S.foodEditPortionServing), findsOneWidget);
+      expect(await foodRows(tester), isEmpty);
+    });
+
+    h.appTest('a portion name that starts with a digit is refused beside '
+        'its field', (tester) async {
+      await portion(tester, '2 slices');
+      expect(find.text(S.foodEditPortionDigit), findsOneWidget);
+      expect(await foodRows(tester), isEmpty);
+      await h.enter(tester, 'Portion name', 'slice');
+      await h.tap(tester, h.saveButton());
+      expect(find.byType(FoodEditor), findsNothing);
+      expect(await foodRows(tester), hasLength(1));
     });
   });
 

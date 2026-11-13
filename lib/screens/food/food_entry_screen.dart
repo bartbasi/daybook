@@ -1668,12 +1668,28 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   // Messages on this screen. They sit under the meal chips, so they never
   // cover the totals bar or Save.
 
+  /// A message with a button does not time out: someone using a screen reader
+  /// needs longer than ten seconds to reach it. It stays until its button is
+  /// tapped, another message replaces it, or the screen closes.
   void _showNotice(_Notice n) {
     _noticeTimer?.cancel();
-    _noticeTimer = Timer(_noticeTime, () {
-      if (mounted) setState(() => _notice = null);
-    });
+    _noticeTimer = null;
+    if (n.onAction == null) {
+      _noticeTimer = Timer(_noticeTime, () {
+        if (mounted) setState(() => _notice = null);
+      });
+    }
     setState(() => _notice = n);
+  }
+
+  /// The button of a message: the message is cleared first, so it cannot offer
+  /// the same thing again after the screen it opens comes back.
+  void _noticeAction() {
+    final action = _notice?.onAction;
+    if (action == null) return;
+    _noticeTimer?.cancel();
+    setState(() => _notice = null);
+    action();
   }
 
   /// A tap on the weight widget while this screen is open: the weight sheet
@@ -1758,7 +1774,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                           message: _notice!.text,
                           onUndo: _notice!.undo == null ? null : _undoNotice,
                           actionLabel: _notice!.actionLabel,
-                          onAction: _notice!.onAction,
+                          onAction: _notice!.onAction == null
+                              ? null
+                              : _noticeAction,
                         ),
                       // What is left is shared by the box and the lines. The
                       // box stays in a fixed area, outside the scrolling

@@ -270,6 +270,59 @@ void main() {
       }
     });
 
+    test('an 8 digit code starting with 0 is a UPC-E when its expansion is '
+        'good, even if it also passes the EAN-8 check', () {
+      for (final c in ['00010054', '00010061', '04252614', '01234565']) {
+        expect(barcodeCheckOk(c) || c == '04252614' || c == '01234565', isTrue);
+        expect(isUpcE(c), isTrue, reason: c);
+      }
+      expect(barcodeCheckOk('00010054'), isTrue);
+      expect(barcodeForm('00010054', upcE: true), '0000100000054');
+      // A real EAN-8 whose expansion fails stays an EAN-8.
+      expect(isUpcE('96385074'), isFalse);
+      expect(isUpcE('04252615'), isFalse);
+      // Every code starting with 0 and with a good expansion is a UPC-E.
+      var seen = 0;
+      for (var n = 0; n < 100000; n += 7) {
+        final c = '0${n.toString().padLeft(6, '0')}0';
+        for (var d = 0; d < 10; d++) {
+          final code = '${c.substring(0, 7)}$d';
+          final upcA = barcodeForm(code, upcE: true).substring(1);
+          expect(isUpcE(code), barcodeCheckOk(upcA), reason: code);
+          seen++;
+        }
+      }
+      expect(seen, greaterThan(1000));
+    });
+
+    test('an 8 digit code starting with 1 keeps EAN-8 first, then UPC-E', () {
+      var both = 0, onlyUpcE = 0;
+      for (var n = 0; n < 1000000; n += 13) {
+        final base = '1${n.toString().padLeft(6, '0')}';
+        for (var d = 0; d < 10; d++) {
+          final code = '$base$d';
+          final upcAOk = barcodeCheckOk(
+            barcodeForm(code, upcE: true).substring(1),
+          );
+          if (barcodeCheckOk(code)) {
+            expect(isUpcE(code), isFalse, reason: code);
+            if (upcAOk) both++;
+          } else {
+            expect(isUpcE(code), upcAOk, reason: code);
+            if (upcAOk) onlyUpcE++;
+          }
+        }
+      }
+      expect(both, greaterThan(0));
+      expect(onlyUpcE, greaterThan(0));
+    });
+
+    test('other 8 digit codes are never a UPC-E', () {
+      expect(isUpcE('96385074'), isFalse);
+      expect(isUpcE('55555556'), isFalse);
+      expect(isUpcE('20000008'), isFalse);
+    });
+
     test('the check digit of typed numbers', () {
       for (final ok in [
         '96385074',
