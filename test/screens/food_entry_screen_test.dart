@@ -1460,8 +1460,8 @@ void main() {
             .onPressed,
         isNull,
       );
+      // One arrow only: two would cancel out and prove nothing about the day.
       await tester.tap(find.byTooltip('Next day'), warnIfMissed: false);
-      await tester.tap(find.byTooltip('Previous day'), warnIfMissed: false);
       await tester.tap(
         find.widgetWithText(ChoiceChip, 'Dinner'),
         warnIfMissed: false,

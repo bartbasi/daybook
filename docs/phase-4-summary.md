@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen and the correction sheet are done, reviewed and pushed. Still to do: the chips row and saved meals, barcode scanning, the food and recipe editors, the speed tests |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row and saved meals are done, reviewed and pushed. Still to do: barcode scanning, the food and recipe editors, the speed tests |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -131,6 +131,9 @@ Two more behaviors to know about:
 - **Changing the food on a counted line keeps the count, not the weight.** "4 eggs" changed to oatmeal gives 4 cups of oatmeal, not the eggs' 200 g. The amount as written is tried first and the weight second. Say if you would rather the weight came first for plain counts.
 
 - **Text typed in the food box is lost if Android kills the app in the background** (for example after switching to another app for a while). The text is kept through folding, rotation and a failed save, and closing the screen offers Undo, but it is not written to disk until Save. Saving a draft when the app is paused would cover it.
+
+- **The saved meal editor does not scroll the line you are typing into view**, as the food entry screen does. With many items and the keyboard up you may have to scroll by hand.
+- **Chips look the same for the moment a save is running.** They do nothing then, and the screen closes right after, so no word or shape was added.
 
 ## Not finished
 

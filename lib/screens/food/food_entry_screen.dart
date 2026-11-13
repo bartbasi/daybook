@@ -82,7 +82,8 @@ class AddedLine {
 
   /// A saved meal chip tapped while there is text or a line: the saved meal
   /// times [SavedMealExpansion.multiplier] as a header with its item lines
-  /// (grammar 6.4 and 9.3).
+  /// (grammar 6.4 and 9.3). Expand at times 1: the items become the header's
+  /// base items, which a later change of the multiplier scales.
   factory AddedLine.fromExpansion(SavedMealExpansion x) {
     final items = [
       for (final i in x.items)
