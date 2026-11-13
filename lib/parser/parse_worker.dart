@@ -527,6 +527,11 @@ class ParseWorker {
   /// True after [dispose], or after the worker stopped.
   bool get isStopped => _stopped;
 
+  /// True when the worker will never answer again: it failed to start, it
+  /// stopped by itself, or it was disposed. False before [start] and while the
+  /// index is being built.
+  bool get isDead => _stopped || _dead != null;
+
   /// Starts the worker, off the first frame's critical path: the call returns
   /// at once and the future completes with true when the index is built, or
   /// with false when it could not be (the failure goes to [onFailure]).

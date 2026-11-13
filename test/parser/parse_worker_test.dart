@@ -197,8 +197,10 @@ void main() {
     test('starts, reports ready, and parses', () async {
       final h = _Box(worker);
       expect(worker.isReady, isFalse);
+      expect(worker.isDead, isFalse, reason: 'not started is not dead');
       expect(await worker.start(), isTrue);
       expect(worker.isReady, isTrue);
+      expect(worker.isDead, isFalse);
       final r = await h.text('2 eggs, 2 sl', 12);
       expect(r.session, h.box.id);
       expect(r.text, '2 eggs, 2 sl');
@@ -490,6 +492,7 @@ void main() {
       await worker.dispose();
       expect(worker.isStopped, isTrue);
       expect(worker.isReady, isFalse);
+      expect(worker.isDead, isTrue);
       expect(h.box.isClosed, isTrue);
       final id = h.box.setText('after', 5);
       expect(h.results.containsKey(id), isFalse);
@@ -547,6 +550,7 @@ void main() {
         final early = hb.box.alternatives('x', const Span(0, 1));
         expect(await bad.start(), isFalse);
         expect(bad.isReady, isFalse);
+        expect(bad.isDead, isTrue);
         expect(failures, hasLength(1));
         expect(failures.single.kind, FailureKind.startup);
         expect(failures.single.errorType, isNotEmpty);
@@ -766,6 +770,27 @@ void main() {
       expect(one.results.containsKey(id), isFalse);
       expect(two.results[id]!.snapshotVersion, 3);
       expect(two.failures, isEmpty);
+      // The box's next text takes up the new data: it is not left behind.
+      final next = one.box.setText('toast ', 6);
+      expect(one.results[next]!.snapshotVersion, 3);
+      expect(one.results[next]!.lines.single.foodRef, _egg);
+    });
+
+    test('a worker that stopped by itself is dead, and every box hears', () {
+      final link = _HeldLink(WorkerCore(parser));
+      final w = ParseWorker.linked(link);
+      final failures = <WorkerFailure>[];
+      w.onFailure = failures.add;
+      final h = _Box(w);
+      w.start();
+      expect(w.isReady, isTrue);
+      expect(w.isDead, isFalse);
+      link.held.add(const WorkerFailure(0, FailureKind.crashed, 'exited'));
+      link.release(0);
+      expect(w.isDead, isTrue);
+      expect(w.isReady, isFalse);
+      expect(failures.single.kind, FailureKind.crashed);
+      expect(h.failures.single.kind, FailureKind.crashed);
     });
 
     test(
@@ -777,6 +802,7 @@ void main() {
         final h = _Box(w);
         final early = w.search('egg');
         expect(await w.start(), isFalse);
+        expect(w.isDead, isTrue);
         expect(failures.single.kind, FailureKind.startup);
         expect(h.failures.single.kind, FailureKind.startup);
         await expectLater(early, throwsA(isA<WorkerFailure>()));

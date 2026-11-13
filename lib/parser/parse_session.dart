@@ -199,11 +199,12 @@ List<UnitChoice> _unitChoices(
 // While it applies, its span is its item's span; while it is suspended, its
 // span is cut to the part inside its item, so it never takes in a neighbour.
 //
-// The item is unchanged by an edit when a new item has the old one's draft at
-// the old one's carried span. A suspended pick is dropped when an edit leaves
-// its item unchanged (the edit was elsewhere), unless the edit only added or
-// removed blanks next to it; when no new item overlaps its span (its item was
-// deleted); when a new pick is made on its item; or when its food is gone.
+// The item is unchanged by an edit when the edit lies wholly outside it and a
+// new item has the old one's draft at the old one's carried span. A suspended
+// pick is dropped when an edit leaves its item unchanged (the edit was
+// elsewhere), unless the edit only added or removed blanks next to it; when
+// no new item overlaps its span (its item was deleted); when a new pick is
+// made on its item; or when its food is gone.
 // A pick that applies is dropped only with its item or its food.
 class _Pick {
   const _Pick(
@@ -401,6 +402,9 @@ class ParseSession {
   List<_Mark> _marks = const [];
   _Pending? _pending;
 
+  // New user data that could not be parsed yet.
+  UserSnapshot? _waiting;
+
   // Parsed items by everything parseItem reads (ItemDraft.cacheKey), so a hit
   // is always right.
   Map<String, _Cached> _cache = {};
@@ -424,28 +428,51 @@ class ParseSession {
   /// Uses new user data. The cache is emptied, because every item may now
   /// parse differently; the sticky corrections stay, except one whose food is
   /// gone. Giving the same snapshot again changes nothing. If parsing with the
-  /// new data fails, the session stays as it was, with the old data.
+  /// new data fails, this throws and the session stays as it was, with the old
+  /// data; the new data waits, and every [setText] tries it again until it
+  /// parses (a newer snapshot replaces it).
   void setSnapshot(UserSnapshot snapshot) {
-    if (identical(snapshot, _snapshot)) return;
+    if (identical(snapshot, _snapshot)) {
+      _waiting = null;
+      return;
+    }
+    _waiting = snapshot;
+    _takeUp(_text);
+  }
+
+  // Parses [text] with the waiting user data. On failure the session stays as
+  // it was and the data keeps waiting.
+  void _takeUp(String text) {
     final oldSnapshot = _snapshot;
     final oldCache = _cache;
-    _snapshot = snapshot;
+    _snapshot = _waiting!;
     _cache = {};
     try {
-      _rebuild(_text);
+      _rebuild(text);
     } catch (_) {
       _snapshot = oldSnapshot;
       _cache = oldCache;
       rethrow;
     }
+    _waiting = null;
   }
 
-  /// The text and the cursor (an index into [text]) after a change.
+  /// The text and the cursor (an index into [text]) after a change. User data
+  /// that failed to parse in [setSnapshot] is tried again first; if it still
+  /// fails, the text is parsed with the data the session has.
   void setText(String text, int cursor) {
     final before = _cursor;
     _cursor = cursor;
     try {
-      if (text == _text && (_items.isNotEmpty || text.isEmpty)) {
+      if (_waiting != null) {
+        try {
+          _takeUp(text);
+          return;
+        } catch (_) {
+          // Still failing; that failure was reported when the data came.
+        }
+        _rebuild(text);
+      } else if (text == _text && (_items.isNotEmpty || text.isEmpty)) {
         _publish();
       } else {
         _rebuild(text);
@@ -611,7 +638,8 @@ class ParseSession {
   /// "Remove from meal" for the typed line at [line] (8.3): the new text and
   /// where [cursor] goes, or null when the item cannot be removed cleanly.
   /// [text] must be the session's text now. The item's text goes, with the
-  /// separators after it (or, for the last item, the ones before it). It is
+  /// separators after it (or, for the last item, the ones before it, and no
+  /// blank or separator is left at the end of the text). It is
   /// verified by reading the new text again: every other item must read
   /// exactly as before, in order, and the removed one must be gone; cutting
   /// "2 eggs" out of "2 eggs and toast" as "and toast" would fail that, so
@@ -632,7 +660,13 @@ class ParseSession {
       if (last) (s.start, after),
       (s.start, s.end),
     ];
-    for (final (a, b) in cuts) {
+    for (var (a, b) in cuts) {
+      // A cut with only blanks and separators after it takes them, and those
+      // before it, so nothing is left dangling at the end of the text.
+      if (_sepAfter.matchAsPrefix(text, b)!.end == text.length) {
+        b = text.length;
+        a = _junkAtEnd.firstMatch(text.substring(0, a))!.start;
+      }
       final t = text.substring(0, a) + text.substring(b);
       final fresh = _parseAll(t);
       if (fresh.length != _items.length - 1) continue;
@@ -648,6 +682,12 @@ class ParseSession {
     }
     return null;
   }
+
+  // Blanks and separators at the end of a text.
+  static final _junkAtEnd = RegExp(
+    r'(?:\s|[,;+.&]|w/|\b(?:and|with|plus)\b)*$',
+    caseSensitive: false,
+  );
 
   // Separators (2.2, 2.5) with the blanks around them.
   static final _sepAfter = RegExp(
@@ -754,10 +794,13 @@ class ParseSession {
       }
       // Its item was deleted.
       if (own == null) continue;
+      // Unchanged: the edit was wholly outside the item and the item reads
+      // the same at its new place. An edit inside it ("slices" to "slice")
+      // changes it even when the parser reads it the same.
       final at = e.map(p.item);
-      final unchanged = items.any(
-        (i) => i.draft.span == at && i.draft.cacheKey == p.itemKey,
-      );
+      final unchanged =
+          (p.item.end <= e.start || p.item.start >= e.oldEnd) &&
+          items.any((i) => i.draft.span == at && i.draft.cacheKey == p.itemKey);
       // A suspended pick whose item an edit elsewhere left as it was: the user
       // has moved on.
       if (!p.applies &&

@@ -128,8 +128,9 @@ Line _expectedPlain(Line l, String text, int cursor) {
 // shrunk with it). The pick's item is the new item that overlaps the carried
 // span most (the first one on a tie). If that item is not a saved meal and
 // its key is the pick's key, the pick applies to it; otherwise it is
-// suspended on it. The pick's old item is unchanged when a new item has its
-// draft at its carried span. A suspended pick is dropped when the text changed,
+// suspended on it. The pick's old item is unchanged when it lies wholly
+// outside the changed region and a new item has its draft at its carried
+// span. A suspended pick is dropped when the text changed,
 // its item is unchanged, and the edit was not only blanks with nothing but
 // blanks between it and the item; and it is never restored onto an unchanged
 // item. Any pick is dropped when no new item overlaps its span, when a new
@@ -227,7 +228,9 @@ class _Model {
         continue;
       }
       final was = carry(p.on);
-      final same = items.any((it) => it.span == was && it.draft == p.onDraft);
+      final outside = p.on.end <= head || p.on.start >= cutEnd;
+      final same =
+          outside && items.any((it) => it.span == was && it.draft == p.onDraft);
       if (!p.live && changed && same && !(blanksOnly && besideOrIn(p.on))) {
         _drop(movedOn);
         continue;
@@ -940,6 +943,48 @@ void main() {
       expect(k.s.lines.any(picked), isFalse);
     });
 
+    test('an edit to the suspended item that the parser reads the same keeps '
+        'it (R43-3)', () {
+      final k = _Keys(newSession(), '2 slices toast');
+      final ref = pickOther(k.s, 0);
+      k.backspace(5); // toast
+      k.backspace(1); // the space
+      k.backspace(1); // the "s" of "slices": "2 slice" reads as "2 slices"
+      expect(k.text, '2 slice');
+      k.type('s toast', (t) {
+        if (t != '2 slices toast') {
+          expect(picked(k.s.lines.single), isFalse, reason: t);
+        }
+      });
+      expect(picked(k.s.lines.single), isTrue);
+      expect(k.s.lines.single.foodRef, ref);
+    });
+
+    test('"eggs x 3" edited to "eggs x3" while suspended keeps it', () {
+      final k = _Keys(newSession(), 'eggs x 3');
+      final ref = pickOther(k.s, 0);
+      k.moveTo(4);
+      k.type('y'); // eggsy x 3: suspended
+      expect(picked(k.s.lines.single), isFalse);
+      k.moveTo(8);
+      k.backspace(1); // eggsy x3: the same draft
+      expect(k.text, 'eggsy x3');
+      k.moveTo(5);
+      k.backspace(1);
+      expect(k.text, 'eggs x3');
+      expect(picked(k.s.lines.single), isTrue);
+      expect(k.s.lines.single.foodRef, ref);
+      // Not only blanks: "x" typed over as "X" reads the same too.
+      k.moveTo(4);
+      k.type('y');
+      expect(picked(k.s.lines.single), isFalse);
+      k.replaceAll('eggsy X3'); // the change is the one letter
+      k.moveTo(5);
+      k.backspace(1);
+      expect(k.text, 'eggs X3');
+      expect(picked(k.s.lines.single), isTrue);
+    });
+
     test('a comma typed directly after a suspended item drops it, though no '
         'item changed', () {
       final k = _Keys(newSession(), '1 cup milk');
@@ -1064,14 +1109,52 @@ void main() {
       );
       failing = false;
       expect(s.snapshot.version, 1);
-      s.setText('toast', 5);
-      expect(s.snapshot.version, 1);
       expect(_sum(s.lines.single), before);
-      // And the new data goes in once the loader is back.
-      s.setSnapshot(UserSnapshot.from(_data(version: 2, learned: true)));
+      // The next text change takes up the new data again.
+      s.setText('toast ', 6);
       expect(s.snapshot.version, 2);
       expect(s.lines.single.foodRef, _egg);
       expect(s.lines.single.fromLearnedMatch, isTrue);
+    });
+
+    test('a text change while the new data still fails keeps the old data '
+        'and tries again on the next one', () {
+      var failing = false;
+      final inner = SqliteUsdaFoods(db);
+      addTearDown(inner.dispose);
+      final flaky = Parser(
+        parser.usda,
+        (ref) => failing && ref == _egg ? throw StateError('boom') : inner(ref),
+      );
+      final s = ParseSession(flaky, snapshot: UserSnapshot.from(_data()))
+        ..setText('toast', 5);
+      failing = true;
+      expect(
+        () =>
+            s.setSnapshot(UserSnapshot.from(_data(version: 2, learned: true))),
+        throwsStateError,
+      );
+      // Still failing: the text is parsed with the old data.
+      s.setText('toast ', 6);
+      expect(s.snapshot.version, 1);
+      expect(s.text, 'toast ');
+      expect(s.lines.single.foodRef, isNot(_egg));
+      failing = false;
+      s.setText('toast', 5);
+      expect(s.snapshot.version, 2);
+      expect(s.lines.single.foodRef, _egg);
+      // A newer snapshot replaces the one waiting.
+      failing = true;
+      expect(
+        () =>
+            s.setSnapshot(UserSnapshot.from(_data(version: 3, learned: true))),
+        throwsStateError,
+      );
+      failing = false;
+      s.setSnapshot(UserSnapshot.from(_data(version: 4)));
+      s.setText('toast ', 6);
+      expect(s.snapshot.version, 4);
+      expect(s.lines.single.foodRef, isNot(_egg));
     });
   });
 
@@ -1634,6 +1717,17 @@ void main() {
           );
         }
       }
+    });
+
+    test('no separator or blank is left at the end of the text', () {
+      expect(remove('2 eggs\ntoast\ncoffee', 2)!.text, '2 eggs\ntoast');
+      expect(remove('2 eggs 2 toast 2 jam', 2)!.text, '2 eggs 2 toast');
+      expect(remove('2 eggs, toast, ', 1)!.text, '2 eggs');
+      expect(remove('2 eggs \n toast  ', 1)!.text, '2 eggs');
+      // The cursor goes to the new end when it was beyond it.
+      final r = remove('2 eggs\ntoast\ncoffee', 2, cursor: 19)!;
+      expect(r.cursor, r.text.length);
+      expect(remove('2 eggs\ntoast\ncoffee', 2, cursor: 2)!.cursor, 2);
     });
 
     test('the cursor keeps its place around the cut', () {
