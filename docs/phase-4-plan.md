@@ -216,6 +216,8 @@ Step 1 acceptance (BRIEF.md): writes go to the database at once and are confirme
 
 Covers saved meals, aliases, recents, same as yesterday and barcode. The Data check screen is removed at the end of this step (task 2.13), when Food entry and the correction sheet show real food numbers.
 
+**Widget link over a full screen.** Found in review of task 1.4: the weight widget's link opens the weight sheet through Home, so if Food entry (or any full screen) is on top, the sheet opens over it and Home's "Weight saved" bar is hidden underneath. Task 2.8 must decide and test what a widget tap does while Food entry is open, without losing typed text.
+
 **Line type.** Task 2.1 creates `lib/parser/line.dart` with the one data class every later task uses: food ref and name, quantity, unit label, base quantity and unit, nutrients (map of nutrient id to amount for this line), state (grammar 8.1), markers (Guess, Assumed, Your pick, Scanned), learned key, the text span, and for saved meals the header with its item lines. Later tasks add fields only through the reviewer.
 
 | Task | Owner | Builds | Files | Grammar and frames | Tests that prove it |
