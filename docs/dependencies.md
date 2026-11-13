@@ -33,6 +33,8 @@ Pulled in by the packages above:
 
 home_widget adds no other Dart package (it uses path_provider and path_provider_foundation, listed above). Its Android side uses androidx.glance:glance-appwidget 1.2.0, androidx.core, androidx.work and kotlinx-coroutines-android, all Apache-2.0. androidx.datastore comes in through Glance (home_widget's Kotlin code imports it), also Apache-2.0. androidx.room comes in through WorkManager, also Apache-2.0. Its LICENSE in the pub cache is BSD-3-Clause (Anton Borries), and its own Android manifest declares no permissions. androidx.work (a dependency of home_widget) adds four to the merged manifest: WAKE_LOCK, ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED and FOREGROUND_SERVICE. The app manifest removes all four with `tools:node="remove"`, because WorkManager is only used by home_widget's background callbacks, which Daybook does not use.
 
+home_widget's iOS side imports only Apple frameworks (AppIntents, Intents, UIKit, WidgetKit) and Flutter. The iPhone widget itself (`ios/WeightWidget/`) uses only WidgetKit and SwiftUI, which are part of iOS.
+
 Flutter's `LicenseRegistry` collects all of these notices, so the License screen in About can show them.
 
 ## Build and test only (not shipped)
@@ -50,6 +52,7 @@ Flutter's `LicenseRegistry` collects all of these notices, so the License screen
 | flutter_driver (SDK), fuchsia_remote_debug_protocol (SDK), process, sync_http (pulled in by integration_test) | BSD-3-Clause | Dev only |
 | webdriver (pulled in by integration_test) | Apache-2.0 | Dev only |
 | reactivecircus/android-emulator-runner | Apache-2.0 | Android emulator for the integration test job in CI |
+| xcodeproj (Ruby gem, comes with CocoaPods on GitHub's macOS runners) and Ruby | MIT (xcodeproj); Ruby license or BSD-2-Clause (Ruby) | `tools/ios/add_widget_target.rb` adds the iPhone widget target to the Xcode project. Run by hand in CI only |
 
 ## Data
 

@@ -11,6 +11,9 @@ import 'util/units.dart';
 //   android/app/src/main/res/values/widget_strings.xml (widget name and
 //     description in the widget picker)
 //   ios/Runner/Info.plist (CFBundleDisplayName)
+//   ios/WeightWidget/WeightWidget.swift (widget name and description in the
+//     widget gallery)
+//   ios/WeightWidget/Info.plist (CFBundleDisplayName of the widget)
 
 /// All user-facing text, in one place.
 class S {

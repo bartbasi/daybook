@@ -12,6 +12,7 @@ import 'package:daybook/platform/weight_widget.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -326,6 +327,57 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  Future<void> writeEmptyOn(TargetPlatform platform) async {
+    debugDefaultTargetPlatformOverride = platform;
+    try {
+      await writeWeightWidget(const [], UnitSystem.imperial, '2026-11-12');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  }
+
+  testWidgets('on iOS the App Group is set before anything is written and '
+      'the update names the iOS widget', (tester) async {
+    mockPlugin(tester);
+    await writeEmptyOn(TargetPlatform.iOS);
+
+    expect(calls.first.method, 'setAppGroupId');
+    expect(calls.first.arguments, {
+      'groupId': 'group.io.github.bartbasi.daybook',
+    });
+    expect(calls.where((c) => c.method == 'setAppGroupId'), hasLength(1));
+    expectWidget(texts(weight: 'No weight yet'));
+    expect(calls.last.method, 'updateWidget');
+    final args = calls.last.arguments as Map;
+    expect(args['ios'], 'WeightWidget');
+    expect(
+      args['qualifiedAndroidName'],
+      'io.github.bartbasi.daybook.WeightWidgetProvider',
+    );
+  });
+
+  testWidgets('on Android no App Group is set', (tester) async {
+    mockPlugin(tester);
+    await writeEmptyOn(TargetPlatform.android);
+
+    expect(calls.where((c) => c.method == 'setAppGroupId'), isEmpty);
+    expectWidget(texts(weight: 'No weight yet'));
+    expect(calls.last.method, 'updateWidget');
+    expect(
+      (calls.last.arguments as Map)['qualifiedAndroidName'],
+      'io.github.bartbasi.daybook.WeightWidgetProvider',
+    );
+  });
+
+  testWidgets('on iOS a failing App Group call does not throw', (
+    tester,
+  ) async {
+    mockPlugin(tester);
+    pluginFails = true;
+    await writeEmptyOn(TargetPlatform.iOS);
+    expect(calls.single.method, 'setAppGroupId');
+  });
+
   test('with no plugin at all, writing the widget just returns', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     // No mock handler: the channel throws MissingPluginException.
@@ -356,6 +408,8 @@ void main() {
 
   test('only the weight link is a weight link', () {
     expect(isWeightLink(Uri.parse('daybook://weight')), isTrue);
+    // The form the iOS widget sends.
+    expect(isWeightLink(Uri.parse('daybook://weight?homeWidget')), isTrue);
     expect(isWeightLink(Uri.parse('daybook://food')), isFalse);
     expect(isWeightLink(Uri.parse('https://weight')), isFalse);
     expect(isWeightLink(Uri()), isFalse);

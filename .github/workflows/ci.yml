@@ -99,6 +99,13 @@ jobs:
       # Unsigned for now. Signing and TestFlight upload come in Phase 6.
       - run: flutter build ios --release --no-codesign
 
+      - name: The widget extension is inside the app
+        run: |
+          if [ ! -d build/ios/iphoneos/Runner.app/PlugIns/WeightWidget.appex ]; then
+            echo "::error::build/ios/iphoneos/Runner.app/PlugIns/WeightWidget.appex is missing."
+            exit 1
+          fi
+
   # The two integration test jobs run on pushes to main and on manual runs
   # only, not on pull requests or other branches.
   android-integration:
