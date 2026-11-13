@@ -60,6 +60,14 @@ Each is the recommended option from the plan's open questions, or a small call m
 30. **Closing the saved meal editor with unsaved changes drops them, with no question and no Undo.** The wireframes say nothing here, and the plan allows a confirmation only for Import. The food entry screen offers Undo for typed text; the editor does not. Say if it should.
 31. **A saved meal cannot be saved with no items.** The editor says "Add at least one item." To get rid of one, use Delete in its menu, which has Undo.
 32. **The saved meal editor has its own copy of the typing code from the food entry screen** (about 250 lines) so that the reviewed food screen did not have to be taken apart. The reviewer checked the copy against the same rules. Sharing the code is a clean-up for later, not a behavior change.
+33. **A barcode already on your phone is used without asking Open Food Facts.** If the barcode belongs to a food you made, or to a product you scanned before, the scan uses that food and sends nothing. Any other barcode sends exactly one request. This works with no connection and sends less, but a product scanned before is not refreshed if Open Food Facts later corrects it. The plan said "exactly one request per scan"; this makes it "at most one". Say if a scan should always ask.
+34. **"Add it as your own food" after a barcode is not found comes with the food editor** (task 2.12). Until then the message says the product was not found and offers nothing more.
+35. **The scan screen has "Type the number instead"**, as the wireframe draws it, built as a number field with Look up and a way back to the camera. A typed number must be 8, 12, 13 or 14 digits and its last digit must check out, so a typo cannot pull up a different product.
+36. **Barcodes are kept in one form.** A US 12 digit barcode is stored with a leading 0 (its 13 digit form), and the short barcode on small US packages is expanded to its full form, so a scanned and a typed number are the same product.
+37. **Impossible values from Open Food Facts are dropped.** A negative value, more than 100 g of a nutrient in 100 g of food, or more than 900 kcal in 100 g is treated as not listed. A product with no usable calorie value counts as not found.
+38. **A product with no serving size on Open Food Facts is added as 100 g and marked Assumed.** One with a serving size is added as 1 serving, as the wireframe shows.
+39. **The sheet opened from the saved meal editor has no "Scan its barcode".** Scanning is on the food entry screen only.
+40. **The app grew by about 8 MB with the barcode scanner** (36.0 MB for the build on your phone, from 27.9 MB). The plan set 15 MB of growth as the point to stop and ask you. The scanner reads barcodes on the phone with no Google services; that code is the size.
 
 ## Open questions from the plan: answered
 
@@ -162,6 +170,17 @@ Food entry (step 2, what is built so far), on the Z Fold 5:
 - Close the screen with text typed: Home should offer Undo and bring the text back.
 - With the largest font size, every line should wrap and nothing should be cut off.
 - TalkBack reads each line as one item with its food, amount and calories.
+
+Barcode scanning (step 2), on the Z Fold 5. None of this has run on a real camera yet:
+- Tap Scan on the food entry screen. The phone should ask for the camera the first time, and only then.
+- Refuse the camera once: plain words should say what to do, and "Type the number instead" should still work.
+- Scan a product. It should appear as a line marked Scanned with the Open Food Facts credit, and the camera light in the status bar should go off when the screen closes.
+- Scan the same product again in airplane mode: it should still be added.
+- Scan something new in airplane mode: a message within about 10 seconds, and nothing added.
+- Try a US product with a 12 digit barcode, and a small package with a short barcode (a can or a pack of gum). Tell me if either is not found when it is on openfoodfacts.org.
+- Look at how the amount reads for products whose serving is written like "30 g" or "2 biscuits (25 g)".
+- Fold and unfold while the camera is open.
+- Type a not found food, tap its line, and use "Scan its barcode" there.
 
 Weight (step 1), on the iPhone, once there is a signed build (see docs/ios-widget.md for the Apple Developer steps):
 - The widget appears in the widget gallery, in the small and medium sizes.
