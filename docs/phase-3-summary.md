@@ -126,4 +126,6 @@ Nothing was changed in this phase. These would be made in Phase 4 if you approve
 
 ## Gate
 
-Phase 3 is done. Waiting for Bart to approve the wireframes and the parser grammar, and to answer the nine decisions above, before starting Phase 4.
+Phase 3 is done.
+
+**Approved by Bart on 2026-11-12:** "go with your recommendations". That settles the nine decisions above as recommended, the decisions listed under "Decisions made", every open question in parser-grammar.md section 14 as option (a), and the two proposed changes to Phase 2 work (the goals column and the default portion in the food data build). Phase 4 can start.
