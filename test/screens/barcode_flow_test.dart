@@ -187,6 +187,10 @@ void main() {
     matching: find.byType(TextField),
   );
   Finder tiles() => find.byType(FoodLineTile);
+  Finder totals() => find.byWidgetPredicate(
+    (w) =>
+        w is Semantics && (w.properties.label ?? '').startsWith('Meal total'),
+  );
   Finder sheet() => find.byType(CorrectionSheet);
   Finder inSheet(Finder f) => find.descendant(of: sheet(), matching: f);
 
@@ -827,6 +831,26 @@ void main() {
       expect(button.bottom, lessThanOrEqualTo(notice.bottom + 0.5));
       expect(button.left, greaterThanOrEqualTo(0));
       expect(button.right, lessThanOrEqualTo(344));
+      expect(totals(), findsNothing);
+      expect(notice.height, lessThanOrEqualTo(200.5));
+      // The message area is at least its padding plus two full lines.
+      final msgText = find.text(
+        'No product found for $code. Add it as your own food?',
+      );
+      final lineHeight = tester
+          .renderObject<RenderParagraph>(msgText)
+          .getBoxesForSelection(
+            const TextSelection(baseOffset: 0, extentOffset: 1),
+          )
+          .first
+          .toRect()
+          .height;
+      final area = tester.getRect(
+        find
+            .ancestor(of: msgText, matching: find.byType(SingleChildScrollView))
+            .first,
+      );
+      expect(area.height, greaterThanOrEqualTo(24 + 2 * lineHeight - 0.5));
       // The words are not scaled down to fit, and are the short ones; the
       // spoken label is the long one.
       expect(
@@ -852,6 +876,109 @@ void main() {
         findsOneWidget,
       );
       semantics.dispose();
+    });
+
+    for (final scale in [1.0, 2.0]) {
+      for (final keyboard in [false, true]) {
+        appTest('a message with no button shows in full at 344 dp, text scale '
+            '$scale, keyboard ${keyboard ? 'up' : 'down'}', (tester) async {
+          final handle = tester.ensureSemantics();
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          await openApp(tester, size: const Size(344, 800));
+          await openFood(tester);
+          await type(tester, '2 eggs, 1 slice toast');
+          answer = (_) async => http.Response('', 500);
+          await scan(tester, code);
+          if (keyboard) {
+            tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+            await tester.pump();
+          }
+          final message = find.text(S.scanNoConnection);
+          expect(message, findsOneWidget);
+          expect(tester.takeException(), isNull);
+          // With the keyboard up the notice takes the totals' place; Save
+          // stays, fully in view and 48 dp tall, and the box keeps its height.
+          expect(totals(), keyboard ? findsNothing : findsOneWidget);
+          if (keyboard) {
+            expect(tester.getSize(box()).height, greaterThanOrEqualTo(48));
+            final save = tester.getRect(saveButton());
+            expect(save.height, greaterThanOrEqualTo(48));
+            expect(save.bottom, lessThanOrEqualTo(500.5));
+          }
+          final bar = find.byType(ConfirmBar);
+          final scrollers = find
+              .descendant(of: bar, matching: find.byType(Scrollable))
+              .evaluate();
+          final extent = scrollers.isEmpty
+              ? 0.0
+              : ((scrollers.first as StatefulElement).state as ScrollableState)
+                    .position
+                    .maxScrollExtent;
+          // A scrollbar is there when, and only when, there is more to see.
+          expect(
+            find.descendant(of: bar, matching: find.byType(Scrollbar)),
+            extent > 0 ? findsOneWidget : findsNothing,
+          );
+          if (keyboard && scale == 2) {
+            // Too long for the room: the whole notice takes at most 40% of
+            // what is above the keyboard, and the message scrolls, with at
+            // least its padding and two lines in view.
+            expect(extent, greaterThan(0));
+            expect(tester.getRect(bar).height, lessThanOrEqualTo(200.5));
+            final line = tester
+                .renderObject<RenderParagraph>(message)
+                .getBoxesForSelection(
+                  const TextSelection(baseOffset: 0, extentOffset: 1),
+                )
+                .first
+                .toRect()
+                .height;
+            final area = tester.getRect(
+              find
+                  .ancestor(
+                    of: message,
+                    matching: find.byType(SingleChildScrollView),
+                  )
+                  .first,
+            );
+            expect(area.height, greaterThanOrEqualTo(24 + 2 * line - 0.5));
+          } else {
+            expect(extent, 0);
+            final paragraph = tester.renderObject<RenderParagraph>(message);
+            expect(paragraph.didExceedMaxLines, isFalse);
+          }
+          // The totals come back when the notice goes, and are spoken.
+          await tester.pump(const Duration(seconds: 11));
+          expect(message, findsNothing);
+          expect(totals(), findsOneWidget);
+          expect(find.semantics.byLabel(RegExp('^Meal total')), findsOneWidget);
+          handle.dispose();
+        });
+      }
+    }
+
+    appTest('a short message with the keyboard up shows in full, with no '
+        'scrollbar', (tester) async {
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 slice toast');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pump();
+      final state = tester.state<FoodEntryScreenState>(
+        find.byType(FoodEntryScreen),
+      );
+      state.debugShowNotice('Done.');
+      await tester.pump();
+      expect(find.text('Done.'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ConfirmBar),
+          matching: find.byType(Scrollbar),
+        ),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
     });
 
     appTest('a message with no button still goes after ten seconds', (

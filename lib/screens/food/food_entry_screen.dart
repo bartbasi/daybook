@@ -1333,6 +1333,10 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
 
   /// Tests make picks through the handle until the correction sheet (task
   /// 2.9) does, and read the newest result.
+  /// Tests show a plain message of their own.
+  @visibleForTesting
+  void debugShowNotice(String text) => _showNotice(_Notice(text));
+
   @visibleForTesting
   SessionHandle? get debugHandle => _handle;
 
@@ -1783,7 +1787,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                         // The message scrolls inside a limited height; its
                         // buttons stay in view.
                         ConfirmBar(
-                          maxMessageHeight: _noticeMaxHeight(context),
+                          maxMessageHeight: _noticeMaxHeight(context, _notice!),
                           message: _notice!.text,
                           onUndo: _notice!.undo == null ? null : _undoNotice,
                           actionLabel: _notice!.actionLabel,
@@ -1822,9 +1826,28 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     );
   }
 
-  double _noticeMaxHeight(BuildContext context) {
+  /// How tall a notice's message may be, or null for no limit. Only while the
+  /// keyboard is up is a notice limited: the whole notice takes at most 40% of
+  /// the height above the keyboard, its button row (48 dp) is not part of what
+  /// scrolls, and the message keeps its vertical padding and two full lines of
+  /// its own text at the current text scale, so a line is never cut through
+  /// the middle at rest.
+  double? _noticeMaxHeight(BuildContext context, _Notice n) {
     final m = MediaQuery.of(context);
-    return ((m.size.height - m.viewInsets.bottom) * 0.07).clamp(40.0, 1e9);
+    if (m.viewInsets.bottom <= 0) return null;
+    final share = (m.size.height - m.viewInsets.bottom) * 0.4;
+    final room = share - (n.onAction == null ? 0 : 48);
+    final painter = TextPainter(
+      text: TextSpan(
+        text: 'A\nA',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final twoLines = painter.height;
+    painter.dispose();
+    return room > 24 + twoLines ? room : 24 + twoLines;
   }
 
   /// The Scan button, after the date (frame 1).
@@ -2141,6 +2164,11 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     // kcal and the macros take a line each. Nothing is scaled down.
     final stacked = MediaQuery.textScalerOf(context).scale(10) > 13;
     const bold = TextStyle(fontWeight: FontWeight.bold);
+    // While the keyboard is up and a message is showing, the message takes
+    // the totals' place so it can be read in full; they come back with the
+    // keyboard down or when the message goes.
+    final hideTotals =
+        _notice != null && MediaQuery.viewInsetsOf(context).bottom > 0;
     final totalsColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2216,8 +2244,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (!_dead) totalsColumn,
-                    if (!_dead) const SizedBox(height: 4),
+                    if (!_dead && !hideTotals) totalsColumn,
+                    if (!_dead && !hideTotals) const SizedBox(height: 4),
                     button,
                   ],
                 )
@@ -2225,7 +2253,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                 Row(
                   children: [
                     Expanded(
-                      child: _dead ? const SizedBox.shrink() : totalsColumn,
+                      child: _dead || hideTotals
+                          ? const SizedBox.shrink()
+                          : totalsColumn,
                     ),
                     const SizedBox(width: 8),
                     ConstrainedBox(

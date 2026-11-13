@@ -9,7 +9,7 @@ import '../../strings.dart';
 /// A one-line message with an optional Undo, read aloud when it appears. Home
 /// shows it above the action bar; the food screen shows it under the meal
 /// chips, so it never covers the totals bar or Save.
-class ConfirmBar extends StatelessWidget {
+class ConfirmBar extends StatefulWidget {
   const ConfirmBar({
     super.key,
     required this.message,
@@ -20,8 +20,8 @@ class ConfirmBar extends StatelessWidget {
     this.maxMessageHeight,
   });
 
-  /// When set, a long message scrolls inside this height while the buttons
-  /// stay in view.
+  /// When set, a message taller than this scrolls inside it, with a scrollbar
+  /// that is always shown, while the buttons stay in view.
   final double? maxMessageHeight;
 
   final String message;
@@ -38,12 +38,56 @@ class ConfirmBar extends StatelessWidget {
   /// the visible [actionLabel].
   final String? actionSpoken;
 
+  @override
+  State<ConfirmBar> createState() => _ConfirmBarState();
+}
+
+class _ConfirmBarState extends State<ConfirmBar> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  String get message => widget.message;
+  VoidCallback? get onUndo => widget.onUndo;
+  String? get actionLabel => widget.actionLabel;
+  VoidCallback? get onAction => widget.onAction;
+  String? get actionSpoken => widget.actionSpoken;
+
+  /// The message, padded; limited to the room it is given, and when it is
+  /// taller than that, scrolling with a scrollbar that is always shown.
   Widget _scrolling(Widget child) {
-    final max = maxMessageHeight;
+    final max = widget.maxMessageHeight;
     if (max == null) return child;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: max),
-      child: SingleChildScrollView(child: child),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: message,
+            style: DefaultTextStyle.of(context).style,
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: box.maxWidth);
+        final tall = painter.height + 24 > max;
+        painter.dispose();
+        final scrolling = ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: max),
+          child: SingleChildScrollView(controller: _scroll, child: child),
+        );
+        if (!tall) return scrolling;
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: max),
+          child: Scrollbar(
+            controller: _scroll,
+            thumbVisibility: true,
+            child: SingleChildScrollView(controller: _scroll, child: child),
+          ),
+        );
+      },
     );
   }
 
