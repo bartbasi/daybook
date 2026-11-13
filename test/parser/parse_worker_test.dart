@@ -132,22 +132,18 @@ void main() {
 
   setUpAll(() {
     final dir = Directory.systemTemp.createTempSync('daybook_worker');
-    addTearDown(() {
-      // A worker stopped in the middle of its start may still hold the file
-      // on Windows; the folder is in the system temp folder anyway.
-      try {
-        dir.deleteSync(recursive: true);
-      } on FileSystemException {
-        // Left for the system to clean up.
-      }
-    });
+    addTearDown(() => dir.deleteSync(recursive: true));
     path = '${dir.path}/usda.sqlite';
     File(path).writeAsBytesSync(
       gzip.decode(File('assets/food/usda.sqlite.gz').readAsBytesSync()),
     );
     db = sqlite3.open(path, mode: OpenMode.readOnly);
+    // Registered after the folder's delete, so it runs first: the loader's
+    // statements are released, then the database is closed, then the file goes.
     addTearDown(db.close);
-    parser = Parser(SearchIndex.build(readUsdaFoods(db)), sqliteUsdaFoods(db));
+    final loader = SqliteUsdaFoods(db);
+    addTearDown(loader.dispose);
+    parser = Parser(SearchIndex.build(readUsdaFoods(db)), loader.call);
   });
 
   group('a real isolate', () {

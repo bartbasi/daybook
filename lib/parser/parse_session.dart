@@ -178,7 +178,10 @@ class ParseSession {
     final l = item.line;
     final ref = l.foodRef;
     if (ref == null) return Alternatives.none;
-    final m = _rankerOf().match(item.draft.foodText);
+    final m = _rankerOf().match(
+      item.draft.foodText,
+      negation: !item.draft.negationProtected,
+    );
     return Alternatives(
       FoodChoice(ref, l.foodName ?? ref, _dataset(ref), l.nutrients[_energyId]),
       [
@@ -196,7 +199,14 @@ class ParseSession {
       for (final c in _rankerOf().search(text))
         draft == null
             ? FoodChoice(c.ref, c.description, c.food.dataset, null)
-            : _choice(c, draft, queryWords(draft.foodText)),
+            : _choice(
+                c,
+                draft,
+                readQuery(
+                  draft.foodText,
+                  negation: !draft.negationProtected,
+                ).words,
+              ),
     ];
   }
 
@@ -299,17 +309,23 @@ class ParseSession {
     _lines = List.unmodifiable([for (final i in _items) _withCursor(i.line)]);
   }
 
-  // 9.2: a not found item that has the cursor (inside, or at either end) is
-  // plain typing.
+  // 9.2: a not found item that has the cursor (after its start, up to and
+  // including its end) is plain typing. The same test as Parser.parseMeal; the
+  // parser does not expose it as a function.
+  //
+  // Session rule that 9.2 does not cover: when the cursor is at the end of the
+  // text and only blanks lie between the item's end and the cursor, the item
+  // is still being typed ("2 " and "2 sl "), so it stays plain. It becomes Not
+  // found when the cursor moves elsewhere or more text follows.
   Line _withCursor(Line l) {
     final s = l.span;
-    if (l.state == LineState.notFound &&
-        s != null &&
-        _cursor >= s.start &&
-        _cursor <= s.end) {
-      return l.asPlain();
-    }
-    return l;
+    if (l.state != LineState.notFound || s == null) return l;
+    final inside = _cursor > s.start && _cursor <= s.end;
+    final typingOn =
+        _cursor > s.end &&
+        _cursor == _text.length &&
+        _text.substring(s.end).trim().isEmpty;
+    return inside || typingOn ? l.asPlain() : l;
   }
 
   _Item? _itemAt(Span span) {
@@ -330,6 +346,7 @@ class ParseSession {
       d.isRange,
       d.unit?.label,
       d.size,
+      d.negationProtected,
     ].join('\u0001');
     var hit = _cache[key];
     if (hit == null) {
@@ -465,7 +482,7 @@ class ParseSession {
     final r = resolveAmount(
       d,
       food,
-      foodWords: queryWords(d.foodText),
+      foodWords: readQuery(d.foodText, negation: !d.negationProtected).words,
       learned:
           learned != null && learned.foodRef == ref && learned.quantity != null
           ? LearnedAmount(learned.quantity!, learned.unitLabel ?? '')

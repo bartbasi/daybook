@@ -155,16 +155,20 @@ class WorkerFailure extends WorkerReply implements Exception {
 /// The worker's side: a parser, a session, and the answer to each request. Used
 /// by the isolate and by the inline worker, so both give the same results.
 class WorkerCore {
-  WorkerCore(Parser parser, {Database? database})
-    : _db = database,
-      session = ParseSession(parser);
+  WorkerCore(Parser parser, {this.database, this.loader})
+    : session = ParseSession(parser);
 
   /// Opens the USDA file at [path] and builds the index.
   factory WorkerCore.open(String path) {
     final db = sqlite3.open(path, mode: OpenMode.readOnly);
     try {
       final index = SearchIndex.build(readUsdaFoods(db));
-      return WorkerCore(Parser(index, sqliteUsdaFoods(db)), database: db);
+      final loader = SqliteUsdaFoods(db);
+      return WorkerCore(
+        Parser(index, loader.call),
+        database: db,
+        loader: loader,
+      );
     } catch (_) {
       db.close();
       rethrow;
@@ -172,7 +176,10 @@ class WorkerCore {
   }
 
   final ParseSession session;
-  final Database? _db;
+
+  /// What [close] releases, when the core opened them.
+  final Database? database;
+  final SqliteUsdaFoods? loader;
 
   /// Answers one request. A failure inside is returned as a [WorkerFailure]
   /// with no user text; the session stays as it was.
@@ -209,7 +216,12 @@ class WorkerCore {
     session.lines,
   );
 
-  void close() => _db?.close();
+  /// Releases the loader's statements, then closes the database. The order
+  /// matters on Windows.
+  void close() {
+    loader?.dispose();
+    database?.close();
+  }
 }
 
 /// How the main side reaches the worker. The isolate and the inline worker
@@ -438,10 +450,10 @@ class _IsolateLink implements WorkerLink {
   final String _path;
   final _early = <WorkerRequest>[];
   final _exited = Completer<void>();
+  final _portArrived = Completer<void>();
   ReceivePort? _in;
   SendPort? _worker;
   Future<Isolate?>? _spawn;
-  var _isReady = false;
   var _closing = false;
   var _reportedStop = false;
 
@@ -452,12 +464,12 @@ class _IsolateLink implements WorkerLink {
     port.listen((Object? m) {
       if (m is SendPort) {
         _worker = m;
+        if (!_portArrived.isCompleted) _portArrived.complete();
         for (final r in _early) {
           m.send(r);
         }
         _early.clear();
       } else if (m is WorkerReply) {
-        if (m is ReadyReply) _isReady = true;
         if (m is WorkerFailure && m.kind == FailureKind.startup) {
           _reportedStop = true;
         }
@@ -510,11 +522,16 @@ class _IsolateLink implements WorkerLink {
   Future<void> close() async {
     _closing = true;
     final isolate = await _spawn;
+    // The worker sends its port first thing; wait for it, so that the
+    // shutdown can reach it and the database is closed properly.
+    await Future.any([_portArrived.future, _exited.future]);
     final w = _worker;
-    if (w != null && _isReady) {
+    if (w != null) {
+      // Even while the index is still being built: the message waits in the
+      // worker's inbox, and the worker then closes its database properly. The
+      // timeout below stops it if that takes too long.
       w.send(_shutdown);
     } else {
-      // Still building the index: there is nothing to finish, so stop it.
       isolate?.kill(priority: Isolate.immediate);
     }
     await _exited.future.timeout(

@@ -21,47 +21,59 @@ const _egg = 'usda:2707153';
 const _coffee = 'usda:2710373';
 const _halfAndHalf = 'usda:2705594';
 
-UserSnapshotData _data({int version = 1, bool learned = false}) =>
-    UserSnapshotData(
-      version: version,
-      foods: [
-        const UserFoodData(
-          ref: 'local:1',
-          name: 'Protein bar',
-          kind: 'custom',
+UserSnapshotData _data({
+  int version = 1,
+  bool learned = false,
+}) => UserSnapshotData(
+  version: version,
+  foods: [
+    const UserFoodData(
+      ref: 'local:1',
+      name: 'Protein bar',
+      kind: 'custom',
+      baseUnit: 'g',
+      baseAmount: 50,
+      portions: [PortionData('1 bar', 50)],
+      nutrients: {1008: 200, 203: 20},
+    ),
+    const UserFoodData(
+      ref: 'local:2',
+      name: 'No sugar cola',
+      kind: 'off',
+      baseUnit: 'ml',
+      baseAmount: 100,
+      nutrients: {1008: 1},
+    ),
+  ],
+  savedMeals: [
+    const SavedMealData(
+      id: 1,
+      name: 'Usual oatmeal',
+      items: [
+        SavedMealItemData(
+          foodRef: _egg,
+          foodName: 'Egg',
+          quantity: 1,
+          unitLabel: '',
+          baseQuantity: 50,
           baseUnit: 'g',
-          baseAmount: 50,
-          portions: [PortionData('1 bar', 50)],
-          nutrients: {1008: 200, 203: 20},
+          nutrients: {1008: 72},
         ),
       ],
-      savedMeals: [
-        const SavedMealData(
-          id: 1,
-          name: 'Usual oatmeal',
-          items: [
-            SavedMealItemData(
-              foodRef: _egg,
-              foodName: 'Egg',
-              quantity: 1,
-              unitLabel: '',
-              baseQuantity: 50,
-              baseUnit: 'g',
-              nutrients: {1008: 72},
-            ),
-          ],
-        ),
-      ],
-      aliases: [const AliasData('my oatmeal', 1)],
-      learned: [
-        if (learned)
-          const LearnedMatchData(
-            key: 'toast',
-            foodRef: _egg,
-            foodName: 'Egg, whole',
-          ),
-      ],
-    );
+    ),
+  ],
+  aliases: [const AliasData('my oatmeal', 1)],
+  // A scanned product counts for the splitter once it has been logged (R40).
+  historyCounts: const {'local:2': 1},
+  learned: [
+    if (learned)
+      const LearnedMatchData(
+        key: 'toast',
+        foodRef: _egg,
+        foodName: 'Egg, whole',
+      ),
+  ],
+);
 
 String _sum(Line l) {
   final nutrients = (l.nutrients.entries.toList()
@@ -88,28 +100,38 @@ String _sum(Line l) {
   ].join('|');
 }
 
+// The parser's line, with the session's extra rule on top: a not found item
+// followed only by blanks, with the cursor at the end of the text, is plain.
+Line _expectedPlain(Line l, String text, int cursor) {
+  final span = l.span;
+  if (l.state == LineState.notFound &&
+      span != null &&
+      cursor > span.end &&
+      cursor == text.length &&
+      text.substring(span.end).trim().isEmpty) {
+    return l.asPlain();
+  }
+  return l;
+}
+
 void main() {
   late Parser parser;
   late Database db;
 
   setUpAll(() {
     final dir = Directory.systemTemp.createTempSync('daybook_session');
-    addTearDown(() {
-      // A worker stopped in the middle of its start may still hold the file
-      // on Windows; the folder is in the system temp folder anyway.
-      try {
-        dir.deleteSync(recursive: true);
-      } on FileSystemException {
-        // Left for the system to clean up.
-      }
-    });
+    addTearDown(() => dir.deleteSync(recursive: true));
     final path = '${dir.path}/usda.sqlite';
     File(path).writeAsBytesSync(
       gzip.decode(File('assets/food/usda.sqlite.gz').readAsBytesSync()),
     );
     db = sqlite3.open(path, mode: OpenMode.readOnly);
+    // Registered after the folder's delete, so it runs first: the loader's
+    // statements are released, then the database is closed, then the file goes.
     addTearDown(db.close);
-    parser = Parser(SearchIndex.build(readUsdaFoods(db)), sqliteUsdaFoods(db));
+    final loader = SqliteUsdaFoods(db);
+    addTearDown(loader.dispose);
+    parser = Parser(SearchIndex.build(readUsdaFoods(db)), loader.call);
   });
 
   ParseSession newSession({UserSnapshotData? data}) =>
@@ -406,7 +428,9 @@ void main() {
       expect(s.lines[1].state, LineState.notFound);
       s.setText('2 eggs, 2 sl', 7); // on the comma, before the item
       expect(s.lines[1].plain, isFalse);
-      s.setText('2 eggs, 2 sl', 8); // at the start of the item
+      s.setText('2 eggs, 2 sl', 8); // at the start of the item: not under it
+      expect(s.lines[1].plain, isFalse);
+      s.setText('2 eggs, 2 sl', 9);
       expect(s.lines[1].plain, isTrue);
       s.setText('2 eggs, 2 sl', 10); // inside
       expect(s.lines[1].plain, isTrue);
@@ -443,6 +467,52 @@ void main() {
             }
           }
         }
+      },
+    );
+  });
+
+  group('a number typed and then a space (session rule, not in 9.2)', () {
+    test('"2 " with the cursor at the end is still plain', () {
+      final s = newSession()..setText('2 ', 2);
+      expect(s.lines.single.state, LineState.notFound);
+      expect(s.lines.single.plain, isTrue);
+      s.setText('2 sl ', 5);
+      expect(s.lines.single.plain, isTrue);
+      s.setText('2 \n ', 4);
+      expect(s.lines.single.plain, isTrue);
+    });
+
+    test('"2 , eggs" with the cursor after the space is not plain', () {
+      final s = newSession()..setText('2 , eggs', 2);
+      expect(s.lines[0].state, LineState.notFound);
+      expect(s.lines[0].plain, isFalse);
+    });
+
+    test('"eggs, 2 " at the end is plain; the cursor in "eggs" ends it', () {
+      final s = newSession()..setText('eggs, 2 ', 8);
+      expect(s.lines[1].state, LineState.notFound);
+      expect(s.lines[1].plain, isTrue);
+      s.setText('eggs, 2 ', 2);
+      expect(s.lines[1].plain, isFalse);
+      s.setText('eggs, 2 ', 8);
+      expect(s.lines[1].plain, isTrue);
+      s.setText('eggs, 2 , toast', 8);
+      expect(s.lines[1].plain, isFalse);
+    });
+  });
+
+  group('a name that starts with No', () {
+    test(
+      'a product named "No sugar cola" is found, as the parser finds it',
+      () {
+        final s = newSession()..setText('no sugar cola', 13);
+        expect(s.lines.single.foodRef, 'local:2');
+        expect(
+          _sum(s.lines.single),
+          _sum(parser.parseMeal('no sugar cola', 13, s.snapshot).single),
+        );
+        final a = s.alternatives(s.lines.single.span!);
+        expect(a.current!.ref, 'local:2');
       },
     );
   });
@@ -771,6 +841,8 @@ void main() {
       'no sugar',
       '.',
       'Usual oatmeal',
+      'no sugar cola',
+      'coffee with no sugar',
       '3 large eggs',
       ' of ',
     ];
@@ -842,7 +914,7 @@ void main() {
             } else {
               expect(
                 _sum(l),
-                _sum(plain[i]),
+                _sum(_expectedPlain(plain[i], text, cursor)),
                 reason: '$seq $step "$text" line $i',
               );
             }
