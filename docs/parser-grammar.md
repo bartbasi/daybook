@@ -69,6 +69,7 @@ Before anything else:
 | A hyphen between a letter and a following digit | removed | `V-8` becomes `V8` |
 | A hyphen between a digit and a following letter | a space | `2-percent` becomes `2 percent` |
 | A hyphen with a digit on both sides | kept, for the quantity rules in section 3 | `2-3` (a range), `1-1/2` (a mixed number) |
+| A combining mark (an accent stored as its own character) | kept with the letter before it; it never splits a word | `café` typed with a combining accent stays one word |
 | Any other character that is not a letter, digit, space, `,` `;` `.` `/` `%` `+` `-` `~` `×` or new line | a space | `!!!` becomes nothing |
 
 Because `&`, `w/` and `w/o` are replaced here, the later steps and the grammar in section 10 only ever see the words "and", "with" and "without".
@@ -102,7 +103,7 @@ A comma is never a decimal point (see [section 12](#12-limits-and-speed)).
 
 ### 2.3 Protected phrases
 
-A protected phrase is a food name that contains a separator word, a number word or digits. Its words are never split and never read as quantities. For filler only, any of the user's own names is also a protected phrase (item 2 below). Protected phrases are found first, longest match first, scanning left to right.
+A protected phrase is a food name whose words are kept together. Its words are never split, never read as quantities and never dropped as filler (2.6 rule 1); the user's own names are also never read as sizes or units (item 2 below). Protected phrases are found first, longest match first, scanning left to right. A phrase protects only text that contains the whole phrase.
 
 The protected list is:
 
@@ -112,11 +113,11 @@ The protected list is:
 
    One more phrase is protected only so that its `a` is never read as a quantity: `a la` (as in "chicken a la king", "pie a la mode").
 
-2. **The user's own names** that contain a separator word (`and`, `with`, `plus`) or a number word or digit: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. For example, a saved meal called "eggs and toast" or a product called "7 Up" stays whole. A number word here means digits, the number words one to ninety-nine as written in 10.2, half, quarter, third, dozen and couple.
+2. **The user's own names of two or more words**: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. Each is protected in full, whatever words it contains: against splitting, against quantity, size and unit reading, and against filler removal. So with a cached product "Big Mac", `big mac` gives the food words "big mac", not a large "mac"; "Thin Mints" and "Mini Wheats" work the same way. A saved meal called "eggs and toast" stays whole, and with an alias "my oatmeal", the "my" in `I had my oatmeal` is kept.
 
-   Each name goes through the clean-up in 2.1 before it becomes a protected phrase, so a product named "Coca-Cola 330ml" becomes "coca cola 330 ml". The 2.1 rule that keeps a word with digits whole applies only when the whole name is that one word (such as "7up"), so this product does not stop `330ml milk` being read as 330 ml of milk.
+   A one-word name needs no protection and gets none, so a recipe named "Bowl" never stops `1 bowl of rice` reading "bowl" as a unit. The one exception is the 2.1 rule that keeps a one-word name containing digits whole (a product named "7up").
 
-   Words inside a protected phrase are never filler words (2.6 rule 1). For this, every alias phrase, saved meal name and user food name counts as protected, even one with no separator word or number word. So with an alias "my oatmeal", the "my" in `I had my oatmeal` is kept.
+   Each name goes through the clean-up in 2.1 before it becomes a protected phrase, so a product named "Coca-Cola 330ml" becomes "coca cola 330 ml". It protects only text that contains the whole name, so it does not stop `330ml milk` being read as 330 ml of milk.
 
 Why a short hand-made list and not one built from the data: the bundled descriptions contain 2,610 names with " and " and 523 different "word and word" pairs, but the most common are "lean and fat" (781 times), "meat and skin" (149) and "solids and liquids" (114), and the list also holds pairs such as "egg and cheese" (from restaurant sandwiches) and "beef and rice". A list built from the data would stop "eggs and cheese" or "beef and rice" from splitting in ways nobody could predict.
 
@@ -449,10 +450,14 @@ A short list kept in code, applied to typed text before matching, longest phrase
 | burger | hamburger |
 | yoghurt | yogurt |
 | donut | doughnut |
+| skim milk, nonfat milk | milk fat free skim |
+| bbq | barbecue |
+| cooked cereal, cereal bar | unchanged |
+| cereal | cereal ready to eat |
 
 Synonyms are applied once, in a single pass. Their output is never scanned again, so "7up" becomes "lemon lime soda" and that "soda" is not turned into "soft drink" (example 73 depends on this).
 
-Each entry was checked against the data. "v8" gives the plain "Tomato and vegetable juice, 100%"; without it, `V8` matches "Beverages, V8 V-FUSION Juices, Tropical", a fruit and vegetable blend with more than twice the calories. Without "toast", the word only matches "French toast", "Melba toast" and the like, because USDA writes "Bread, white, toasted". Without "coke", the typo rule turns it into "cake".
+Each entry was checked against the data. "v8" gives the plain "Tomato and vegetable juice, 100%"; without it, `V8` matches "Beverages, V8 V-FUSION Juices, Tropical", a fruit and vegetable blend with more than twice the calories. Without "toast", the word only matches "French toast", "Melba toast" and the like, because USDA writes "Bread, white, toasted". Without "coke", the typo rule turns it into "cake". "skim milk" and "nonfat milk" find "Milk, fat free (skim)", and "cereal" finds "Cereal, ready-to-eat, NFS"; the identity rows "cooked cereal" and "cereal bar" stop the cereal row applying inside those phrases.
 
 ### 5.4 Candidates and ranking
 
@@ -544,11 +549,11 @@ After an item's amount is read, its food words (with leading filler words droppe
 1. every alias phrase (`aliases.phrase`);
 2. every saved meal name (`saved_meals.name`).
 
-Both sides are compared as: lower case, accents and punctuation removed, words separated by single spaces. There is no stemming and no other filler-word removal, and a word inside the user's own name is never filler (2.3), so "my" counts: `I had my oatmeal` matches an alias "my oatmeal", and `I had usual breakfast` matches "usual breakfast". The match must be exact. `usual breakfast` matches an alias "Usual breakfast"; `usual breakfasts` does not. Exact matching is what keeps expansions from happening by accident.
+Both sides go through the same key before they are compared: the clean-up in 2.1, then lower case, with accents and apostrophes dropped, any other punctuation turned into a space, and words separated by single spaces. So an alias saved as "pb&j" expands when `pb and j` is typed. There is no stemming and no other filler-word removal, and a word inside the user's own name is never filler (2.3), so "my" counts: `I had my oatmeal` matches an alias "my oatmeal", and `I had usual breakfast` matches "usual breakfast". The match must be exact. `usual breakfast` matches an alias "Usual breakfast"; `usual breakfasts` does not. Exact matching is what keeps expansions from happening by accident.
 
-Names that contain "and", "with" or a number word are protected phrases (2.3), so they reach this step whole.
+Names of two or more words are protected phrases (2.3), so they reach this step whole.
 
-If two saved meals have the same normalized name, the newest (highest id) wins. An alias wins over a saved meal name.
+If two saved meals have the same normalized name, the newest (highest id) wins. An alias wins over a saved meal name. Two aliases with the same key cannot both be saved, so "pb&j" and "pb and j" cannot be saved as different aliases.
 
 ### 6.2 Quantity
 
@@ -1117,3 +1122,6 @@ In these places the document was silent or two of its rules disagreed. The lead 
 - A user food with a base amount of zero or less is never matched (4.5).
 - A default shows the portion its rule picked when that portion's amount is 1 ("1 leek"), and only otherwise a portion of the same weight ("1 small" for coffee) (4.6).
 - A bare count compares the portion's word with the plural rule, so `2 cookies` uses a "1 cookie" portion (4.5 rule 2).
+- Every user name of two or more words is kept whole, whatever words it contains: with a cached product "Big Mac", `big mac` is "big mac", not a large "mac". A one-word name gets no protection, so a recipe named "Bowl" does not stop `1 bowl of rice` (2.3).
+- Alias and saved meal names are compared after the same clean-up as typed text, so an alias saved as "pb&j" expands for `pb and j`, and the two cannot be saved as different aliases (6.1).
+- New synonyms: `skim milk` and `nonfat milk` find "Milk, fat free (skim)", `bbq` reads as "barbecue", and `cereal` finds "Cereal, ready-to-eat, NFS" except in `cooked cereal` and `cereal bar` (5.3).
