@@ -4,6 +4,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 
 import '../../app.dart';
 import '../../app_scope.dart';
@@ -20,6 +21,7 @@ import '../../util/dates.dart';
 import '../../util/units.dart';
 import '../weight/weight_sheet.dart';
 import 'confirm_bar.dart';
+import 'correction_sheet.dart';
 import 'food_line_tile.dart';
 
 // The one-screen food entry (food-entry.html, parser-grammar.md 8 and 9).
@@ -33,8 +35,9 @@ import 'food_line_tile.dart';
 // exactly the text in the box.
 //
 // Where later tasks plug in:
-//   2.9  [FoodEntryScreenState.onLineTap]: the correction sheet. It receives a
-//        [LineTap]; both a tap on a line and "Fix N items" end up there.
+//   2.9  [FoodEntryScreenState.onLineTap] opens the correction sheet
+//        (correction_sheet.dart) for a [LineTap]; both a tap on a line and
+//        "Fix N items" end up there. The sheet asks this screen to act.
 //   2.10 [_chipsSeam] in the scroll area, under the box: the chips row. It adds
 //        lines with [FoodEntryScreenState.addLines].
 //   2.11 [_scanSeam] in the top bar: the Scan button, which also adds lines
@@ -130,6 +133,7 @@ class FoodDraft {
     required this.picks,
     required this.added,
     this.editingMealId,
+    this.savedMealId,
   });
 
   final String date;
@@ -141,6 +145,10 @@ class FoodDraft {
 
   /// Set when the screen was editing a logged meal.
   final int? editingMealId;
+
+  /// The saved meal whose items were made into added lines by a change to
+  /// one of them (the meal still counts as made from it).
+  final int? savedMealId;
 }
 
 /// What the screen hands back when it closes.
@@ -169,7 +177,14 @@ class FoodAbandoned extends FoodEntryResult {
 
 /// A tap on a line, for the correction sheet (task 2.9).
 class LineTap {
-  const LineTap({required this.line, this.header, this.addedIndex, this.text});
+  const LineTap({
+    required this.line,
+    this.header,
+    this.addedIndex,
+    this.added,
+    this.text,
+    this.typedText,
+  });
 
   /// The line tapped. For a saved meal header this is the header; for one of
   /// its items it is the item.
@@ -180,6 +195,13 @@ class LineTap {
 
   /// The index in the screen's added lines, or null for a typed line.
   final int? addedIndex;
+
+  /// The added line itself (the saved meal header, for one of its items):
+  /// the sheet finds it again by identity, not by [addedIndex].
+  final AddedLine? added;
+
+  /// For a typed line: the words typed for it (a slice of [text]).
+  final String? typedText;
 
   /// For a typed line: the text of the result its span belongs to. Pass this
   /// text, never the box's current text, with the span (plan rule 6).
@@ -217,11 +239,16 @@ class _Notice {
   final Future<void> Function()? undo;
 }
 
+class _Signal extends ChangeNotifier {
+  void fire() => notifyListeners();
+}
+
 class _Moved implements Exception {
   const _Moved();
 }
 
-class FoodEntryScreenState extends State<FoodEntryScreen> {
+class FoodEntryScreenState extends State<FoodEntryScreen>
+    implements CorrectionHost {
   /// The food screen on top, if one is open. The widget link uses it: a tap on
   /// the weight widget opens the weight sheet over this screen.
   static FoodEntryScreenState? active;
@@ -261,6 +288,15 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   var _busy = false;
   var _writing = false;
   var _closed = false;
+
+  // The correction sheet. [_changes] tells it that the box, the newest result
+  // or the worker changed. [_addedChanged] is true once the user changed the
+  // added lines of a logged meal being edited (it is then worth a draft).
+  // [_keptSavedMealId] is a saved meal whose items became added lines.
+  var _sheetOpen = false;
+  final _changes = _Signal();
+  var _addedChanged = false;
+  int? _keptSavedMealId;
   final _currentKey = GlobalKey();
   String? _error;
 
@@ -279,6 +315,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _slotId = d?.slotId ?? e?.meal.slotId ?? widget.slotId;
     _editingMealId = d?.editingMealId ?? e?.meal.id;
     _editingSlotName = d?.slotName ?? e?.slotName ?? '';
+    _keptSavedMealId = d?.savedMealId;
+    _addedChanged = d?.editingMealId != null;
     _added = d != null
         ? [...d.added]
         : [
@@ -315,6 +353,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     if (identical(active, this)) active = null;
     _noticeTimer?.cancel();
     _slotsSub?.cancel();
+    _changes.dispose();
     _handle?.close();
     _failWaiters(const _Moved());
     _controller.dispose();
@@ -341,6 +380,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       worker = await host.acquire();
     } catch (_) {
       if (mounted) setState(() => _dead = true);
+      _changes.fire();
       return;
     }
     if (!mounted) return;
@@ -348,6 +388,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _handle = h;
     if (h.isClosed) {
       setState(() => _dead = true);
+      _changes.fire();
       return;
     }
     final text = _controller.text;
@@ -374,6 +415,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     final picks = _picksNow();
     _handle?.close();
     _handle = null;
+    _changes.fire();
     _result = null;
     _sentText = null;
     _sentCursor = -2;
@@ -408,6 +450,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       }
     }
     if (mounted) setState(() {});
+    _changes.fire();
   }
 
   void _onResult(ParseResult r) {
@@ -423,20 +466,39 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       }
     }
     if (mounted) setState(() {});
+    _changes.fire();
     _revealCurrentLine();
   }
 
   /// Keeps the line for the item under the cursor in view (frame 2). It only
   /// scrolls the lines area: the text box is outside it, so the two never
-  /// fight. It runs after a result, never while the user scrolls by hand.
+  /// fight. A line above the view is shown at the start, one below it at the
+  /// end, and one taller than the view shows its top. It runs after a result,
+  /// never while the user scrolls by hand.
   void _revealCurrentLine() {
     final binding = WidgetsBinding.instance;
     binding.addPostFrameCallback((_) {
       final c = _currentKey.currentContext;
       if (!mounted || c == null) return;
-      Scrollable.ensureVisible(
-        c,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      final box = c.findRenderObject();
+      if (box == null || !box.attached) return;
+      final viewport = RenderAbstractViewport.maybeOf(box);
+      final position = Scrollable.maybeOf(c)?.position;
+      if (viewport == null || position == null) return;
+      final top = viewport.getOffsetToReveal(box, 0).offset;
+      final bottom = viewport.getOffsetToReveal(box, 1).offset;
+      final here = position.pixels;
+      double? to;
+      if (bottom > top) {
+        to = top; // taller than the view: its top
+      } else if (here > top) {
+        to = top; // above the view
+      } else if (here < bottom) {
+        to = bottom; // below the view
+      }
+      if (to == null) return;
+      position.jumpTo(
+        to.clamp(position.minScrollExtent, position.maxScrollExtent),
       );
     });
     binding.scheduleFrame();
@@ -454,6 +516,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     }
     _waiters.clear();
     if (mounted) setState(() {});
+    _changes.fire();
   }
 
   void _failWaiters(Object error) {
@@ -534,7 +597,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
         return l.savedMealId;
       }
     }
-    return null;
+    return _keptSavedMealId;
   }
 
   String _slotName() {
@@ -546,26 +609,315 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 
   /// Adds lines that did not come from typing (chips and scans, tasks 2.10
   /// and 2.11). They are listed before the typed lines, in the order added.
-  void addLines(List<AddedLine> lines) =>
-      setState(() => _added = [..._added, ...lines]);
+  void addLines(List<AddedLine> lines) => setState(() {
+    _added = [..._added, ...lines];
+    _addedChanged = true;
+  });
 
   void removeAdded(int index) {
     if (index < 0 || index >= _added.length) return;
-    setState(() => _added = [..._added]..removeAt(index));
+    setState(() {
+      _added = [..._added]..removeAt(index);
+      _addedChanged = true;
+    });
   }
 
-  // The seam for the correction sheet (task 2.9).
+  // The correction sheet (task 2.9).
 
   /// Called when a line is tapped and when "Fix N items" asks for the first
-  /// line that was not found. Task 2.9 opens the correction sheet here. Until
-  /// then nothing opens.
+  /// line that was not found. Opens the correction sheet. It is not awaited:
+  /// Save, which can call this, must not stay busy while the sheet is open.
   void onLineTap(LineTap tap) {
-    lineTapObserver?.call(tap);
+    if (_sheetOpen || !mounted) return;
+    // A line drawn for text the box has moved on from is not tapped: the
+    // lines are about to catch up (rule 6).
+    if (tap.text != null && tap.text != _controller.text) return;
+    unawaited(_openSheet(tap));
   }
 
-  /// Tests watch what the correction sheet would be asked to open.
-  @visibleForTesting
-  static void Function(LineTap tap)? lineTapObserver;
+  /// The keyboard goes down while the sheet is open and comes back, with the
+  /// cursor where it was, when it closes (frame 4). It stays down if it was
+  /// down (editing a logged meal).
+  Future<void> _openSheet(LineTap tap) async {
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final hadFocus = _focus.hasFocus;
+    _sheetOpen = true;
+    _focus.unfocus();
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        constraints: const BoxConstraints(maxWidth: 600),
+        builder: (_) => CorrectionSheet(host: this, tap: tap, handle: _handle),
+      );
+    } finally {
+      _sheetOpen = false;
+    }
+    if (!mounted || !hadFocus) return;
+    _focus.requestFocus();
+    // A rewrite or a removal already set its own cursor.
+    if (_controller.text == text && selection.isValid) {
+      _controller.selection = selection;
+    }
+  }
+
+  @override
+  void addListener(VoidCallback listener) => _changes.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _changes.removeListener(listener);
+
+  @override
+  SessionHandle? get sheetHandle => _handle;
+
+  @override
+  bool get sheetUsable => !_dead;
+
+  @override
+  String get boxText => _controller.text;
+
+  @override
+  void sheetNote(String text) {
+    if (mounted) _showNotice(_Notice(text));
+  }
+
+  @override
+  Future<ParseWorker?> sheetWorker() async {
+    try {
+      return await _parser?.acquire();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<T?> _guard<T>(Future<T> Function() f) async {
+    try {
+      return await f();
+    } catch (_) {
+      return null; // never the text or a line
+    }
+  }
+
+  void _stale() => sheetNote(S.foodSheetStale);
+
+  /// Rule 8: the text and the cursor in one step, so the next text sent to
+  /// the parser is exactly this one.
+  void _setText(String text, int cursor) {
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: cursor.clamp(0, text.length)),
+    );
+  }
+
+  Future<Line?> _foodLine(
+    String ref, {
+    double? quantity,
+    String unit = '',
+  }) async {
+    final w = await sheetWorker();
+    if (w == null) return null;
+    return _guard<Line?>(() => w.foodLine(ref, quantity: quantity, unit: unit));
+  }
+
+  /// The handle, text and span of a typed line (or a typed saved meal
+  /// header) when they are still good; otherwise a message and null.
+  ({SessionHandle h, String text, Span span})? _typedTarget(LineTap tap) {
+    final h = _handle;
+    final text = tap.text;
+    final span = tap.line.span;
+    if (h == null ||
+        h.isClosed ||
+        text == null ||
+        span == null ||
+        text != _controller.text) {
+      _stale();
+      return null;
+    }
+    return (h: h, text: text, span: span);
+  }
+
+  /// A line that is an added line, or an item of a saved meal header. These
+  /// are changed on the screen's own list, never through the text.
+  bool _foodLevel(LineTap tap) => tap.addedIndex != null || tap.header != null;
+
+  /// Turns a saved meal header into its items as added lines for this meal,
+  /// and returns them. For a typed header the name's text is removed first
+  /// (lead ruling, notes item 5); on a refusal nothing changes.
+  Future<List<AddedLine>?> _explode(LineTap tap) async {
+    final header = tap.header!;
+    final fresh = [for (final i in header.items) AddedLine(i)];
+    if (tap.added != null) {
+      final at = _added.indexWhere((a) => identical(a, tap.added));
+      if (at < 0) {
+        _stale();
+        return null;
+      }
+      setState(() {
+        _added = [
+          ..._added.sublist(0, at),
+          ...fresh,
+          ..._added.sublist(at + 1),
+        ];
+        _keptSavedMealId ??= header.savedMealId;
+        _addedChanged = true;
+      });
+      return fresh;
+    }
+    final span = header.span;
+    final text = tap.text;
+    final h = _handle;
+    if (h == null || h.isClosed || span == null || text == null) {
+      _stale();
+      return null;
+    }
+    if (text != _controller.text) {
+      _stale();
+      return null;
+    }
+    final out = await _guard(() => h.removeItem(text, _cursor(), span));
+    if (out == null) {
+      sheetNote(S.foodSheetRefusedRemove);
+      return null;
+    }
+    if (_controller.text != text) {
+      _stale();
+      return null;
+    }
+    _setText(out.text, out.cursor);
+    setState(() {
+      _added = [..._added, ...fresh];
+      _keptSavedMealId ??= header.savedMealId;
+      _addedChanged = true;
+    });
+    return fresh;
+  }
+
+  /// Replaces an added line (or an item of a saved meal, after the meal was
+  /// turned into its items) with [newLine], or removes it when [newLine] is
+  /// null. The stored row of a logged meal keeps its id; a changed line no
+  /// longer carries its stored values.
+  Future<void> _applyToAdded(LineTap tap, Line? newLine) async {
+    AddedLine? target;
+    if (tap.header != null) {
+      final items = await _explode(tap);
+      if (items == null) return;
+      final at = tap.header!.items.indexWhere((i) => identical(i, tap.line));
+      if (at < 0 || at >= items.length) {
+        _stale();
+        return;
+      }
+      target = items[at];
+    } else {
+      target = tap.added;
+    }
+    final i = _added.indexWhere((a) => identical(a, target));
+    if (target == null || i < 0) {
+      _stale();
+      return;
+    }
+    final id = target.existingId;
+    setState(() {
+      final list = [..._added];
+      if (newLine == null) {
+        list.removeAt(i);
+      } else {
+        list[i] = AddedLine(newLine, existingId: id);
+      }
+      _added = list;
+      _addedChanged = true;
+    });
+  }
+
+  @override
+  Future<void> sheetPick(
+    LineTap tap,
+    String ref, {
+    Marker marker = Marker.yourPick,
+  }) async {
+    if (_foodLevel(tap)) {
+      final line = await _foodLine(ref);
+      if (line == null) return sheetNote(S.foodSheetRefusedFood);
+      return _applyToAdded(tap, line);
+    }
+    final t = _typedTarget(tap);
+    if (t == null) return;
+    final ok = await _guard(
+      () => t.h.pick(t.text, t.span, ref, marker: marker),
+    );
+    if (ok != true) _stale();
+  }
+
+  @override
+  Future<void> sheetSetAmount(LineTap tap, double quantity, String unit) async {
+    if (_foodLevel(tap)) {
+      final ref = tap.line.foodRef;
+      final line = ref == null
+          ? null
+          : await _foodLine(ref, quantity: quantity, unit: unit);
+      if (line == null) return sheetNote(S.foodSheetRefusedAmount);
+      return _applyToAdded(tap, line);
+    }
+    final t = _typedTarget(tap);
+    if (t == null) return;
+    final out = await _guard(
+      () => t.h.rewriteAmount(
+        t.text,
+        _cursor(),
+        t.span,
+        quantity: quantity,
+        unit: unit,
+      ),
+    );
+    if (out == null) return sheetNote(S.foodSheetRefusedAmount);
+    if (_controller.text != t.text) return _stale();
+    _setText(out.text, out.cursor);
+  }
+
+  @override
+  Future<void> sheetRemove(LineTap tap) async {
+    if (_foodLevel(tap)) return _applyToAdded(tap, null);
+    final t = _typedTarget(tap);
+    if (t == null) return;
+    final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
+    if (out == null) return sheetNote(S.foodSheetRefusedRemove);
+    if (_controller.text != t.text) return _stale();
+    _setText(out.text, out.cursor);
+  }
+
+  @override
+  Future<void> sheetForget(LineTap tap) async {
+    final key = tap.line.learnedKey;
+    if (key == null) return;
+    final done = await _guard(() => _db.forgetLearnedMatch(key));
+    // The lines come back through the snapshot, as a new result.
+    if (done == null) sheetNote(S.foodSheetForgetFailed);
+  }
+
+  @override
+  Future<void> sheetUseFood(LineTap tap, String ref) async {
+    final line = await _foodLine(ref);
+    if (line == null) return sheetNote(S.foodSheetRefusedFood);
+    final fresh = AddedLine(line);
+    if (tap.added != null) {
+      final at = _added.indexWhere((a) => identical(a, tap.added));
+      if (at < 0) return _stale();
+      setState(() {
+        _added = [..._added]..[at] = fresh;
+        _addedChanged = true;
+      });
+      return;
+    }
+    final t = _typedTarget(tap);
+    if (t == null) return;
+    final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
+    if (out == null) return sheetNote(S.foodSheetRefusedRemove);
+    if (_controller.text != t.text) return _stale();
+    _setText(out.text, out.cursor);
+    addLines([fresh]);
+  }
 
   /// Tests make picks through the handle until the correction sheet (task
   /// 2.9) does, and read the newest result.
@@ -610,7 +962,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
           if (l.state == LineState.notFound && !l.plain) l,
       ];
       if (fix.isNotEmpty) {
-        onLineTap(LineTap(line: fix.first, text: r.text));
+        onLineTap(
+          LineTap(
+            line: fix.first,
+            text: r.text,
+            typedText: _typedText(fix.first),
+          ),
+        );
         return;
       }
       final inputs = _inputs(r.lines);
@@ -663,7 +1021,12 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _closed = true;
     _failWaiters(const _Moved());
     FoodEntryResult? result;
-    if (_controller.text.trim().isNotEmpty) result = FoodAbandoned(_draft());
+    // Added lines count too: for a new meal any of them, for a logged meal
+    // only a change to them.
+    final worth =
+        _controller.text.trim().isNotEmpty ||
+        (_editing ? _addedChanged : _added.isNotEmpty);
+    if (worth) result = FoodAbandoned(_draft());
     Navigator.of(context).pop(result);
   }
 
@@ -699,6 +1062,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       picks: _picksNow(),
       added: _added,
       editingMealId: _editingMealId,
+      savedMealId: _keptSavedMealId,
     );
   }
 
@@ -832,26 +1196,34 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
             children: [
               Expanded(
                 child: ContentWidth(
-                  child: LayoutBuilder(
-                    builder: (context, box) => Column(
-                      children: [
-                        _topBar(context),
-                        if (!largeText) header,
-                        if (_notice != null)
-                          ConfirmBar(
-                            message: _notice!.text,
-                            onUndo: _notice!.undo == null ? null : _undoNotice,
-                          ),
-                        // The box stays here, outside the scrolling lines.
-                        _boxArea(context, box.maxHeight),
-                        Expanded(
-                          child: _scrollArea(
-                            context,
-                            header: largeText ? header : null,
+                  child: Column(
+                    children: [
+                      _topBar(context),
+                      if (!largeText) header,
+                      if (_notice != null)
+                        ConfirmBar(
+                          message: _notice!.text,
+                          onUndo: _notice!.undo == null ? null : _undoNotice,
+                        ),
+                      // What is left is shared by the box and the lines. The
+                      // box stays in a fixed area, outside the scrolling
+                      // lines, and takes what it needs first.
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, room) => Column(
+                            children: [
+                              _boxArea(context, room.maxHeight),
+                              Expanded(
+                                child: _scrollArea(
+                                  context,
+                                  header: largeText ? header : null,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -896,75 +1268,75 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 
   Widget _topBar(BuildContext context) {
     final today = _clock().localDate;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          IconButton(
-            tooltip: S.foodClose,
-            icon: const Icon(Icons.close),
-            onPressed: _writing ? null : _close,
-          ),
-          IconButton(
-            tooltip: S.foodPreviousDay,
-            icon: const Icon(Icons.chevron_left),
-            onPressed: () => setState(() => _date = addDays(_date, -1)),
-          ),
-          Expanded(
-            child: Semantics(
-              header: true,
-              button: true,
-              child: InkWell(
-                onTap: _pickDate,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    // One line that shrinks to fit, so the row stays compact
-                    // at large text.
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        S.foodDate(_date, today),
-                        maxLines: 1,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+    // At large text the date gets its own row under the buttons, at its full
+    // size, and wraps if it must.
+    final stacked = MediaQuery.textScalerOf(context).scale(10) > 13;
+    final date = Semantics(
+      header: true,
+      button: true,
+      child: InkWell(
+        onTap: _pickDate,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Center(
+            child: Text(
+              S.foodDate(_date, today),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
-          IconButton(
-            tooltip: S.foodNextDay,
-            icon: const Icon(Icons.chevron_right),
-            // The date stops at today.
-            onPressed: _date.compareTo(today) >= 0
-                ? null
-                : () => setState(() => _date = addDays(_date, 1)),
-          ),
-          _scanSeam,
-          PopupMenuButton<String>(
-            tooltip: S.foodMenu,
-            enabled: !_busy,
-            onSelected: (v) {
-              if (v == 'delete') _delete();
-              if (v == 'saved') _saveAsSavedMeal();
-            },
-            itemBuilder: (_) => [
-              if (_editing)
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Text(S.foodDeleteMeal),
-                ),
-              PopupMenuItem(
-                value: 'saved',
-                enabled: _fresh && _hasLines && _fixLines.isEmpty,
-                child: const Text(S.foodSaveAsSaved),
-              ),
-            ],
+        ),
+      ),
+    );
+    final children = [
+      IconButton(
+        tooltip: S.foodClose,
+        icon: const Icon(Icons.close),
+        onPressed: _writing ? null : _close,
+      ),
+      IconButton(
+        tooltip: S.foodPreviousDay,
+        icon: const Icon(Icons.chevron_left),
+        onPressed: () => setState(() => _date = addDays(_date, -1)),
+      ),
+      if (stacked) const Spacer() else Expanded(child: date),
+      IconButton(
+        tooltip: S.foodNextDay,
+        icon: const Icon(Icons.chevron_right),
+        // The date stops at today.
+        onPressed: _date.compareTo(today) >= 0
+            ? null
+            : () => setState(() => _date = addDays(_date, 1)),
+      ),
+      _scanSeam,
+      PopupMenuButton<String>(
+        tooltip: S.foodMenu,
+        enabled: !_busy,
+        onSelected: (v) {
+          if (v == 'delete') _delete();
+          if (v == 'saved') _saveAsSavedMeal();
+        },
+        itemBuilder: (_) => [
+          if (_editing)
+            const PopupMenuItem(value: 'delete', child: Text(S.foodDeleteMeal)),
+          PopupMenuItem(
+            value: 'saved',
+            enabled: _fresh && _hasLines && _fixLines.isEmpty,
+            child: const Text(S.foodSaveAsSaved),
           ),
         ],
       ),
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: stacked
+          ? Column(
+              children: [
+                Row(children: children),
+                date,
+              ],
+            )
+          : Row(children: children),
     );
   }
 
@@ -1005,10 +1377,10 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   /// The text box, in a fixed area above the lines. It grows with its text up
   /// to a few lines and then scrolls inside itself, keeping its own caret in
   /// view. [available] is the height of the whole content column: the box
-  /// takes at most 40 percent of it, so the lines and Save keep room.
+  /// takes at most half of it, so the lines and Save keep room.
   Widget _boxArea(BuildContext context, double available) {
     final lineHeight = MediaQuery.textScalerOf(context).scale(16) * 1.4;
-    final fit = ((available * 0.4 - 56) / lineHeight).floor();
+    final fit = ((available * 0.5 - 56) / lineHeight).floor();
     final maxLines = fit.clamp(1, 4);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1076,37 +1448,24 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   );
 
   Widget _addedTile(int i) {
-    final line = _added[i].line;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final added = _added[i];
+    final line = added.line;
+    return Column(
       children: [
-        Expanded(
-          child: Column(
-            children: [
-              FoodLineTile(
-                line: line,
-                onTap: () => onLineTap(LineTap(line: line, addedIndex: i)),
+        FoodLineTile(
+          line: line,
+          onTap: () =>
+              onLineTap(LineTap(line: line, addedIndex: i, added: added)),
+        ),
+        if (line.state == LineState.aliasOrSavedMeal)
+          for (final item in line.items)
+            FoodLineTile(
+              line: item,
+              indent: true,
+              onTap: () => onLineTap(
+                LineTap(line: item, header: line, addedIndex: i, added: added),
               ),
-              if (line.state == LineState.aliasOrSavedMeal)
-                for (final item in line.items)
-                  FoodLineTile(
-                    line: item,
-                    indent: true,
-                    onTap: () => onLineTap(
-                      LineTap(line: item, header: line, addedIndex: i),
-                    ),
-                  ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: IconButton(
-            tooltip: S.foodRemove(line.foodName ?? ''),
-            icon: const Icon(Icons.close),
-            onPressed: _busy ? null : () => removeAdded(i),
-          ),
-        ),
+            ),
       ],
     );
   }
@@ -1136,7 +1495,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
           FoodLineTile(
             line: l,
             current: current,
-            onTap: () => onLineTap(LineTap(line: l, text: text)),
+            onTap: () => onLineTap(
+              LineTap(line: l, text: text, typedText: _typedText(l)),
+            ),
           ),
         ),
         for (final item in l.items)
@@ -1153,7 +1514,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
           line: l,
           typed: _typedText(l),
           current: current,
-          onTap: () => onLineTap(LineTap(line: l, text: text)),
+          onTap: () =>
+              onLineTap(LineTap(line: l, text: text, typedText: _typedText(l))),
         ),
       ),
     ];
@@ -1174,13 +1536,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
         ? S.foodParserStopped
         : _error ?? (_requestFailed ? S.foodParseFailed : null);
     // At large text the button goes under the totals, full width, and the
-    // totals stay on one line each, so the bar stays compact.
+    // kcal and the macros take a line each. Nothing is scaled down.
     final stacked = MediaQuery.textScalerOf(context).scale(10) > 13;
-    Widget oneLine(Widget w) => FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: w,
-    );
+    const bold = TextStyle(fontWeight: FontWeight.bold);
     final totalsColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1190,44 +1548,34 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
         Semantics(
           label: S.spokenTotals(kcal, p, c, f, fix),
           excludeSemantics: true,
-          child: oneLine(
-            Text.rich(
-              TextSpan(
-                children: [
+          child: stacked
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(S.kcal(kcal), style: bold),
+                    Text(S.totalsMacros(p, c, f).trim()),
+                  ],
+                )
+              : Text.rich(
                   TextSpan(
-                    text: S.kcal(kcal),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    children: [
+                      TextSpan(text: S.kcal(kcal), style: bold),
+                      TextSpan(text: S.totalsMacros(p, c, f)),
+                    ],
                   ),
-                  TextSpan(text: S.totalsMacros(p, c, f)),
-                ],
-              ),
-              maxLines: 1,
-            ),
-          ),
+                ),
         ),
         _leftTodaySeam,
         if (fix > 0)
-          ExcludeSemantics(
-            child: oneLine(
-              Text(
-                S.itemsNotCounted(fix),
-                maxLines: 1,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
+          ExcludeSemantics(child: Text(S.itemsNotCounted(fix), style: bold)),
       ],
     );
     final button = FilledButton(
       style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
       onPressed: _canSave ? _save : null,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          fix > 0 ? S.fixItems(fix) : S.save,
-          maxLines: 1,
-          textAlign: TextAlign.center,
-        ),
+      child: Text(
+        fix > 0 ? S.fixItems(fix) : S.save,
+        textAlign: TextAlign.center,
       ),
     );
     return Material(

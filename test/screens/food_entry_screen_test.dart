@@ -14,6 +14,7 @@ import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/parser/parser.dart';
 import 'package:daybook/parser/search_index.dart';
+import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
@@ -171,10 +172,7 @@ void main() {
     workersMade = 0;
     links = [];
     linkMaker = null;
-    FoodEntryScreenState.lineTapObserver = null;
   });
-
-  tearDown(() => FoodEntryScreenState.lineTapObserver = null);
 
   /// Unmounts the app first, so drift's stream clean-up timer runs, then
   /// closes the database.
@@ -462,14 +460,18 @@ void main() {
         'asks for a pick, and nothing is saved', (tester) async {
       await openApp(tester);
       await openFood(tester);
-      final taps = <LineTap>[];
-      FoodEntryScreenState.lineTapObserver = taps.add;
       await type(tester, '2 eggs, 1 zorbo');
       await tester.tap(saveButton());
       await settle(tester);
-      expect(taps, hasLength(1));
-      expect(taps.single.line.state, LineState.notFound);
-      expect(taps.single.text, '2 eggs, 1 zorbo');
+      // The not found sheet for that item opens, and Save is not busy.
+      expect(find.byType(CorrectionSheet), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CorrectionSheet),
+          matching: find.text('"1 zorbo"'),
+        ),
+        findsOneWidget,
+      );
       expect(await mealRows(tester), isEmpty);
       expect(find.byType(FoodEntryScreen), findsOneWidget);
       expect(find.text('Not found'), findsOneWidget);
@@ -493,19 +495,20 @@ void main() {
         findsOneWidget,
       );
 
-      final taps = <LineTap>[];
-      FoodEntryScreenState.lineTapObserver = taps.add;
       await tester.tap(find.text('Fix 1 item'));
       await settle(tester);
-      expect(taps, hasLength(1));
-      expect(taps.single.line.state, LineState.notFound);
-      expect(taps.single.line.span, isNotNull);
+      expect(find.byType(CorrectionSheet), findsOneWidget);
+      expect(find.text('Which food?'), findsNothing); // not found: no list
       expect(await mealRows(tester), isEmpty);
 
-      // Tapping a line calls the same hook.
+      // Tapping a line opens the sheet for that line.
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(CorrectionSheet), findsNothing);
       await tester.tap(tiles().first);
-      expect(taps, hasLength(2));
-      expect(taps.last.line.state, LineState.matched);
+      await settle(tester);
+      expect(find.byType(CorrectionSheet), findsOneWidget);
+      expect(find.text('Which food?'), findsOneWidget);
     });
 
     appTest('two not found items read "Fix 2 items"', (tester) async {
@@ -783,11 +786,10 @@ void main() {
         'the others and appends the text', (tester) async {
       final before = await logBrief(tester);
       await openLogged(tester);
-      final remove = find.byWidgetPredicate(
-        (w) => w is IconButton && (w.tooltip ?? '').startsWith('Remove Butter'),
-      );
-      await tester.tap(remove);
-      await tester.pump();
+      await tester.tap(find.widgetWithText(FoodLineTile, 'Butter, NFS'));
+      await settle(tester);
+      await tester.tap(find.text('Remove from meal'));
+      await settle(tester);
       expect(tiles(), findsNWidgets(4));
       await type(tester, '1 banana');
       expect(find.text('From your text'), findsOneWidget);
@@ -1854,13 +1856,6 @@ void main() {
       await settle(tester);
       expect(find.byType(FoodEntryScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
-      final remove = tester.getSize(
-        find.byWidgetPredicate(
-          (w) => w is IconButton && w.tooltip == 'Remove Butter, NFS',
-        ),
-      );
-      expect(remove.height, greaterThanOrEqualTo(48));
-      expect(remove.width, greaterThanOrEqualTo(48));
     });
 
     Finder linesArea() => find.byKey(FoodEntryScreenState.linesKey);
@@ -1884,7 +1879,13 @@ void main() {
           .state<EditableTextState>(find.byType(EditableText))
           .renderEditable;
       final caret = editable.getLocalRectForCaret(
-        TextPosition(offset: boxText(tester).length),
+        TextPosition(
+          offset: tester
+              .widget<TextField>(box())
+              .controller!
+              .selection
+              .extentOffset,
+        ),
       );
       final caretGlobal = MatrixUtils.transformRect(
         editable.getTransformTo(null),
@@ -1978,6 +1979,39 @@ void main() {
       expectBoxAndCaretVisible(tester, 'after the next change');
     });
 
+    appTest('a mid-text edit of the first item after the list has scrolled '
+        'to the bottom leaves the current line fully in view', (tester) async {
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      final long = '$brief, 1 apple, 1 banana, 1 orange, 1 pear';
+      await type(tester, long);
+      await settle(tester);
+      expect(linesOffset(tester), greaterThan(0));
+      // Caret inside "2 eggs", right after the 2, and a 0 typed there.
+      final edited = '20${long.substring(1)}';
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: edited,
+          selection: const TextSelection.collapsed(offset: 2),
+        ),
+      );
+      await settle(tester);
+      final current = find.byWidgetPredicate(
+        (w) => w is FoodLineTile && w.current,
+      );
+      expect(current, findsOneWidget);
+      final area = tester.getRect(linesArea());
+      final r = tester.getRect(current);
+      // Its top is always in view; all of it is when it fits.
+      expect(r.top, greaterThanOrEqualTo(area.top - 0.5));
+      expect(r.top, lessThan(area.bottom));
+      if (r.height <= area.height) {
+        expect(r.bottom, lessThanOrEqualTo(area.bottom + 0.5));
+      }
+      expectBoxAndCaretVisible(tester, 'after the mid-text edit');
+    });
+
     for (final (name, text, fix) in [
       ('Save', brief, false),
       ('Fix', '$brief, 1 zorbo, 1 apple', true),
@@ -2010,13 +2044,28 @@ void main() {
         expect(boxRect.bottom, lessThanOrEqualTo(500));
         expect(tester.getRect(button).bottom, lessThanOrEqualTo(500));
         final area = tester.getRect(linesArea());
-        expect(500 - area.bottom, lessThanOrEqualTo(500 / 3 + 1));
+        // Larger text is never drawn smaller: nothing is scaled to fit.
+        for (final t in [
+          find.text('Today, Nov 12'),
+          find.textContaining('kcal', findRichText: true).first,
+          if (fix) find.text('1 item not counted'),
+        ]) {
+          expect(
+            find.ancestor(of: t, matching: find.byType(FittedBox)),
+            findsNothing,
+          );
+        }
+        expect(tester.getRect(button).bottom, lessThanOrEqualTo(500));
         expect(area.top, greaterThanOrEqualTo(boxRect.bottom - 0.5));
-        final seen = [
-          for (final t in tiles().evaluate())
-            tester.getRect(find.byWidget(t.widget)).overlaps(area),
-        ];
-        expect(seen, contains(true));
+        // In the Fix state the lines give way first (Save, the box and the
+        // top row come before them); in the Save state a line is in view.
+        if (!fix) {
+          final seen = [
+            for (final t in tiles().evaluate())
+              tester.getRect(find.byWidget(t.widget)).overlaps(area),
+          ];
+          expect(seen, contains(true));
+        }
         expectBoxAndCaretVisible(tester, 'at 2x');
 
         await tester.tap(find.byTooltip('Previous day'));

@@ -215,7 +215,15 @@ class S {
   static const foodSaveAsSaved = 'Save as a saved meal';
   static const foodMealPicker = 'Meal';
   static String foodEditing(String slot) => 'Editing $slot';
-  static String foodRemove(String name) => 'Remove $name';
+  static const foodSheetStale = 'That line changed. Tap it again.';
+  static const foodSheetRefusedAmount =
+      'The text cannot show that amount, so nothing was changed.';
+  static const foodSheetRefusedRemove =
+      'That item could not be taken out cleanly, so nothing was changed.';
+  static const foodSheetRefusedFood =
+      'That food could not be used here, so nothing was changed.';
+  static const foodSheetForgetFailed =
+      'Could not forget that match. Try again.';
   static const foodGroupAdded = 'Added';
   static const foodGroupTyped = 'From your text';
   static const foodLoading = 'Getting the food list ready...';
@@ -231,6 +239,66 @@ class S {
   static String fixItems(int n) => n == 1 ? fixOne : 'Fix $n items';
   static String itemsNotCounted(int n) =>
       n == 1 ? '1 item not counted' : '$n items not counted';
+
+  // The correction sheet (grammar 8.3, food-entry frames 4, 7 and 8).
+  static const sheetYouTyped = 'You typed';
+  static const sheetAmount = 'Amount';
+  static const sheetUnit = 'Unit';
+  static const sheetMultiplier = 'Multiplier';
+  static const sheetBareCount = 'count';
+  static const sheetWhichFood = 'Which food?';
+  static const sheetFoodsLabel = 'Foods to choose from';
+  static const sheetCurrentPick = 'Current pick';
+  static const sheetRemembered =
+      'Your pick is remembered when you save the meal.';
+  static const sheetSearchHint = 'Search all foods';
+  static const sheetNoResults = 'No foods found.';
+  static String sheetNothingMatches(String words) =>
+      'Nothing in the food list or your own foods matches "$words". '
+      'Search with other words.';
+  static const sheetRemove = 'Remove from meal';
+  static const sheetForget = 'Forget this match';
+  static const sheetDone = 'Done';
+  static const sheetUseFood = 'Use a food instead';
+  static const sheetSavedMeal = 'Saved meal';
+  static const sheetQuantityBad = 'Enter a number above 0.';
+  static const sheetRowHint = 'Double tap to choose this food';
+
+  /// The dataset of a food, for a row of the sheet. Null for a food whose
+  /// dataset is not known (an added line).
+  static String datasetName(String? dataset) => switch (dataset) {
+    'fndds' => 'USDA FNDDS',
+    'sr_legacy' => 'USDA SR Legacy',
+    'foundation' => 'USDA Foundation',
+    'local' => 'My food',
+    _ => 'USDA',
+  };
+
+  /// '2 tbsp' or '2' for a bare count, as in the sheet's rows.
+  static String sheetAmountShort(double? q, String? unit) {
+    if (q == null) return '';
+    final u = unit ?? '';
+    return u.isEmpty ? quantityText(q) : '${quantityText(q)} $u';
+  }
+
+  /// 'USDA FNDDS. 2 tbsp, 39 kcal. Current pick' (frame 4). A search result
+  /// from the worker has no amount and may have no energy.
+  static String sheetRowSub({
+    required String dataset,
+    String amount = '',
+    double? kcalValue,
+    bool current = false,
+  }) {
+    final tail = [
+      if (amount.isNotEmpty) amount,
+      if (kcalValue != null) kcal(kcalValue),
+    ].join(', ');
+    return [
+      dataset,
+      if (tail.isNotEmpty) tail,
+      if (current) sheetCurrentPick,
+    ].join('. ');
+  }
 
   // The markers on a line: each is a word and a shape (grammar 8.2).
   static const markerGuess = 'Guess';
