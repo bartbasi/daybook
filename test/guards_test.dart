@@ -26,7 +26,12 @@ const _sdkPackages = {
   'flutter_web_plugins',
 };
 
-final _logCall = RegExp(r'(?<![\w$])(print|debugPrint|log)\(');
+final _logCall = RegExp(
+  r'(?<![\w$])(print|debugPrint\w*|log)\(|\b(stdout|stderr)\b',
+);
+final _netUse = RegExp(
+  r'\b(HttpClient|HttpServer|(Raw|Secure)?Socket|WebSocket|RawDatagramSocket)\b',
+);
 final _httpImport = RegExp('''^\\s*(import|export)\\s+['"]package:http/''');
 
 /// Dart files under lib/ as 'lib/a/b.dart' paths, without generated files.
@@ -126,7 +131,7 @@ void main() {
       final lines = _codeLines(file.readAsStringSync());
       for (var n = 0; n < lines.length; n++) {
         final m = _logCall.firstMatch(lines[n]);
-        if (m != null) found.add('${_name(file)}:${n + 1} calls ${m[1]}(');
+        if (m != null) found.add('${_name(file)}:${n + 1} uses ${m[0]}');
       }
     }
     expect(
@@ -156,6 +161,35 @@ void main() {
     );
   });
 
+  test('dart:io networking is used only by the barcode client', () {
+    final found = <String>[];
+    for (final file in _libFiles()) {
+      if (_httpAllowed.contains(_name(file))) continue;
+      final lines = _codeLines(file.readAsStringSync());
+      for (var n = 0; n < lines.length; n++) {
+        final m = _netUse.firstMatch(lines[n]);
+        if (m != null) found.add('${_name(file)}:${n + 1} uses ${m[0]}');
+      }
+    }
+    expect(
+      found,
+      isEmpty,
+      reason: 'The only network code is lib/data/off_client.dart:\n'
+          '${found.join('\n')}',
+    );
+  });
+
+  test('every allow-listed file still exists', () {
+    for (final path in {..._logAllowed, ..._httpAllowed}) {
+      expect(
+        File(path).existsSync(),
+        isTrue,
+        reason: '$path is on an allow list in test/guards_test.dart but no '
+            'longer exists. Remove it from the list.',
+      );
+    }
+  });
+
   test('every package in pubspec.yaml has a row in docs/dependencies.md', () {
     final documented = _documentedPackages();
     final missing = <String>[
@@ -180,6 +214,10 @@ void main() {
     expect(_documentedPackages(), contains('http'));
     expect(_logCall.hasMatch('catalog(x)'), isFalse);
     expect(_logCall.hasMatch('  debugPrint(s);'), isTrue);
+    expect(_logCall.hasMatch('debugPrintStack(x)'), isTrue);
+    expect(_logCall.hasMatch('stderr.writeln(x)'), isTrue);
+    expect(_netUse.hasMatch('final c = HttpClient();'), isTrue);
+    expect(_netUse.hasMatch('MySocketThing()'), isFalse);
     final code = _codeLines("// print(1)\nfinal a = 'log(';\n/* log(\n*/ log(2);");
     expect(code.where(_logCall.hasMatch), hasLength(1));
   });

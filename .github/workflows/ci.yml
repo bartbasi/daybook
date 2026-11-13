@@ -105,6 +105,7 @@ jobs:
     name: Integration test on Android emulator
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -140,6 +141,7 @@ jobs:
     name: Integration test on iOS simulator
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -154,7 +156,7 @@ jobs:
       - name: Boot an iPhone simulator and run the tests
         run: |
           xcrun simctl list devices available
-          UDID="$(xcrun simctl list devices available iPhone | grep -Eo '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | tail -n 1)"
+          UDID="$(xcrun simctl list devices available | grep -E '^[[:space:]]+iPhone' | grep -Eo '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | tail -n 1 || true)"
           if [ -z "$UDID" ]; then
             echo "::error::No iPhone simulator is available on this runner image."
             exit 1

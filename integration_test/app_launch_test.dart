@@ -5,33 +5,44 @@
 // bundled food data, the real plugins. CI runs it on an Android emulator and
 // an iOS simulator.
 
+import 'dart:io';
+
+import 'package:daybook/data/food_reference.dart';
 import 'package:daybook/main.dart' as app;
-import 'package:daybook/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('the app starts and shows its first screen', (tester) async {
+  testWidgets('the app starts and installs the food data', (tester) async {
     app.main();
 
-    // The first run unpacks the food data, so give it time. Not pumpAndSettle:
-    // a progress animation would keep it from settling.
+    // Not pumpAndSettle: it could wait forever on an animation.
     var waited = 0;
-    while (find.byType(Scaffold).evaluate().isEmpty && waited < 150) {
+    while (find.byType(Scaffold).evaluate().isEmpty && waited < 300) {
       await tester.pump(const Duration(milliseconds: 200));
       waited++;
     }
-    expect(find.byType(Scaffold), findsOneWidget);
+    expect(find.byType(Scaffold), findsWidgets);
 
-    // The food data has been installed once the loading message is gone.
+    // The first run unpacks the food data; its version file is written last.
+    final dir = await getApplicationSupportDirectory();
+    final version = File(p.join(dir.path, 'usda_version.txt'));
     waited = 0;
-    while (find.text(S.loadingFoods).evaluate().isNotEmpty && waited < 300) {
+    while (!version.existsSync() && waited < 300) {
       await tester.pump(const Duration(milliseconds: 200));
       waited++;
     }
-    expect(find.text(S.loadingFoods), findsNothing);
+    expect(version.existsSync(), isTrue);
+
+    final path = await installFoodReference();
+    final foods = FoodReference.open(path);
+    final egg = foods.food(2707153);
+    foods.close();
+    expect(egg, isNotNull);
   });
 }
