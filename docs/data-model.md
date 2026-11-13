@@ -29,6 +29,8 @@ The user database is defined in `lib/data/database.dart` (drift). The reference 
 
 ## Tables (schema version 1)
 
+Version 1 was amended before any release (`goals.fixed_calories` became `calories`, and `meals.saved_meal_id` was added), so there is no migration for it. Every later schema change is version 2, with a migration.
+
 ### Food
 
 | Table | Purpose | Key columns |
@@ -39,7 +41,7 @@ The user database is defined in `lib/data/database.dart` (drift). The reference 
 | `recipe_ingredients` | What a recipe is made of | `recipe_food_id`, `food_ref`, `quantity`, `unit_label`, `base_quantity`. The recipe's totals are stored in `food_nutrients` when it is saved. |
 | `meal_slots` | Breakfast, Lunch, Dinner, Snack; user can rename, add, reorder | `name`, `position`, `archived` |
 | `meal_slot_rules` | Default slot by time of day | `start_minute` (0 to 1439), `slot_id`. A rule applies until the next rule starts. |
-| `meals` | One save from the food entry screen | `local_date`, `slot_id`, `logged_at_ms`, `source_text` (what was typed) |
+| `meals` | One save from the food entry screen | `local_date`, `slot_id`, `logged_at_ms`, `source_text` (what was typed), `saved_meal_id` (nullable; the first saved meal expanded in this meal, set to null if that saved meal is deleted) |
 | `meal_entries` | One line of a meal | `food_ref`, `food_name`, `quantity` and `unit_label` as entered ("2 slice"), `base_quantity` and `base_unit` (60 g) |
 | `meal_entry_nutrients` | Nutrients for the amount eaten | (`entry_id`, `nutrient_id`), `amount` |
 | `saved_meals`, `saved_meal_items`, `saved_meal_item_nutrients` | Saved meals, same shape as meals | |
@@ -84,7 +86,7 @@ They are inserted when the database is created.
 | Table | Purpose | Key columns |
 |---|---|---|
 | `profile` | One row: inputs for Mifflin-St Jeor | `sex`, `birth_date`, `height_cm` |
-| `goals` | Calorie and macro goals, versioned by date | `effective_from` (unique), `calorie_mode` ('calculated' or 'fixed'), `fixed_calories`, `activity_factor`, `target_kg_per_week`, `exercise_add_back_percent` (0, 50, 100; default 100), `macro_mode` ('grams' or 'percent'), protein, carbs and fat targets |
+| `goals` | Calorie and macro goals, versioned by date | `effective_from` (unique), `calorie_mode` ('calculated' or 'fixed'), `calories` (the calorie goal in both modes: the calculated number stored when Goals is saved, or the number the user typed), `activity_factor`, `target_kg_per_week`, `exercise_add_back_percent` (0, 50, 100; default 100), `macro_mode` ('grams' or 'percent'), protein, carbs and fat targets |
 | `goal_nutrients` | Other nutrient targets | (`goal_id`, `nutrient_id`), `target_amount` |
 | `settings` | Small key and value settings | `units` = 'imperial' by default |
 

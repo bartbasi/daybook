@@ -58,20 +58,20 @@ final _fixture = <(String, List<Object?>)>[
   ),
   ('INSERT INTO meal_slots VALUES (?,?,?,?)', [5, 'Late 夜', 4, 1]),
   ('INSERT INTO meal_slot_rules VALUES (?,?)', [300, 5]),
+  ('INSERT INTO saved_meals VALUES (?,?,?)', [1, 'Usual 🍳', 1786000000000]),
   (
-    'INSERT INTO meals VALUES (?,?,?,?,?,?)',
-    [1, '2026-11-08', 1, 1786000000123, -360, 'two eggs, "toast"\r\n'],
+    'INSERT INTO meals VALUES (?,?,?,?,?,?,?)',
+    [1, '2026-11-08', 1, 1786000000123, -360, 'two eggs, "toast"\r\n', 1],
   ),
   (
-    'INSERT INTO meals VALUES (?,?,?,?,?,?)',
-    [2, '2026-11-09', 5, 1786000000999, 540, null],
+    'INSERT INTO meals VALUES (?,?,?,?,?,?,?)',
+    [2, '2026-11-09', 5, 1786000000999, 540, null, null],
   ),
   (
     'INSERT INTO meal_entries VALUES (?,?,?,?,?,?,?,?,?)',
     [1, 1, 0, 'usda:1', 'Egg', 2, 'each', 100.1, 'g'],
   ),
   ('INSERT INTO meal_entry_nutrients VALUES (?,?,?)', [1, 1008, 0.1]),
-  ('INSERT INTO saved_meals VALUES (?,?,?)', [1, 'Usual 🍳', 1786000000000]),
   (
     'INSERT INTO saved_meal_items VALUES (?,?,?,?,?,?,?,?,?)',
     [1, 1, 0, 'local:1', 'Café', 1, 'cup', 240.0, 'ml'],
@@ -174,7 +174,7 @@ final _fixture = <(String, List<Object?>)>[
       1,
       '2026-01-01',
       'calculated',
-      null,
+      2138,
       1.375,
       -0.5,
       100,
@@ -412,7 +412,13 @@ void main() {
     expect(food.baseAmount, 100.0);
     final n = await db.select(db.foodNutrients).getSingle();
     expect((n.nutrientId, n.amount), (1008, 389.0));
-    expect(await db.select(db.meals).get(), isEmpty);
+    final meal = await db.select(db.meals).getSingle();
+    expect(meal.localDate, '2026-01-02');
+    expect(meal.sourceText, 'oats');
+    expect(meal.savedMealId, isNull);
+    final goal = await db.select(db.goals).getSingle();
+    expect(goal.calorieMode, 'fixed');
+    expect(goal.calories, 2000);
   });
 
   test('stream queries see the imported data', () async {

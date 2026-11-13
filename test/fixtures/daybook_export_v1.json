@@ -43,7 +43,17 @@
     "slot_id": 1
    }
   ],
-  "meals": [],
+  "meals": [
+   {
+    "id": 1,
+    "local_date": "2026-01-02",
+    "slot_id": 1,
+    "logged_at_ms": 1767355200000,
+    "tz_offset_minutes": -360,
+    "source_text": "oats",
+    "saved_meal_id": null
+   }
+  ],
   "meal_entries": [],
   "meal_entry_nutrients": [],
   "saved_meals": [],
@@ -72,7 +82,21 @@
   "workout_sets": [],
   "cardio_sessions": [],
   "profile": [],
-  "goals": [],
+  "goals": [
+   {
+    "id": 1,
+    "effective_from": "2026-01-01",
+    "calorie_mode": "fixed",
+    "calories": 2000,
+    "activity_factor": 1.375,
+    "target_kg_per_week": -0.25,
+    "exercise_add_back_percent": 100,
+    "macro_mode": "grams",
+    "protein_target": null,
+    "carbs_target": null,
+    "fat_target": null
+   }
+  ],
   "goal_nutrients": [],
   "settings": [
    {

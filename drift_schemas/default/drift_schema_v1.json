@@ -540,8 +540,59 @@
     },
     {
       "id": 6,
+      "references": [],
+      "type": "table",
+      "data": {
+        "name": "saved_meals",
+        "was_declared_in_moor": false,
+        "columns": [
+          {
+            "name": "id",
+            "getter_name": "id",
+            "moor_type": "int",
+            "nullable": false,
+            "customConstraints": null,
+            "defaultConstraints": "PRIMARY KEY AUTOINCREMENT",
+            "dialectAwareDefaultConstraints": {
+              "sqlite": "PRIMARY KEY AUTOINCREMENT"
+            },
+            "default_dart": null,
+            "default_client_dart": null,
+            "dsl_features": [
+              "auto-increment"
+            ]
+          },
+          {
+            "name": "name",
+            "getter_name": "name",
+            "moor_type": "string",
+            "nullable": false,
+            "customConstraints": null,
+            "default_dart": null,
+            "default_client_dart": null,
+            "dsl_features": []
+          },
+          {
+            "name": "created_at_ms",
+            "getter_name": "createdAtMs",
+            "moor_type": "int",
+            "nullable": false,
+            "customConstraints": null,
+            "default_dart": null,
+            "default_client_dart": null,
+            "dsl_features": []
+          }
+        ],
+        "is_virtual": false,
+        "without_rowid": false,
+        "constraints": []
+      }
+    },
+    {
+      "id": 7,
       "references": [
-        4
+        4,
+        6
       ],
       "type": "table",
       "data": {
@@ -629,6 +680,32 @@
             "default_dart": null,
             "default_client_dart": null,
             "dsl_features": []
+          },
+          {
+            "name": "saved_meal_id",
+            "getter_name": "savedMealId",
+            "moor_type": "int",
+            "nullable": true,
+            "customConstraints": null,
+            "defaultConstraints": "REFERENCES saved_meals (id) ON DELETE SET NULL",
+            "dialectAwareDefaultConstraints": {
+              "sqlite": "REFERENCES saved_meals (id) ON DELETE SET NULL"
+            },
+            "default_dart": null,
+            "default_client_dart": null,
+            "dsl_features": [
+              {
+                "foreign_key": {
+                  "to": {
+                    "table": "saved_meals",
+                    "column": "id"
+                  },
+                  "initially_deferred": false,
+                  "on_update": null,
+                  "on_delete": "setNull"
+                }
+              }
+            ]
           }
         ],
         "is_virtual": false,
@@ -637,9 +714,9 @@
       }
     },
     {
-      "id": 7,
+      "id": 8,
       "references": [
-        6
+        7
       ],
       "type": "table",
       "data": {
@@ -765,9 +842,9 @@
       }
     },
     {
-      "id": 8,
+      "id": 9,
       "references": [
-        7
+        8
       ],
       "type": "table",
       "data": {
@@ -831,59 +908,9 @@
       }
     },
     {
-      "id": 9,
-      "references": [],
-      "type": "table",
-      "data": {
-        "name": "saved_meals",
-        "was_declared_in_moor": false,
-        "columns": [
-          {
-            "name": "id",
-            "getter_name": "id",
-            "moor_type": "int",
-            "nullable": false,
-            "customConstraints": null,
-            "defaultConstraints": "PRIMARY KEY AUTOINCREMENT",
-            "dialectAwareDefaultConstraints": {
-              "sqlite": "PRIMARY KEY AUTOINCREMENT"
-            },
-            "default_dart": null,
-            "default_client_dart": null,
-            "dsl_features": [
-              "auto-increment"
-            ]
-          },
-          {
-            "name": "name",
-            "getter_name": "name",
-            "moor_type": "string",
-            "nullable": false,
-            "customConstraints": null,
-            "default_dart": null,
-            "default_client_dart": null,
-            "dsl_features": []
-          },
-          {
-            "name": "created_at_ms",
-            "getter_name": "createdAtMs",
-            "moor_type": "int",
-            "nullable": false,
-            "customConstraints": null,
-            "default_dart": null,
-            "default_client_dart": null,
-            "dsl_features": []
-          }
-        ],
-        "is_virtual": false,
-        "without_rowid": false,
-        "constraints": []
-      }
-    },
-    {
       "id": 10,
       "references": [
-        9
+        6
       ],
       "type": "table",
       "data": {
@@ -1077,7 +1104,7 @@
     {
       "id": 12,
       "references": [
-        9
+        6
       ],
       "type": "table",
       "data": {
@@ -2167,8 +2194,8 @@
             "dsl_features": []
           },
           {
-            "name": "fixed_calories",
-            "getter_name": "fixedCalories",
+            "name": "calories",
+            "getter_name": "calories",
             "moor_type": "int",
             "nullable": true,
             "customConstraints": null,
@@ -2412,11 +2439,20 @@
       ]
     },
     {
+      "name": "saved_meals",
+      "sql": [
+        {
+          "dialect": "sqlite",
+          "sql": "CREATE TABLE IF NOT EXISTS \"saved_meals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"name\" TEXT NOT NULL, \"created_at_ms\" INTEGER NOT NULL);"
+        }
+      ]
+    },
+    {
       "name": "meals",
       "sql": [
         {
           "dialect": "sqlite",
-          "sql": "CREATE TABLE IF NOT EXISTS \"meals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"local_date\" TEXT NOT NULL, \"slot_id\" INTEGER NOT NULL REFERENCES meal_slots (id), \"logged_at_ms\" INTEGER NOT NULL, \"tz_offset_minutes\" INTEGER NOT NULL, \"source_text\" TEXT NULL);"
+          "sql": "CREATE TABLE IF NOT EXISTS \"meals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"local_date\" TEXT NOT NULL, \"slot_id\" INTEGER NOT NULL REFERENCES meal_slots (id), \"logged_at_ms\" INTEGER NOT NULL, \"tz_offset_minutes\" INTEGER NOT NULL, \"source_text\" TEXT NULL, \"saved_meal_id\" INTEGER NULL REFERENCES saved_meals (id) ON DELETE SET NULL);"
         }
       ]
     },
@@ -2435,15 +2471,6 @@
         {
           "dialect": "sqlite",
           "sql": "CREATE TABLE IF NOT EXISTS \"meal_entry_nutrients\" (\"entry_id\" INTEGER NOT NULL REFERENCES meal_entries (id) ON DELETE CASCADE, \"nutrient_id\" INTEGER NOT NULL, \"amount\" REAL NOT NULL, PRIMARY KEY (\"entry_id\", \"nutrient_id\"));"
-        }
-      ]
-    },
-    {
-      "name": "saved_meals",
-      "sql": [
-        {
-          "dialect": "sqlite",
-          "sql": "CREATE TABLE IF NOT EXISTS \"saved_meals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"name\" TEXT NOT NULL, \"created_at_ms\" INTEGER NOT NULL);"
         }
       ]
     },
@@ -2560,7 +2587,7 @@
       "sql": [
         {
           "dialect": "sqlite",
-          "sql": "CREATE TABLE IF NOT EXISTS \"goals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"effective_from\" TEXT NOT NULL UNIQUE, \"calorie_mode\" TEXT NOT NULL, \"fixed_calories\" INTEGER NULL, \"activity_factor\" REAL NOT NULL, \"target_kg_per_week\" REAL NOT NULL, \"exercise_add_back_percent\" INTEGER NOT NULL DEFAULT 100, \"macro_mode\" TEXT NOT NULL, \"protein_target\" REAL NULL, \"carbs_target\" REAL NULL, \"fat_target\" REAL NULL);"
+          "sql": "CREATE TABLE IF NOT EXISTS \"goals\" (\"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"effective_from\" TEXT NOT NULL UNIQUE, \"calorie_mode\" TEXT NOT NULL, \"calories\" INTEGER NULL, \"activity_factor\" REAL NOT NULL, \"target_kg_per_week\" REAL NOT NULL, \"exercise_add_back_percent\" INTEGER NOT NULL DEFAULT 100, \"macro_mode\" TEXT NOT NULL, \"protein_target\" REAL NULL, \"carbs_target\" REAL NULL, \"fat_target\" REAL NULL);"
         }
       ]
     },

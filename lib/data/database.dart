@@ -94,6 +94,12 @@ class Meals extends Table {
   IntColumn get loggedAtMs => integer()();
   IntColumn get tzOffsetMinutes => integer()();
   TextColumn get sourceText => text().nullable()();
+  // The first saved meal expanded in this meal, so chips can be ordered by use.
+  IntColumn get savedMealId => integer().nullable().references(
+    SavedMeals,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
 }
 
 class MealEntries extends Table {
@@ -293,7 +299,9 @@ class Goals extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get effectiveFrom => text().unique()();
   TextColumn get calorieMode => text()(); // 'calculated' or 'fixed'
-  IntColumn get fixedCalories => integer().nullable()();
+  // The calorie goal in both modes: the calculated number stored when Goals
+  // is saved, or the number the user typed.
+  IntColumn get calories => integer().nullable()();
   RealColumn get activityFactor => real()();
   RealColumn get targetKgPerWeek => real()(); // negative to lose
   IntColumn get exerciseAddBackPercent =>
