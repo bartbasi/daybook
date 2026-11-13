@@ -136,10 +136,11 @@ List<UnitChoice> unitChoicesForFood(
 }
 
 // The unit picker (8.3): grams and ounces, the volume units, each of the
-// food's own portions that can be typed, then a bare count and "serving".
-// [read] gives the line for one of a unit text, or null when the text cannot
-// express it; a choice is listed only when that line has the amount offered
-// and is not assumed. The same unit text with the same amount is one choice.
+// food's own portions that can be typed, then "serving" and a bare count, each
+// only at an amount no earlier choice has. [read] gives the line for one of a
+// unit text, or null when the text cannot express it; a choice is listed only
+// when that line has the amount offered and is not assumed. The same unit text
+// with the same amount is one choice.
 List<UnitChoice> _unitChoices(
   PortionFood food,
   Line? Function(String unitText) read,
@@ -150,6 +151,7 @@ List<UnitChoice> _unitChoices(
     List<String> texts, {
     double? grams,
     bool asTyped = false,
+    bool onlyNew = false,
   }) {
     for (final t in texts) {
       final l = read(t);
@@ -162,6 +164,9 @@ List<UnitChoice> _unitChoices(
       if (asTyped && l.unitLabel != t) continue;
       if (grams != null && (g - grams).abs() > 0.05) continue;
       if (out.any((c) => c.unitText == t && c.grams == g)) return;
+      // "serving" and a bare count only fill a gap: not at an amount that is
+      // already listed.
+      if (onlyNew && out.any((c) => (c.grams - g).abs() <= 0.05)) return;
       out.add(UnitChoice(label, t, g));
       return;
     }
@@ -179,8 +184,8 @@ List<UnitChoice> _unitChoices(
       '',
     ], grams: p.gramsPerUnit);
   }
-  add('serving', const ['serving']);
-  add('', const ['']);
+  add('serving', const ['serving'], onlyNew: true);
+  add('', const [''], onlyNew: true);
   return out;
 }
 
@@ -568,9 +573,12 @@ class ParseSession {
   /// A saved meal header (6.4) takes a quantity only ([unit] empty): its
   /// multiplier. The result must be the same saved meal with that multiplier.
   ///
-  /// When the line's amount was assumed, its item is marked once the new text
-  /// is set: [Line.assumedAmountSetInSheet] (7.2). A line already marked stays
-  /// marked through a second change in the sheet.
+  /// When the line's amount was assumed because none was typed or the typed
+  /// unit could not be converted (the cases where 7.3 uses a learned amount),
+  /// its item is marked once the new text is set:
+  /// [Line.assumedAmountSetInSheet] (7.2). A typed range is the user's own
+  /// amount and is not marked. A line already marked stays marked through a
+  /// second change in the sheet.
   ({String text, int cursor})? rewriteAmount(
     String text,
     int cursor,
@@ -587,7 +595,10 @@ class ParseSession {
         : _tryAmount(item, quantity, unit, cursor);
     if (r == null) return null;
     final mark =
-        !header && (item.marked || item.line.markers.contains(Marker.assumed));
+        !header &&
+        (item.marked ||
+            (item.line.markers.contains(Marker.assumed) &&
+                !item.draft.isRange));
     _pending = _Pending(
       _text,
       r.text,
@@ -654,8 +665,9 @@ class ParseSession {
   /// the same food, the amount shown, and no Assumed marker. Grams and ounces
   /// (not "oz" where it would be read as a fluid ounce), the volume units the
   /// food can convert, each of the food's own portions that can be typed, then
-  /// a bare count and "serving"; labels that start with "Quantity not
-  /// specified" are never listed. Empty for a line with no food.
+  /// "serving" and a bare count, each only at an amount not already listed;
+  /// labels that start with "Quantity not specified" are never listed. Empty
+  /// for a line with no food.
   List<UnitChoice> unitChoices(Span line) {
     final item = _itemAt(line);
     final ref = item?.line.foodRef;

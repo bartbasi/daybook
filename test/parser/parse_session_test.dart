@@ -940,6 +940,22 @@ void main() {
       expect(k.s.lines.any(picked), isFalse);
     });
 
+    test('a comma typed directly after a suspended item drops it, though no '
+        'item changed', () {
+      final k = _Keys(newSession(), '1 cup milk');
+      pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1); // 1 cu milk: suspended
+      k.moveTo(k.text.length);
+      k.type(',');
+      expect(k.text, '1 cu milk,');
+      k.backspace(1);
+      k.moveTo(4);
+      k.type('p');
+      expect(k.text, '1 cup milk');
+      expect(picked(k.s.lines.single), isFalse);
+    });
+
     test('blanks typed or removed next to a suspended item keep it', () {
       final k = _Keys(newSession(), '1 cup milk, 2 eggs');
       final ref = pickOther(k.s, 0);
@@ -1717,6 +1733,22 @@ void main() {
       expect(set(k.s.lines.single), isFalse);
     });
 
+    test('is not made for a typed range, which is the user\'s own amount', () {
+      final s = newSession()..setText('2-3 eggs', 8);
+      expect(s.lines.single.markers, contains(Marker.assumed));
+      setAmount(s, 0, 3);
+      expect(s.text, '3 eggs');
+      expect(set(s.lines.single), isFalse);
+    });
+
+    test('is made for a typed unit the food could not convert (7.3)', () {
+      final s = newSession()..setText('2 slices butter', 15);
+      expect(s.lines.single.markers, contains(Marker.assumed));
+      setAmount(s, 0, 1, 'tbsp');
+      expect(s.text, '1 tbsp butter');
+      expect(set(s.lines.single), isTrue);
+    });
+
     test('is not made when the new text never arrives', () {
       final s = newSession()..setText('toast', 5);
       final r = s.rewriteAmount('toast', 5, s.lines[0].span!, quantity: 2)!;
@@ -1856,8 +1888,10 @@ void main() {
       expect(s.lines.single.foodRef, 'local:7');
       final choices = s.unitChoices(s.lines.single.span!);
       // No weight: grams and ounces cannot be converted (4.5).
-      expect(choices.map((c) => c.unitText), unorderedEquals(['serving', '']));
-      expect(choices.map((c) => c.grams), everyElement(1));
+      // A bare count is one serving here too: "serving" is kept, the bare
+      // count dropped.
+      expect(choices.map((c) => c.unitText), ['serving']);
+      expect(choices.single.grams, 1);
       for (final c in choices) {
         final r = s.rewriteAmount(
           s.text,
@@ -1873,16 +1907,36 @@ void main() {
       }
     });
 
-    test('a bare count and serving are offered when they read back', () {
+    test('serving and a bare count are not offered at an amount already '
+        'listed', () {
+      // The egg's own "1 egg" portion is the bare count, 50 g; serving would
+      // be the same 50 g, so it is left out.
       final s = newSession()..setText('2 eggs', 6);
       final choices = s.unitChoices(s.lines[0].span!);
-      // The egg's own "1 egg" portion is the bare count; serving is the
-      // default amount.
       expect(choices.where((c) => c.unitText == ''), hasLength(1));
       expect(choices.singleWhere((c) => c.unitText == '').label, 'egg');
+      expect(choices.map((c) => c.unitText), isNot(contains('serving')));
+
+      // Coffee: "small", a bare count and serving are all 360 g; only
+      // "small", the food's own portion, is listed.
+      final c = newSession()..setText('coffee', 6);
+      final coffee = c.unitChoices(c.lines[0].span!);
+      final at360 = coffee.where((u) => (u.grams - 360).abs() <= 0.05);
+      expect(at360.map((u) => u.label), ['small']);
+      for (final u in coffee) {
+        if (u.unitText != 'serving' && u.unitText != '') continue;
+        expect(
+          coffee.where((o) => o != u && (o.grams - u.grams).abs() <= 0.05),
+          isEmpty,
+          reason: u.label,
+        );
+      }
+
+      // The same rule for a food that is not typed.
+      final food = unitChoicesForFood(parser, s.snapshot, _coffee);
       expect(
-        choices.singleWhere((c) => c.unitText == 'serving').grams,
-        closeTo(50, 1e-9),
+        food.where((u) => (u.grams - 360).abs() <= 0.05).map((u) => u.label),
+        ['small'],
       );
     });
 

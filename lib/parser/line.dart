@@ -163,12 +163,13 @@ class Line {
   /// learning on Save (7.2) needs it.
   final bool fromLearnedMatch;
 
-  /// True only for a typed line whose amount was assumed and that the user
-  /// then set in the correction sheet, with the item's text unchanged since
-  /// (grammar 7.2, second row: on Save, store this line's quantity and unit on
-  /// the learned row for its key). False for a line whose typed amount was
-  /// changed in the sheet (7.2, third row: nothing is learned), and false for
-  /// every line once its item is edited again.
+  /// True only for a typed line whose amount was assumed (no amount typed, or
+  /// a typed unit the food could not convert) and that the user then set in
+  /// the correction sheet, with the item's text unchanged since (grammar 7.2,
+  /// second row: on Save, store this line's quantity and unit on the learned
+  /// row for its key). False for a line whose typed amount, a range included,
+  /// was changed in the sheet (7.2, third row: nothing is learned), and false
+  /// for every line once its item is edited again.
   final bool assumedAmountSetInSheet;
 
   /// For a typed line: the item's food words as typed, for the not found
