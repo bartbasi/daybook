@@ -51,7 +51,18 @@ Future<void> settle(WidgetTester tester) async {
 /// Lets a test hold or fail a database write.
 class Gate extends QueryInterceptor {
   Completer<void>? hold;
+  Completer<void>? holdDelete;
   var failInsert = false;
+
+  @override
+  Future<int> runDelete(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    await holdDelete?.future;
+    return super.runDelete(executor, statement, args);
+  }
 
   @override
   Future<int> runInsert(
@@ -79,11 +90,15 @@ class FakeLink implements WorkerLink {
 
   /// While true, the answers to text requests are kept, not given.
   var hold = false;
+
+  /// While true, the answers to foodLine requests are kept too.
+  var holdFoodLines = false;
   final held = <WorkerReply>[];
   var lastSession = 0;
 
   void release() {
     hold = false;
+    holdFoodLines = false;
     final now = [...held];
     held.clear();
     for (final r in now) {
@@ -117,7 +132,8 @@ class FakeLink implements WorkerLink {
     }
     final r = core.handle(request);
     if (r == null) return;
-    if (hold && request is TextRequest) {
+    if ((hold && request is TextRequest) ||
+        (holdFoodLines && request is FoodLineRequest)) {
       held.add(r);
     } else {
       reply!(r);
@@ -1421,6 +1437,41 @@ void main() {
       links.single.release();
       await settle(tester);
       expect(await mealRows(tester), isEmpty);
+    });
+
+    appTest('a tap on the date arrows or the meal while Save waits does '
+        'not move the meal: it is stored where Save was tapped', (
+      tester,
+    ) async {
+      linkMaker = FakeLink.new;
+      await openApp(tester);
+      await openFood(tester);
+      await tester.tap(find.byTooltip('Previous day'));
+      await tester.pump();
+      await type(tester, '2 eggs');
+      links.single.hold = true;
+      await tester.tap(saveButton());
+      await tester.pump();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, Icons.chevron_left),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.byTooltip('Next day'), warnIfMissed: false);
+      await tester.tap(find.byTooltip('Previous day'), warnIfMissed: false);
+      await tester.tap(
+        find.widgetWithText(ChoiceChip, 'Dinner'),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      links.single.release();
+      await settle(tester);
+      final m = await theMeal(tester);
+      expect(m.meal.localDate, '2026-11-11');
+      expect(m.slotName, 'Breakfast');
     });
 
     appTest('the system back button also closes while Save waits', (

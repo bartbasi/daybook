@@ -135,13 +135,9 @@ class _MealChipsState extends State<MealChips> {
       if (y != null)
         _Chip(
           name: S.chipSameAsYesterday,
-          sub: S.chipYesterdaySub(
+          sub: S.chipYesterdaySub(y.slotName, y.totals[Nutrients.energy]),
+          spoken: S.spokenYesterdayChip(
             y.slotName,
-            y.entries.length,
-            y.totals[Nutrients.energy],
-          ),
-          spoken: S.spokenWholeChip(
-            '${S.chipSameAsYesterday}, ${y.slotName}',
             y.entries.length,
             y.totals[Nutrients.energy],
             widget.logsNow,

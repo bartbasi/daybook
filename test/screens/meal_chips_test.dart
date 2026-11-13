@@ -24,7 +24,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
-import 'food_entry_screen_test.dart' show Gate, nowFixed, settle;
+import '../speed/tap_counter.dart';
+import 'food_entry_screen_test.dart' show FakeLink, Gate, nowFixed, settle;
 
 // The chips row of the food screen (task 2.10), over the real food data with
 // the parser worker running inline.
@@ -59,8 +60,12 @@ void main() {
 
   late AppDatabase db;
   late Gate gate;
+  late List<FakeLink> links;
+  var useLink = false;
 
   setUp(() {
+    links = [];
+    useLink = false;
     gate = Gate();
     db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
   });
@@ -98,7 +103,12 @@ void main() {
         db: db,
         clock: () => nowFixed,
         foodsPath: Future.value('unused'),
-        workerFactory: (_) => ParseWorker.inlineWith(parser),
+        workerFactory: (_) {
+          if (!useLink) return ParseWorker.inlineWith(parser);
+          final link = FakeLink(parser);
+          links.add(link);
+          return ParseWorker.linked(link);
+        },
       ),
     );
     await settle(tester);
@@ -119,9 +129,7 @@ void main() {
   Finder sheet() => find.byType(CorrectionSheet);
   Finder inSheet(Finder f) => find.descendant(of: sheet(), matching: f);
 
-  var taps = 0;
   Future<void> tap(WidgetTester tester, Finder f) async {
-    taps++;
     await tester.tap(f);
     await settle(tester);
   }
@@ -276,7 +284,7 @@ void main() {
         greaterThan(tester.getTopLeft(chip('My oatmeal')).dy),
       );
       // Name, item count and kcal on each whole-meal chip.
-      expect(find.text('Breakfast, 3 items, 219 kcal'), findsOneWidget);
+      expect(find.text('Breakfast, 219 kcal'), findsOneWidget);
       expect(find.text('2 items, 180 kcal'), findsOneWidget);
       expect(find.text('2 items, 127 kcal'), findsOneWidget);
       // It is under the box and above the lines.
@@ -340,7 +348,7 @@ void main() {
       expect(chip('Same as yesterday'), findsNothing);
       await tap(tester, find.widgetWithText(ChoiceChip, 'Lunch'));
       expect(chip('Same as yesterday'), findsOneWidget);
-      expect(find.text('Lunch, 1 item, 4 kcal'), findsOneWidget);
+      expect(find.text('Lunch, 4 kcal'), findsOneWidget);
     });
 
     appTest('follows the meal: saved meals are ordered by use in that slot', (
@@ -372,13 +380,13 @@ void main() {
       await seed(tester);
       await openApp(tester);
       await openFood(tester);
-      expect(find.text('Breakfast, 3 items, 219 kcal'), findsOneWidget);
+      expect(find.text('Breakfast, 219 kcal'), findsOneWidget);
       await tap(tester, find.byTooltip('Previous day'));
       // The day before Nov 11 is Nov 10: nothing there.
       expect(chip('Same as yesterday'), findsNothing);
       await tap(tester, find.byTooltip('Previous day'));
       // The day before Nov 10 is Nov 9: one egg line (the 2 eggs, 176 kcal).
-      expect(find.text('Breakfast, 1 item, 176 kcal'), findsOneWidget);
+      expect(find.text('Breakfast, 176 kcal'), findsOneWidget);
     });
 
     appTest('is not shown while editing a logged meal', (tester) async {
@@ -409,13 +417,17 @@ void main() {
       // The test font is wider than a real one, so this is the narrowest
       // width where the second chip is in view with no swipe.
       await openApp(tester, size: const Size(673, 800));
-      taps = 0;
-      await openFood(tester);
+      final taps = TapCounter(tester);
+      await taps.tap(plusFood());
+      await settle(tester);
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
       // The most used saved meal is in view with no swipe, so the target is
       // 2 taps.
       expect(tester.getRect(chip('My oatmeal')).right, lessThan(673));
-      await tap(tester, chip('My oatmeal'));
-      expect(taps, 2, reason: '+ Food, then the chip');
+      await taps.tap(chip('My oatmeal'));
+      await settle(tester);
+      taps.expectCount(2, flow: 'Log a saved meal');
       expect(find.byType(FoodEntryScreen), findsNothing);
       expect(
         find.text('Breakfast logged: My oatmeal, 127 kcal'),
@@ -477,12 +489,16 @@ void main() {
     ) async {
       await seed(tester);
       await openApp(tester);
-      taps = 0;
-      await openFood(tester);
+      final taps = TapCounter(tester);
+      await taps.tap(plusFood());
+      await settle(tester);
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
       // First in the row, so always in view.
       expect(tester.getRect(chip('Same as yesterday')).left, lessThan(100));
-      await tap(tester, chip('Same as yesterday'));
-      expect(taps, 2);
+      await taps.tap(chip('Same as yesterday'));
+      await settle(tester);
+      taps.expectCount(2, flow: 'Same as yesterday');
       expect(find.byType(FoodEntryScreen), findsNothing);
       expect(
         find.text('Breakfast logged: same as yesterday, 219 kcal'),
@@ -644,6 +660,74 @@ void main() {
         (await mealRows(tester)).where((m) => m.localDate == '2026-11-12'),
         hasLength(1),
       );
+    });
+
+    appTest('a saved meal deleted just before its chip is tapped says so and '
+        'logs nothing; the other chips still work', (tester) async {
+      final s = await seed(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await tester.ensureVisible(chip('Usual breakfast'));
+      await tester.pump();
+      await real(tester, () => db.deleteSavedMeal(s.usual.id));
+      // Tapped before a frame: the chip is still the old one.
+      await tester.tap(chip('Usual breakfast'));
+      await settle(tester);
+      expect(find.text('That saved meal is no longer there.'), findsOneWidget);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      expect(
+        (await mealRows(tester)).where((m) => m.localDate == '2026-11-12'),
+        isEmpty,
+      );
+      await tapChip(tester, chip('Same as yesterday'));
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      expect(
+        (await mealRows(tester)).where((m) => m.localDate == '2026-11-12'),
+        hasLength(1),
+      );
+    });
+
+    appTest('the same with text in the box: nothing is added and the other '
+        'chips add', (tester) async {
+      final s = await seed(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '1 apple');
+      await tester.ensureVisible(chip('Usual breakfast'));
+      await tester.pump();
+      await real(tester, () => db.deleteSavedMeal(s.usual.id));
+      await tester.tap(chip('Usual breakfast'));
+      await settle(tester);
+      expect(find.text('That saved meal is no longer there.'), findsOneWidget);
+      expect(tiles(), findsNWidgets(1));
+      expect(find.text('Added'), findsNothing);
+      await tapChip(tester, chip('My oatmeal'));
+      expect(tiles(), findsNWidgets(4));
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+    });
+
+    appTest('a food chip still being priced makes the screen not empty: a '
+        'whole-meal chip tapped then adds, and nothing is logged', (
+      tester,
+    ) async {
+      useLink = true;
+      await seed(tester);
+      await openApp(tester);
+      await openFood(tester);
+      links.single.holdFoodLines = true;
+      await tester.tap(chip('Egg'));
+      await tester.pump();
+      await tester.tap(chip('Same as yesterday'));
+      await tester.pump();
+      links.single.release();
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      expect(
+        (await mealRows(tester)).where((m) => m.localDate == '2026-11-12'),
+        isEmpty,
+      );
+      // The food and yesterday's three entries.
+      expect(tiles(), findsNWidgets(4));
     });
 
     appTest('a saved meal deleted while the screen is open loses its chip', (
@@ -1044,6 +1128,47 @@ void main() {
       expect(m.entries.first.nutrients[Nutrients.energy], 88);
       expect(m.entries[1].entry.baseQuantity, 180);
     });
+
+    for (final steps in [
+      ['1.1', '1'],
+      ['0.7', '0.3', '1'],
+    ]) {
+      appTest('changed through ${steps.join(', then ')} the stored values are '
+          'exactly the originals, with no drift', (tester) async {
+        final s = await seed(tester);
+        await openApp(tester);
+        await openFood(tester);
+        await type(tester, '1 apple');
+        await tapChip(tester, chip('Usual breakfast'));
+        for (final m in steps) {
+          await tap(
+            tester,
+            find
+                .descendant(
+                  of: find.byType(FoodLineTile),
+                  matching: find.textContaining('Usual breakfast'),
+                )
+                .first,
+          );
+          await tester.enterText(multiplier(), m);
+          await tap(tester, inSheet(find.text('Done')));
+        }
+        await tester.tap(saveButton());
+        await settle(tester);
+        final rows = await mealRows(tester);
+        final meal = await mealOf(
+          tester,
+          rows.firstWhere((x) => x.localDate == '2026-11-12').id,
+        );
+        expect(meal.meal.savedMealId, s.usual.id);
+        expect(meal.entries[0].entry.quantity, 2);
+        expect(meal.entries[0].entry.baseQuantity, 100);
+        expect(meal.entries[0].nutrients[Nutrients.energy], 176);
+        expect(meal.entries[1].entry.quantity, 1);
+        expect(meal.entries[1].entry.baseQuantity, 360);
+        expect(meal.entries[1].nutrients[Nutrients.energy], 4);
+      });
+    }
 
     appTest('a number that is not above 0 is refused and the sheet stays', (
       tester,

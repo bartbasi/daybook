@@ -104,11 +104,6 @@ class _SavedMealsScreenState extends State<SavedMealsScreen> {
     }
   }
 
-  /// The first word of each item's name, as Home lists a meal's foods.
-  static String _inBrief(SavedMealDetail m) => S.foodsInBrief([
-    for (final i in m.items) i.item.foodName.split(',').first.trim(),
-  ]);
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -181,13 +176,15 @@ class _SavedMealsScreenState extends State<SavedMealsScreen> {
 
   Widget _row(BuildContext context, SavedMealDetail m) {
     final theme = Theme.of(context);
-    final sub = S.savedMealRowSub(m.items.length, m.totals[Nutrients.energy]);
-    final foods = _inBrief(m);
-    final also = m.aliases.isEmpty ? '' : S.savedMealAlsoTyped(m.aliases);
+    final sub = S.savedMealRowSub(
+      m.items.length,
+      m.totals[Nutrients.energy],
+      m.aliases,
+    );
     return Semantics(
       container: true,
       button: true,
-      label: S.savedMealRowLabel(m.meal.name, sub, foods, also),
+      label: S.savedMealRowLabel(m.meal.name, sub),
       excludeSemantics: true,
       onTap: () => _open(m),
       child: InkWell(
@@ -204,10 +201,6 @@ class _SavedMealsScreenState extends State<SavedMealsScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 Text(sub, style: theme.textTheme.bodyMedium),
-                if (foods.isNotEmpty)
-                  Text(foods, style: theme.textTheme.bodySmall),
-                if (also.isNotEmpty)
-                  Text(also, style: theme.textTheme.bodySmall),
               ],
             ),
           ),

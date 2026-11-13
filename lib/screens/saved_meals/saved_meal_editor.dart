@@ -161,7 +161,7 @@ class SavedMealEditorState extends State<SavedMealEditor>
 
   // The parser.
 
-  Future<void> _attach() async {
+  Future<void> _attach({List<DraftPick> picks = const []}) async {
     final ParseWorker worker;
     try {
       final host = _parser;
@@ -180,10 +180,47 @@ class SavedMealEditorState extends State<SavedMealEditor>
       _changes.fire();
       return;
     }
-    _sendText(_cursor());
+    final text = _box.text;
+    final id = _sendText(_cursor());
+    if (picks.isEmpty) return;
+    // Wait for the text's result, then send the picks again, in order.
+    try {
+      await _waitFor(id, text);
+    } catch (_) {
+      return; // The box moved on, or the worker stopped: the text is kept.
+    }
+    for (final p in picks) {
+      if (!mounted || h.isClosed) return;
+      h
+          .pick(text, p.span, p.foodRef, marker: p.marker)
+          .then((_) {}, onError: (Object _) {});
+    }
+  }
+
+  /// The picks to send again after a retry: only from a result that is for
+  /// exactly the text in the box.
+  List<DraftPick> _picksNow() {
+    final r = _result;
+    if (r == null || r.text != _box.text) return const [];
+    return [
+      for (final l in r.lines)
+        if (l.state != LineState.aliasOrSavedMeal &&
+            l.span != null &&
+            l.foodRef != null &&
+            (l.markers.contains(Marker.yourPick) ||
+                l.markers.contains(Marker.scanned)))
+          DraftPick(
+            l.span!,
+            l.foodRef!,
+            l.markers.contains(Marker.yourPick)
+                ? Marker.yourPick
+                : Marker.scanned,
+          ),
+    ];
   }
 
   void _retry() {
+    final picks = _picksNow();
     _handle?.close();
     _handle = null;
     _result = null;
@@ -195,7 +232,7 @@ class SavedMealEditorState extends State<SavedMealEditor>
       _requestFailed = false;
       _dead = false;
     });
-    _attach();
+    _attach(picks: picks);
   }
 
   int _cursor() {
@@ -342,22 +379,24 @@ class SavedMealEditorState extends State<SavedMealEditor>
 
   // The other names.
 
-  void _addAlias() {
+  /// "+ Add". True when the name was added.
+  bool _addAlias() {
     final p = _newAlias.text.trim();
     final key = nameKey(p);
     if (key.isEmpty) {
       setState(() => _aliasError = S.savedMealAliasEmpty);
-      return;
+      return false;
     }
     if (_aliases.any((a) => nameKey(a) == key)) {
       setState(() => _aliasError = S.savedMealAliasInList(p));
-      return;
+      return false;
     }
     setState(() {
       _aliases = [..._aliases, p];
       _aliasError = null;
       _newAlias.clear();
     });
+    return true;
   }
 
   void _removeAlias(int i) => setState(() {
@@ -370,12 +409,16 @@ class SavedMealEditorState extends State<SavedMealEditor>
   Future<void> _save() async {
     if (!_canSave) return;
     final name = _name.text.trim();
+    // A name typed and not yet added counts as if "+ Add" was tapped: the same
+    // refusals, and a refusal stops the save.
+    if (_newAlias.text.trim().isNotEmpty && !_addAlias()) return;
     setState(() {
       _busy = true;
       _error = null;
       _aliasError = null;
       _note = null;
     });
+    var finished = false;
     try {
       if (name.isEmpty) {
         setState(() => _error = S.savedMealNameEmpty);
@@ -439,9 +482,22 @@ class SavedMealEditorState extends State<SavedMealEditor>
         );
         return;
       }
-      Navigator.of(context).pop(SavedMealSaved(result.saved!));
+      finished = true;
+      _popSelf(SavedMealSaved(result.saved!));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (!finished && mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Closes this editor's own route and nothing else, whatever is on top of
+  /// it (the weight sheet may have taken the top during a write).
+  void _popSelf(SavedMealEditorResult result) {
+    final route = ModalRoute.of(context);
+    final nav = Navigator.of(context);
+    if (route == null || route.isCurrent) {
+      nav.pop(result);
+    } else {
+      nav.removeRoute(route, result);
     }
   }
 
@@ -450,16 +506,19 @@ class SavedMealEditorState extends State<SavedMealEditor>
     if (s == null || _busy) return;
     setState(() {
       _busy = true;
+      _writing = true;
       _error = null;
     });
     try {
       final deleted = await _db.deleteSavedMeal(s.meal.id);
       if (!mounted) return;
-      Navigator.of(context).pop(SavedMealRemoved(deleted));
+      setState(() => _writing = false);
+      _popSelf(SavedMealRemoved(deleted));
     } catch (_) {
       if (mounted) {
         setState(() {
           _busy = false;
+          _writing = false;
           _error = S.savedMealDeleteFailed;
         });
       }
@@ -734,6 +793,12 @@ class SavedMealEditorState extends State<SavedMealEditor>
     if (priced.reset) sheetNote(S.foodSheetAmountReset);
   }
 
+  @visibleForTesting
+  SessionHandle? get debugHandle => _handle;
+
+  @visibleForTesting
+  ParseResult? get debugResult => _result;
+
   // Layout.
 
   @override
@@ -764,13 +829,15 @@ class SavedMealEditorState extends State<SavedMealEditor>
             children: [
               Expanded(
                 child: ContentWidth(
-                  child: Column(
-                    children: [
-                      if (_note != null)
-                        ConfirmBar(message: _note!, onUndo: null),
-                      Expanded(child: _scrollArea(theme)),
-                      _boxArea(context),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, room) => Column(
+                      children: [
+                        if (_note != null)
+                          ConfirmBar(message: _note!, onUndo: null),
+                        Expanded(child: _scrollArea(theme)),
+                        _boxArea(context, room.maxHeight),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -912,20 +979,28 @@ class SavedMealEditorState extends State<SavedMealEditor>
 
   /// The empty box that adds items by typing, outside the scrolling lines so
   /// it never scrolls away.
-  Widget _boxArea(BuildContext context) {
+  Widget _boxArea(BuildContext context, double available) {
+    // As on the food screen: the box takes at most half of the room, grows
+    // with its text up to a few lines, and then scrolls inside itself.
+    final lineHeight = MediaQuery.textScalerOf(context).scale(16) * 1.4;
+    final fit = ((available * 0.5 - 56) / lineHeight).floor();
+    final maxLines = fit.clamp(1, 3);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Semantics(
-        label: S.savedMealBoxLabel,
-        child: TextField(
-          controller: _box,
-          focusNode: _focus,
-          keyboardType: TextInputType.multiline,
-          minLines: 1,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            hintText: S.savedMealBoxHint,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: (available - 16).clamp(0, 1e9)),
+        child: Semantics(
+          label: S.savedMealBoxLabel,
+          child: TextField(
+            controller: _box,
+            focusNode: _focus,
+            keyboardType: TextInputType.multiline,
+            minLines: 1,
+            maxLines: maxLines,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: S.savedMealBoxHint,
+            ),
           ),
         ),
       ),

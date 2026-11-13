@@ -467,8 +467,15 @@ class S {
   static const chipsFoodLabel = 'Recent and frequent. Tap adds a line.';
   static const chipSameAsYesterday = 'Same as yesterday';
   static const chipSameAsYesterdayShort = 'same as yesterday';
-  static String chipYesterdaySub(String slot, int items, double? kcalValue) =>
-      '$slot, ${lineItems(items)}, ${kcal(kcalValue)}';
+  static String chipYesterdaySub(String slot, double? kcalValue) =>
+      '$slot, ${kcal(kcalValue)}';
+  static String spokenYesterdayChip(
+    String slot,
+    int items,
+    double? kcalValue,
+    bool logsNow,
+  ) =>
+      spokenWholeChip('$chipSameAsYesterday, $slot', items, kcalValue, logsNow);
   static String chipSavedSub(int items, double? kcalValue) =>
       '${lineItems(items)}, ${kcal(kcalValue)}';
   static String spokenWholeChip(
@@ -507,18 +514,17 @@ class S {
   static const savedMealsHelpMake =
       'To save a meal you logged: open it from Home, then "Save as a saved '
       'meal" in its menu.';
-  static String savedMealRowSub(int items, double? kcalValue) =>
-      '${lineItems(items)}, ${kcal(kcalValue)}';
-  static String savedMealAlsoTyped(List<String> names) =>
-      'Also typed as: ${names.join(', ')}';
-  static String savedMealRowLabel(
-    String name,
-    String sub,
-    String foods,
-    String also,
+
+  /// '2 items, 260 kcal. Also typed as: usual breakfast, ub' (frame 1).
+  static String savedMealRowSub(
+    int items,
+    double? kcalValue,
+    List<String> names,
   ) =>
-      '${[name, sub, if (foods.isNotEmpty) foods, if (also.isNotEmpty) also].join('. ')}. '
-      'Double tap to edit.';
+      '${lineItems(items)}, ${kcal(kcalValue)}'
+      '${names.isEmpty ? '' : '. Also typed as: ${names.join(', ')}'}';
+  static String savedMealRowLabel(String name, String sub) =>
+      '$name. $sub. Double tap to edit.';
   static const savedMealEditNew = 'New saved meal';
   static const savedMealOtherNames = 'Other names you can type';
   static const savedMealNewName = 'New name';

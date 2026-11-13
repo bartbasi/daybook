@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:daybook/app.dart';
@@ -8,6 +9,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
 import 'package:daybook/data/nutrients.dart';
+import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/parser/parser.dart';
 import 'package:daybook/parser/search_index.dart';
@@ -23,7 +25,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
-import 'food_entry_screen_test.dart' show FakeLink, nowFixed, settle;
+import 'food_entry_screen_test.dart' show FakeLink, Gate, nowFixed, settle;
 
 // The saved meals list and editor under More (task 2.10), over the real food
 // data with the parser worker running inline.
@@ -56,11 +58,13 @@ void main() {
   });
 
   late AppDatabase db;
+  late Gate gate;
   late List<FakeLink> links;
   var useLink = false;
 
   setUp(() {
-    db = AppDatabase(NativeDatabase.memory());
+    gate = Gate();
+    db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
     links = [];
     useLink = false;
   });
@@ -244,12 +248,16 @@ void main() {
       expect(find.text('Saved meals'), findsOneWidget);
       expect(find.text('+ New'), findsOneWidget);
       expect(find.text('Usual breakfast'), findsOneWidget);
-      expect(find.text('2 items, 180 kcal'), findsOneWidget);
-      expect(find.text('Also typed as: usual breakfast, ub'), findsOneWidget);
-      expect(find.text('Egg, Coffee'), findsOneWidget);
+      expect(
+        find.text('2 items, 180 kcal. Also typed as: usual breakfast, ub'),
+        findsOneWidget,
+      );
+      expect(find.text('Egg, Coffee'), findsNothing);
       expect(find.text('My oatmeal'), findsOneWidget);
-      expect(find.text('1 item, 88 kcal'), findsOneWidget);
-      expect(find.text('Also typed as: my oats'), findsOneWidget);
+      expect(
+        find.text('1 item, 88 kcal. Also typed as: my oats'),
+        findsOneWidget,
+      );
       expect(find.textContaining("Type a saved meal's name"), findsOneWidget);
       expect(find.textContaining('Save as a saved meal'), findsOneWidget);
       expect(
@@ -545,6 +553,161 @@ void main() {
       expect(rows.single.meal.name, 'Snack mix');
       expect(rows.single.aliases, isEmpty);
       expect(rows.single.items.single.item.quantity, 2);
+    });
+  });
+
+  group('review fixes', () {
+    appTest('a grown box and a message in the bar at 2x text with the '
+        'keyboard up have no overflow at 344x800 and 344x700', (tester) async {
+      for (final h in [800.0, 700.0]) {
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await usualBreakfast(tester);
+        await openApp(tester, size: Size(344, h));
+        await goToList(tester);
+        await openEditor(tester, 'Usual breakfast');
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pump();
+        await tester.enterText(nameField(), '');
+        await type(tester, '1 apple\n1 egg\n1 pear\n1 plum');
+        await tester.tap(saveButton());
+        await settle(tester);
+        expect(find.text('Give it a name.'), findsOneWidget);
+        expect(tester.takeException(), isNull, reason: 'height $h');
+        expect(tester.getRect(boxField()).top, greaterThanOrEqualTo(0));
+        expect(
+          tester.getRect(saveButton()).bottom,
+          lessThanOrEqualTo(h - 300 + 0.5),
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 10));
+        await real(tester, () => db.delete(db.savedMeals).go());
+      }
+    });
+
+    appTest('a route that took the top during the write is not what closes: '
+        'the editor leaves, and Save cannot run twice', (tester) async {
+      await openApp(tester);
+      await goToList(tester);
+      await tap(tester, find.text('+ New'));
+      await tester.enterText(nameField(), 'Snack mix');
+      await type(tester, '2 eggs');
+      gate.hold = Completer<void>();
+      await tester.tap(saveButton());
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump();
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNull);
+      await tester.tap(saveButton(), warnIfMissed: false);
+      Navigator.of(tester.element(find.byType(SavedMealEditor))).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('on top')),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      gate.hold!.complete();
+      gate.hold = null;
+      await settle(tester);
+      expect(find.byType(SavedMealEditor), findsNothing);
+      expect(find.text('on top'), findsOneWidget);
+      expect(
+        await real(tester, () => db.select(db.savedMeals).get()),
+        hasLength(1),
+      );
+    });
+
+    appTest('Back while a delete runs waits for it: the editor leaves with '
+        'the Undo on the list', (tester) async {
+      await myOatmeal(tester);
+      await openApp(tester);
+      await goToList(tester);
+      await openEditor(tester, 'My oatmeal');
+      gate.holdDelete = Completer<void>();
+      await tap(tester, find.byTooltip('More options'));
+      await tester.tap(find.text('Delete saved meal'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(SavedMealEditor), findsOneWidget);
+      gate.holdDelete!.complete();
+      gate.holdDelete = null;
+      await settle(tester);
+      expect(find.byType(SavedMealEditor), findsNothing);
+      expect(find.text('Saved meal "My oatmeal" deleted.'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+    });
+
+    appTest('a name typed in the New name field is added by Save', (
+      tester,
+    ) async {
+      final m = await usualBreakfast(tester);
+      await openApp(tester);
+      await goToList(tester);
+      await openEditor(tester, 'Usual breakfast');
+      await tester.enterText(newNameField(), 'my usual');
+      await tester.pump();
+      await tap(tester, saveButton());
+      expect(find.byType(SavedMealEditor), findsNothing);
+      expect((await detail(tester, m.id)).aliases, [
+        'usual breakfast',
+        'ub',
+        'my usual',
+      ]);
+    });
+
+    appTest('a name left in the New name field that is refused stops the '
+        'save, with the same words as + Add', (tester) async {
+      final m = await usualBreakfast(tester);
+      await openApp(tester);
+      await goToList(tester);
+      await openEditor(tester, 'Usual breakfast');
+      await tester.enterText(nameField(), 'Renamed');
+      await tester.enterText(newNameField(), 'UB');
+      await tester.pump();
+      await tap(tester, saveButton());
+      expect(find.byType(SavedMealEditor), findsOneWidget);
+      expect(find.text('"UB" is already in this list.'), findsOneWidget);
+      expect((await detail(tester, m.id)).meal.name, 'Usual breakfast');
+    });
+
+    appTest('Try again after the worker died sends the picks again', (
+      tester,
+    ) async {
+      useLink = true;
+      await usualBreakfast(tester);
+      await openApp(tester);
+      await goToList(tester);
+      await openEditor(tester, 'Usual breakfast');
+      await type(tester, '2 slices toast');
+      final s = tester.state<SavedMealEditorState>(
+        find.byType(SavedMealEditor),
+      );
+      const text = '2 slices toast';
+      final span = s.debugResult!.lines.single.span!;
+      final alts = await real(
+        tester,
+        () => s.debugHandle!.alternatives(text, span),
+      );
+      await real(
+        tester,
+        () => s.debugHandle!.pick(
+          text,
+          span,
+          alts.others.first.ref,
+          marker: Marker.yourPick,
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Your pick'), findsOneWidget);
+      links.single.crash();
+      await tester.pump();
+      await tester.tap(find.text('Try again'));
+      await settle(tester);
+      expect(find.text('Your pick'), findsOneWidget);
     });
   });
 
