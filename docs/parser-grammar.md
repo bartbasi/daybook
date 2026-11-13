@@ -676,9 +676,15 @@ For a line that has a food:
 - **Candidates**: the current pick first, marked as chosen, then up to **7 others** in ranking order (5.4), skipping the current food. The list scrolls. Each row shows the food name, its dataset or "My food", and kcal for the line's amount. Added lines have no typed text to rank, so they show only the current food here.
 - **A note under the list**: "Your pick is remembered when you save the meal." (For added lines and saved meal items, which are never learned, the note is left out.)
 - **Search box**: below the list, as in 5.7.
-- **Amount**: a quantity field and a unit picker. The picker offers only amounts that typed text can express for that food: g and oz always; the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion; and each of the food's own portions that can be typed, meaning that writing that unit into the item and re-parsing it gives the same food and that portion's grams. A portion whose label cannot be typed back (for example "drink (12 fl oz)", or "medium or regular slice" when typing it would pick another portion or another food) is not offered, and neither is any portion whose label starts with "Quantity not specified".
+- **Amount**: a quantity field and a unit picker. The picker offers only amounts that typed text can express for that food:
+  - grams and ounces for any food measured in grams, which is every USDA food. A food of the user's that is measured in servings or milliliters with no weight does not offer them, because a weight cannot be converted for it (4.5). `oz` is not offered when, for that food, it would be read as a fluid ounce (4.2); `fl oz` is offered instead;
+  - the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion;
+  - each of the food's own portions that can be typed, meaning that writing that unit into the item and re-parsing it gives the same food and that portion's grams;
+  - a bare count and `serving`, whenever they re-parse to the same food, so a food of the user's with no portions can still have its amount changed.
+
+  A portion whose label cannot be typed back (for example "drink (12 fl oz)", or "medium or regular slice" when typing it would pick another portion or another food) is not offered, and neither is any portion whose label starts with "Quantity not specified".
 - **Forget this match**: only when a learned match produced the line (7.4).
-- **Remove from meal**: for a typed line, deletes the item's text from the box; for an added line, deletes the line.
+- **Remove from meal**: for a typed line, deletes the item's text from the box, checked by re-parsing: every other item must read exactly as before, otherwise nothing is removed. For an added line, it deletes the line.
 
 For a **not found** line there are no candidate rows. The sheet has:
 - the **search box**, filled in with the item's food words and with focus;
@@ -688,7 +694,7 @@ For a **not found** line there are no candidate rows. The sheet has:
 
 **Picking a food** on a typed line makes a sticky correction for that item (9.1), marked "Your pick". The text is not changed.
 
-**Changing the amount** on a typed line rewrites only the item's amount in the text box: the old quantity and unit are replaced, or, if there was none, `<quantity> <unit> ` is put immediately before the item's first food word, after any leading filler (`I had toast` becomes `I had 2 slice toast`). When the new amount has no unit, an `of` left right after the old amount is removed (`2 slices of toast` set to 3 gives `3 toast`). Only numbers and units are ever written, never food names. The rewrite is checked by re-parsing: the new text must give the same amount. If the text cannot express the amount, the change is refused and nothing is rewritten. See [open question 8](#142-open-questions). On an added line, the amount is changed on the line itself.
+**Changing the amount** on a typed line rewrites only the item's amount in the text box: the old quantity and unit are replaced, or, if there was none, `<quantity> <unit> ` is put immediately before the item's first food word, after any leading filler (`I had toast` becomes `I had 2 slice toast`). When the new amount has no unit, an `of` left right after the old amount is removed (`2 slices of toast` set to 3 gives `3 toast`). Only numbers and units are ever written, never food names. The rewrite is checked by re-parsing: the new text must give the same amount. If the text cannot express the amount, the change is refused and nothing is rewritten. A typed saved meal header's multiplier (6.4) is changed the same way: the quantity in the text is rewritten and checked by re-parsing. See [open question 8](#142-open-questions). On an added line, the amount is changed on the line itself.
 
 ### 8.4 Save
 
@@ -704,18 +710,29 @@ The parser runs again on **every** change to the text, with no debounce. The spe
 
 ### 9.1 Keeping a correction attached
 
-Each typed line remembers the span of text it came from, and, when the user picked a food in the sheet, a **sticky correction** (the chosen food ref). A span is a pair of UTF-16 indexes into the text exactly as typed, before any clean-up (2.1). After every text change:
+Each typed line remembers the span of text it came from, and, when the user picked a food in the sheet, a **sticky correction** (a pick): the chosen food ref, the learned key (7.1) it was picked with, and its own item's span. A span is a pair of UTF-16 indexes into the text exactly as typed, before any clean-up (2.1). After every text change:
 
 1. Find the changed region: the longest common start and the longest common end of the old and new text.
-2. Items wholly before the region keep their correction. Items wholly after it keep theirs, with spans shifted by the change in length.
-3. An item that overlaps the region keeps its correction only if its new learned key (7.1) equals the old one. Otherwise the correction is suspended, as described below.
+2. Carry each pick's span through the edit: text before the region keeps its positions, text after it shifts by the change in length, and a span that overlaps the region stretches or shrinks with it.
+3. The pick's item is the new item that overlaps that span most. If that item's key equals the pick's key, the pick applies. Otherwise the pick is suspended, as described below.
 
 So:
-- typing `, 1 banana` at the end keeps every correction above it;
+- typing `, 1 banana` at the end, one character at a time, keeps every correction above it;
 - changing `2 slices toast` to `3 slices toast` keeps the chosen bread and recomputes the grams;
-- changing it to `3 slices white toast` changes the key, so the correction no longer applies and normal matching (learned row, then ranking) gives the line; once the user edits elsewhere, it is dropped (see below).
+- changing it to `3 slices white toast` changes the key, so the pick is suspended and normal matching (learned row, then ranking) gives the line; it is dropped once the user moves on to another item (see below).
 
-**A changed key suspends the pick; it does not drop it at once.** Changing an amount by backspacing must not lose a pick. When an edit changes the key of a picked item, the pick is suspended for as long as later edits keep touching that same item. If the item's key becomes equal to the picked key again, the pick is restored. The suspended pick is dropped for good as soon as an edit lands entirely outside that item, or when the screen is closed. While suspended, the line shows what a fresh parse shows, without "Your pick". For example, take `2 slices toast` with a picked bread. Backspacing the 2 gives `slices toast`; the key is now different, so the pick is suspended. Typing 3 gives `3 slices toast`; the key matches again, so the pick is back.
+**A changed key suspends the pick; it does not drop it at once.** So changing an amount by backspacing does not lose a pick. While a pick is suspended, its line shows what a fresh parse shows, without "Your pick". An edit that changes that same item again, or that only adds or removes blanks next to it, keeps the pick suspended. When the item's key equals the pick's key again, the pick is restored. For example:
+- `2 slices toast` with a picked bread: backspacing the 2 gives `slices toast`, whose key differs, so the pick is suspended; typing 3 gives `3 slices toast`, the key matches again, and the pick is back;
+- `eggs` with a pick, then ` x3` typed after it: while the text reads `eggs x` the key differs, and `eggs x3` restores the pick;
+- `2 slices toast` with the last word backspaced and typed again: the pick is suspended while the word is incomplete and back once `toast` is whole.
+
+A suspended pick is dropped for good when:
+- an edit changes a different item and leaves the pick's item as it was (the user has moved on);
+- its item disappears entirely, for example when it is backspaced to nothing. Typing the same words again later does not bring the pick back;
+- a new pick is made on that item;
+- the screen is closed.
+
+A pick that applies is never dropped by typing elsewhere, never restored onto an item that an edit left unchanged, and never applied to two items.
 
 Sticky corrections live in memory until Save. The phone's undo does not bring back a dropped correction. Added lines (9.3) are not tied to the text, so typing never changes them.
 
@@ -1132,8 +1149,8 @@ In these places the document was silent or two of its rules disagreed. The lead 
 - Every user name of two or more words is kept whole, whatever words it contains: with a logged cached product "Big Mac", `big mac` is "big mac", not a large "mac". A one-word name gets no protection, so a recipe named "Bowl" does not stop `1 bowl of rice` (2.3).
 - Negation is not applied inside the user's own names: with a food named "No sugar cola", `2 cans no sugar cola` finds that food (2.3, 5.2 step 3).
 - A scanned product's name is protected only once the product has been logged, so a never logged "Large eggs" does not change what `2 large eggs` means (2.3).
-- The unit picker in the correction sheet offers only amounts the text can express for that food. A new amount goes right before the first food word (`I had toast` becomes `I had 2 slice toast`), a leftover `of` is removed when the new amount has no unit, and a change the text cannot express is refused (8.3).
-- Backspacing an amount no longer loses a pick: a changed key suspends the pick while the user keeps editing that item, and the pick comes back if the key matches again (9.1).
+- The unit picker in the correction sheet offers only amounts the text can express for that food: no grams or ounces for a user food with no weight, `fl oz` instead of `oz` where oz would mean fluid ounces, and a bare count or `serving` whenever they re-parse to the same food. A new amount goes right before the first food word (`I had toast` becomes `I had 2 slice toast`), a leftover `of` is removed when the new amount has no unit, and a change the text cannot express is refused. "Remove from meal" and a saved meal's multiplier are checked by re-parsing the same way (8.3).
+- Backspacing an amount no longer loses a pick: a changed key suspends the pick while the user keeps editing that item, and the pick comes back if the key matches again. It is dropped when the user changes another item, when its item is deleted, or when the screen closes (9.1).
 - Trailing spaces or tabs after a not found item at the end of the text keep it under the cursor, so typing `2 ` does not flash "Not found" (9.2).
 - Alias and saved meal names are compared after the same clean-up as typed text, so an alias saved as "pb&j" expands for `pb and j`, and the two cannot be saved as different aliases (6.1).
 - New synonyms: `skim milk` and `nonfat milk` find "Milk, fat free (skim)", `bbq` reads as "barbecue", and `cereal` finds "Cereal, ready-to-eat, NFS" except in `cooked cereal` and `cereal bar` (5.3).
