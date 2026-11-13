@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saved meals and aliases: Daybook wireframe</title>
+<link rel="stylesheet" href="wireframe.css">
+</head>
+<body>
+<div id="unfolded"><div id="cover">
+<header class="page-head">
+<div class="crumbs"><a href="index.html">Daybook design</a> / Saved meals and aliases</div>
+<h1>Saved meals and aliases</h1>
+<p>Lighter wireframes. A saved meal has a name and any number of other names (aliases). Any of them, typed in Food entry, expands to the items. The two saved meals are the fixtures in docs/parser-grammar.md 11.1.</p>
+<div class="widths">Frame width:
+<a href="saved-meals.html">360 dp (phone)</a>
+<a href="saved-meals.html#cover">344 dp (Z Fold 5 cover screen)</a>
+<a href="saved-meals.html#unfolded">673 dp (Z Fold 5 unfolded)</a></div>
+</header>
+<div class="states"><div class="state"><div><div class="state-title">1. Saved meals</div><div class="phone"><div class="screen "><div class="status"><span>9:05</span><span>signal  battery</span></div><div class="appbar"><div class="iconbtn">&lt;</div><div class="title">Saved meals</div><div class="btn primary small">+ New</div></div><div class="scroll"><div class="row"><div class="grow"><b>Usual breakfast</b><div class="small muted">2 items, 260 kcal. Also typed as: usual breakfast, ub</div></div><span class="chev"></span></div><div class="row"><div class="grow"><b>My oatmeal</b><div class="small muted">2 items, 243 kcal. Also typed as: my oatmeal</div></div><span class="chev"></span></div><div class="small mt">Type a saved meal's name, or one of its other names, in Food entry and it expands to its items.</div><div class="small mt">To save a meal you logged: open it from Home, then "Save as a saved meal" in its menu.</div></div><div class="navbar"><div class="navbar-inner"><div class="tab"><div class="ico"></div>Today</div><div class="tab"><div class="ico"></div>Summary</div><div class="tab"><div class="ico"></div>Workouts</div><div class="tab"><div class="ico"></div>Weight</div><div class="tab on"><div class="ico"></div>More</div></div></div><div class="gesture"></div></div></div></div><div class="notes"><p>Each row shows items, kcal and the names that can be typed. Tap to edit. The menu in the editor has Delete (with Undo).</p><p>Usual breakfast: 176 + 84 = 260. My oatmeal: Oatmeal, NFS 1 cup 182 + Honey 1 tbsp 61 = 243.</p></div></div><div class="state"><div><div class="state-title">2. Edit a saved meal</div><div class="phone"><div class="screen "><div class="status"><span>9:06</span><span>signal  battery</span></div><div class="appbar"><div class="iconbtn">&lt;</div><div class="title">Usual breakfast</div><span class="iconbtn">...</span></div><div class="scroll fade"><div class="fieldlabel">Name</div><div class="field">Usual breakfast</div><div class="fieldlabel">Other names you can type</div><div class="chiprow wrap"><div class="chip">usual breakfast &nbsp;x</div><div class="chip">ub &nbsp;x</div><div class="chip">+ Add</div></div><div class="mt"><div class="linegroup">Items</div><div class="line"><div class="between"><span class="name">Egg, whole, cooked, NS as to cooking method</span><b class="nowrap">176 kcal</b></div><div class="between small"><span class="nowrap">2 egg, 100 g</span><span class="nowrap">P 12 &nbsp;C 1 &nbsp;F 14</span></div></div><div class="line"><div class="between"><span class="name">Bread, sour dough, toasted</span><b class="nowrap">84 kcal</b></div><div class="between small"><span class="nowrap">1 slice, 28 g</span><span class="nowrap">P 3 &nbsp;C 16 &nbsp;F 1</span></div></div></div><div class="textbox mt"><span class="ph">Type to add items, the same way as Food entry</span></div></div><div class="bar"><div class="grow totals"><b>260 kcal</b> &nbsp;P 15 &nbsp;C 17 &nbsp;F 15</div><div class="btn primary square">Save</div></div><div class="gesture"></div></div></div></div><div class="notes"><p>The saved items are shown as <b>added lines</b>: each holds its food and amount, and tapping one opens the same sheet as Food entry to change or remove it. Items that are not touched never change.</p><p>The empty box below adds more items by typing, with the same parser and lines as Food entry. Typed items join the list when the saved meal is saved.</p><p>Other names: each must be unique; a name already used by another saved meal is refused with a plain message.</p><p>Saving a saved meal never changes meals already logged.</p><p>176 + 84 = 260. P 12 + 3 = 15, C 1 + 16 = 17, F 14 + 1 = 15.</p></div></div></div>
+<footer class="legal">Daybook. Copyright 2026 Play, Inc. Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.</footer>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybook wireframes</title>
+<link rel="stylesheet" href="wireframe.css">
+</head>
+<body>
+<header class="page-head">
+<h1>Daybook wireframes, Phase 3</h1>
+<p>Grayscale boxes and text: layout and behavior only, no visual design. Each page shows a screen's important states
+side by side, with notes. Frames are drawn at 360 dp wide, 1 CSS pixel per dp. Every page has links to redraw its
+frames at 344 dp (the Z Fold 5 cover screen) and 673 dp (unfolded).</p>
+<p>Sample data is one day, Thursday, Nov 12, 2026: a man of 44, 5 ft 11 in, 181.8 lb, losing 0.5 lb a week, goal
+2,138 kcal. Numbers on each screen add up; food values are close to USDA values but are samples.</p>
+<p>Tap counts for the six speed targets: <a href="speed-targets.md">speed-targets.md</a> (plain text). The same counts
+are on the screen pages.</p>
+</header>
+
+<h2 class="section">Navigation</h2>
+<div class="target" style="border-width:1px">
+<p><b>Bottom bar, five tabs, each with an icon and a word:</b> Today (Home), Summary, Workouts, Weight, More.</p>
+<p><b>One tap from Home:</b> Food entry (+ Food), the weight sheet (Weight), the cardio screen (Cardio), any meal or
+exercise logged today (to edit it), today's Summary (the budget card), and each tab.</p>
+<p><b>Two taps from Home:</b> log a saved meal or "same as yesterday" (+ Food, then the chip); start yesterday's or
+last week's workout, or any routine (Workouts, then Start).</p>
+<p><b>Under More:</b> things set up once and changed rarely: Goals, Saved meals and aliases, My foods and recipes,
+Exercises, Settings, About.</p>
+<p><b>Foldables:</b> one column everywhere. Nothing needs more than 344 dp. Unfolded, content stops at 600 dp wide and
+is centered; bars stretch. No separate tablet layout.</p>
+</div>
+
+<h2 class="section">Screens from PHASES.md</h2>
+<ol class="screenlist">
+<li><a href="home.html">Home (Today)</a>, including the foldable frames</li>
+<li><a href="food-entry.html">Food entry</a>: live lines, guess, not found, correction, alias, barcode, after Save</li>
+<li><a href="weight.html">Weight entry and widget</a>: entry, saved, failed, history and trend, edit, delete, Android and iOS widgets</li>
+<li><a href="workout.html">Workout logging</a>: Workouts tab, prefilled sets, adjusting, rest timer, records</li>
+<li><a href="cardio.html">Cardio entry</a>: one screen, estimate and override</li>
+<li><a href="summary.html">Daily and weekly summary</a>: totals against goals, top foods per nutrient</li>
+<li><a href="goals.html">Goals</a>: Mifflin-St Jeor, activity, rate, own number, add-back, macros, low-intake warning</li>
+<li><a href="about.html">About</a>: version, source, license, credits, feedback, Buy Me a Coffee row</li>
+</ol>
+
+<h2 class="section">Supporting screens (lighter)</h2>
+<ol class="screenlist">
+<li><a href="settings.html">Settings</a>: More tab, units, meal slots and times, export and import, Health Connect</li>
+<li><a href="saved-meals.html">Saved meals and aliases</a></li>
+<li><a href="food-editor.html">Custom food and recipe editor</a></li>
+<li><a href="routine-editor.html">Routine editor and exercise picker</a></li>
+<li><a href="exercise-detail.html">Exercise detail and weekly volume</a></li>
+</ol>
+
+<h2 class="section">Rules used on every screen</h2>
+<ul style="max-width:820px">
+<li>Tap targets are at least 48 by 48 dp.</li>
+<li>States are shown with words and shapes (labels, dashed or thick borders, hatching), never by color alone.</li>
+<li>Text sizes are in sp and scale with the phone's setting. Rows grow taller and screens scroll; nothing is cut off.</li>
+<li>Every save is written to the database at once and confirmed from what was read back. Deletes offer Undo instead of
+asking "are you sure". The only confirmation in the app is Import, which replaces all data.</li>
+<li>No ads, no accounts, no ratings prompts, no donation prompts. Buy Me a Coffee is one row in About.</li>
+</ul>
+
+<footer class="legal">Daybook. Copyright 2026 Play, Inc. Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.</footer>
+</body>
+</html>
