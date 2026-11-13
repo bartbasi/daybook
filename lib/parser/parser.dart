@@ -24,34 +24,53 @@ import 'user_snapshot_data.dart';
 typedef UsdaFoodLoader = PortionFood? Function(String ref);
 
 /// A [UsdaFoodLoader] over an open USDA reference database (the tables of
-/// tools/build_food_db.py). Results are kept, so each food is read once.
-UsdaFoodLoader sqliteUsdaFoods(Database db) {
-  final memo = <String, PortionFood?>{};
-  return (ref) => memo.putIfAbsent(ref, () {
+/// tools/build_food_db.py). Results are kept, so each food is read once. A food
+/// with no portion row and no nutrient row counts as missing. Its two queries
+/// are prepared once; call [dispose] when the owner of [db] is done, before
+/// closing the database, to release them. See [sqliteUsdaFoods] for the plain
+/// function form.
+class SqliteUsdaFoods {
+  SqliteUsdaFoods(Database db)
+    : _portions = db.prepare(
+        'SELECT label, gram_weight FROM food_portion '
+        'WHERE food_id = ? ORDER BY seq',
+      ),
+      _nutrients = db.prepare(
+        'SELECT nutrient_id, amount FROM food_nutrient WHERE food_id = ?',
+      );
+
+  final PreparedStatement _portions;
+  final PreparedStatement _nutrients;
+  final Map<String, PortionFood?> _memo = {};
+
+  PortionFood? call(String ref) => _memo.putIfAbsent(ref, () {
     final id = ref.startsWith('usda:') ? int.tryParse(ref.substring(5)) : null;
-    if (id == null ||
-        db.select('SELECT 1 FROM food WHERE id = ?', [id]).isEmpty) {
-      return null;
-    }
+    if (id == null) return null;
+    final portions = _portions.select([id]);
+    final nutrients = _nutrients.select([id]);
+    if (portions.isEmpty && nutrients.isEmpty) return null;
     return PortionFood.usda(
       portions: [
-        for (final r in db.select(
-          'SELECT label, gram_weight FROM food_portion '
-          'WHERE food_id = ? ORDER BY seq',
-          [id],
-        ))
+        for (final r in portions)
           (r['label'] as String, (r['gram_weight'] as num).toDouble()),
       ],
       nutrients: {
-        for (final r in db.select(
-          'SELECT nutrient_id, amount FROM food_nutrient WHERE food_id = ?',
-          [id],
-        ))
+        for (final r in nutrients)
           r['nutrient_id'] as int: (r['amount'] as num).toDouble(),
       },
     );
   });
+
+  /// Releases the prepared statements. The loader must not be called after.
+  void dispose() {
+    _portions.close();
+    _nutrients.close();
+  }
 }
+
+/// [SqliteUsdaFoods] as a plain function, for callers that never dispose it
+/// (the statements then live until the database is closed).
+UsdaFoodLoader sqliteUsdaFoods(Database db) => SqliteUsdaFoods(db).call;
 
 class Parser {
   Parser(this.usda, this.loadUsda);
@@ -76,8 +95,9 @@ class Parser {
 
   /// The lines for [text], in screen order. A saved meal header carries its
   /// item lines in [Line.items]; on screen they follow it. [cursor] is an
-  /// index into [text]; a not found item that has it (inside, or at either
-  /// end) is returned as plain (9.2). A cursor outside the text means none.
+  /// index into [text]; a not found item that has it (after its start, up to
+  /// and including its end) is returned as plain (9.2). A cursor outside the
+  /// text means none.
   ///
   /// Totals: add up the item lines of headers and every other line. A header
   /// adds nothing of its own (6.4).
@@ -88,7 +108,7 @@ class Parser {
       if (line == null) continue;
       final sp = d.span;
       if (line.state == LineState.notFound &&
-          cursor >= sp.start &&
+          cursor > sp.start &&
           cursor <= sp.end) {
         line = line.asPlain();
       }
@@ -99,7 +119,8 @@ class Parser {
 
   /// One item to its line (grammar 5.1 order): an alias or saved meal, then a
   /// learned match, then ranking. Does not look at the cursor. Null when the
-  /// item gives no line (R36: all its words were cut by a negation).
+  /// item gives no line (R36: all its words were cut by a negation and no
+  /// amount was typed).
   Line? parseItem(ItemDraft d, UserSnapshot s) {
     if (!d.hasFoodWords) {
       return Line(
@@ -144,12 +165,11 @@ class Parser {
       }
     }
     if (food == null) {
-      final m = _rankerOf(s).match(d.foodText);
+      final m = _rankerOf(s).match(d.foodText, negation: !d.negationProtected);
       if (m.state == LineState.notFound || m.top == null) {
-        // R36: every word was removed by the negation cut ("no sugar").
-        if (m.allNegated) {
-          return null;
-        }
+        // Every word was removed by the negation cut ("no sugar"): with an
+        // amount it is not found (8.1), without one it gives no line (R36).
+        if (m.allNegated && !d.hasAmount) return null;
         return notFound();
       }
       ref = m.top!.ref;

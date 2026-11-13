@@ -35,6 +35,7 @@ class ItemDraft {
     this.unit,
     this.size,
     this.amountSpans = const [],
+    this.negationProtected = false,
   });
 
   /// Where the whole item came from in the typed text.
@@ -72,6 +73,11 @@ class ItemDraft {
   /// multipliers. Adjacent parts are merged. Later tasks use this to rewrite
   /// only the amount in the text (8.3).
   final List<Span> amountSpans;
+
+  /// True when the item's food words include "no" or "without" inside one of
+  /// the user's protected names ("No sugar cola"). The matcher then does not
+  /// cut the words at the negation (5.2 step 3).
+  final bool negationProtected;
 
   /// Whether an amount was typed at all.
   bool get hasAmount => quantity != null;
@@ -171,7 +177,9 @@ class Line {
   final double? baseQuantity;
   final String? baseUnit;
 
-  /// Nutrient id (USDA ids) to the amount for this line, already scaled.
+  /// Nutrient id (USDA ids) to the amount for this line, already scaled. For a
+  /// saved meal header this is the subtotal of its [items], not an amount of
+  /// its own: totals must add the item lines and never the header.
   final Map<int, double> nutrients;
 
   final Set<Marker> markers;
@@ -183,7 +191,9 @@ class Line {
   final Span? span;
 
   /// For a saved meal header (state aliasOrSavedMeal): the multiplier (6.4),
-  /// and below it the item lines. Both are unused on other lines.
+  /// and below it the item lines. Both are unused on other lines. The item
+  /// lines are already multiplied by [multiplier] (quantity, base quantity and
+  /// nutrients), and they, not the header, count toward the meal total.
   final double? multiplier;
   final List<Line> items;
 }

@@ -1,6 +1,8 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:io';
+
 import 'package:daybook/parser/grams.dart';
 import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/parser.dart';
@@ -324,6 +326,10 @@ void main() {
         _one('2 large usual breakfast', data: d).state,
         isNot(LineState.aliasOrSavedMeal),
       );
+      expect(
+        _one('large usual breakfast', data: d).state,
+        isNot(LineState.aliasOrSavedMeal),
+      );
     });
 
     test('a header counts as one line and its items sit under it', () {
@@ -467,6 +473,94 @@ void main() {
       },
     );
 
+    test('the negation cut does not apply inside a protected name (R39)', () {
+      final d = UserSnapshotData(
+        foods: const [
+          UserFoodData(
+            ref: 'local:1',
+            name: 'No sugar cola',
+            kind: 'custom',
+            baseUnit: 'g',
+            baseAmount: 100,
+            nutrients: {1008: 5},
+          ),
+        ],
+      );
+      expect(_one('no sugar cola', data: d).foodRef, 'local:1');
+      expect(_one('2 cans no sugar cola', data: d).foodRef, 'local:1');
+      expect(
+        _parse('coffee with no sugar cola', data: d).last.foodRef,
+        'local:1',
+      );
+      // Without the food the cut still applies.
+      expect(_parse('no sugar cola'), isEmpty);
+    });
+
+    test('an amount with only negated words is not found (R36, 8.1)', () {
+      final l = _one('2 no sugar');
+      expect(l.state, LineState.notFound);
+      expect(l.span, const Span(0, 10));
+      expect(_one('3 without milk').state, LineState.notFound);
+      expect(_parse('coffee with no sugar'), hasLength(1));
+      expect(_parse('no sugar'), isEmpty);
+    });
+
+    test('a scanned product is a protected name only once logged (R40)', () {
+      UserSnapshotData data(Map<String, int> history) => UserSnapshotData(
+        foods: const [
+          UserFoodData(
+            ref: 'local:1',
+            name: 'Large eggs',
+            kind: 'off',
+            baseUnit: 'g',
+            baseAmount: 100,
+            portions: [PortionData('1 egg', 60)],
+            nutrients: {1008: 150},
+          ),
+        ],
+        historyCounts: history,
+      );
+      final never = _one('2 large eggs', data: data(const {}));
+      expect(never.foodRef, 'usda:1');
+      expect(never.baseQuantity, 100);
+      final logged = _one('2 large eggs', data: data(const {'local:1': 1}));
+      expect(logged.foodRef, 'local:1');
+      // Custom foods are always protected.
+      final custom = UserSnapshotData(
+        foods: const [
+          UserFoodData(
+            ref: 'local:1',
+            name: 'Large eggs',
+            kind: 'custom',
+            baseUnit: 'g',
+            baseAmount: 100,
+            nutrients: {1008: 150},
+          ),
+        ],
+      );
+      expect(_one('2 large eggs', data: custom).foodRef, 'local:1');
+    });
+
+    test('protected names are compared after accent folding (2.3)', () {
+      final d = UserSnapshotData(
+        foods: const [
+          UserFoodData(
+            ref: 'local:1',
+            name: 'Café and croissant',
+            kind: 'custom',
+            baseUnit: 'g',
+            baseAmount: 100,
+            nutrients: {1008: 300},
+          ),
+        ],
+      );
+      for (final t in ['cafe and croissant', 'café and croissant']) {
+        final lines = _parse(t, data: d);
+        expect(lines, hasLength(1), reason: t);
+        expect(lines.single.foodRef, 'local:1', reason: t);
+      }
+    });
+
     test('filler only and separators give no line', () {
       expect(_parse('I had'), isEmpty);
       expect(_parse('!!!'), isEmpty);
@@ -508,8 +602,15 @@ void main() {
 
     Line last(int cursor) => _parse(text, cursor: cursor).last;
 
+    test('the cursor at the start of the item does not count (9.2)', () {
+      final l = _parse('zz, eggs', cursor: 0).first;
+      expect(l.state, LineState.notFound);
+      expect(l.plain, isFalse);
+      expect(_parse('zz, eggs', cursor: 1).first.plain, isTrue);
+    });
+
     test('a not found item with the cursor in it is plain', () {
-      for (final c in [8, 10, 12]) {
+      for (final c in [9, 10, 12]) {
         final l = last(c);
         expect(l.state, LineState.notFound);
         expect(l.plain, isTrue, reason: 'cursor $c');
@@ -517,7 +618,7 @@ void main() {
     });
 
     test('the cursor elsewhere leaves it not found', () {
-      for (final c in [-1, 0, 3, 6, 7]) {
+      for (final c in [-1, 0, 3, 6, 7, 8]) {
         expect(last(c).plain, isFalse, reason: 'cursor $c');
       }
     });
@@ -600,6 +701,50 @@ void main() {
   });
 
   group('sqliteUsdaFoods', () {
+    test('a food with no portion and no nutrient row is missing', () {
+      final db = sqlite3.openInMemory()
+        ..execute('CREATE TABLE food (id INTEGER PRIMARY KEY)')
+        ..execute(
+          'CREATE TABLE food_nutrient '
+          '(food_id INTEGER, nutrient_id INTEGER, amount REAL)',
+        )
+        ..execute(
+          'CREATE TABLE food_portion '
+          '(food_id INTEGER, seq INTEGER, label TEXT, gram_weight REAL)',
+        )
+        ..execute('INSERT INTO food VALUES (1)')
+        ..execute('INSERT INTO food VALUES (2)')
+        ..execute('INSERT INTO food_nutrient VALUES (2, 1008, 10)');
+      final load = SqliteUsdaFoods(db);
+      expect(load('usda:1'), isNull);
+      expect(load('usda:2')!.nutrients, {1008: 10});
+      expect(load('usda:2')!.portions.usable, isEmpty);
+      load.dispose();
+      db.close();
+    });
+
+    test('dispose releases the file so it can be deleted', () {
+      final dir = Directory.systemTemp.createTempSync('daybook_loader');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = '${dir.path}/f.sqlite';
+      final db = sqlite3.open(path)
+        ..execute(
+          'CREATE TABLE food_nutrient '
+          '(food_id INTEGER, nutrient_id INTEGER, amount REAL)',
+        )
+        ..execute(
+          'CREATE TABLE food_portion '
+          '(food_id INTEGER, seq INTEGER, label TEXT, gram_weight REAL)',
+        )
+        ..execute('INSERT INTO food_nutrient VALUES (1, 1008, 10)');
+      final load = SqliteUsdaFoods(db);
+      expect(load('usda:1'), isNotNull);
+      load.dispose();
+      db.close();
+      File(path).deleteSync();
+      expect(File(path).existsSync(), isFalse);
+    });
+
     late Database db;
     setUp(() {
       db = sqlite3.openInMemory()

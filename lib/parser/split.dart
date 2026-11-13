@@ -9,6 +9,7 @@
 import 'amount.dart';
 import 'clean.dart';
 import 'line.dart';
+import 'normalize.dart' show foldText;
 import 'tokens.dart';
 
 /// The user's own names (foods, recipes, cached products, saved meals, alias
@@ -19,7 +20,8 @@ import 'tokens.dart';
 /// Each name goes through the 2.1 clean-up first, so "Eggs & toast" is the
 /// phrase `eggs and toast`. A name of two or more words is a protected phrase
 /// in full (2.3): never split, never read as quantity, size or unit, never
-/// removed as filler, whatever words it contains. A one-word name gets no
+/// removed as filler, whatever words it contains. Words are compared after the
+/// same accent folding as `nameKey`, so `cafe` meets "Café". A one-word name gets no
 /// protection, except that a one-word name with digits (`7up`) stays whole
 /// when a number touches letters.
 class UserNames {
@@ -42,7 +44,7 @@ class UserNames {
       }
       final words = [
         for (final chunk in _hardChunks(cleanText(trimmed).text))
-          for (final t in chunk) t.text.toLowerCase(),
+          for (final t in chunk) foldText(t.text),
       ];
       // A name of two or more words is protected in full (R38). A one-word
       // name needs no protection.
@@ -74,13 +76,13 @@ class UserNames {
   /// The number of words of the longest protected phrase that starts at token
   /// [i], or 0.
   int _matchAt(List<Tok> t, int i) {
-    final candidates = _byFirst[t[i].text.toLowerCase()];
+    final candidates = _byFirst[foldText(t[i].text)];
     if (candidates == null) return 0;
     for (final p in candidates) {
       if (i + p.length > t.length) continue;
       var ok = true;
       for (var k = 1; k < p.length; k++) {
-        if (t[i + k].text.toLowerCase() != p[k]) {
+        if (foldText(t[i + k].text) != p[k]) {
           ok = false;
           break;
         }
@@ -480,5 +482,10 @@ ItemDraft? _build(_Item it, int end, List<Tok> t, CleanText clean) {
     unit: it.unit,
     size: it.size,
     amountSpans: amountSpans,
+    negationProtected: food.any(
+      (w) =>
+          w.prot &&
+          (w.text.toLowerCase() == 'no' || w.text.toLowerCase() == 'without'),
+    ),
   );
 }

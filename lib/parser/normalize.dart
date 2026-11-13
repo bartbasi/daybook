@@ -56,7 +56,7 @@ List<String> rawWords(String folded) {
   return out;
 }
 
-/// Step 3 of 5.2: a word of 4 letters or more loses a plural ending.
+/// Step 6 of 5.2: a word of 4 letters or more loses a plural ending.
 String stem(String w) {
   if (w.length < 4) return w;
   if (w.endsWith('sses')) return w.substring(0, w.length - 2);
@@ -172,14 +172,21 @@ final _percent = RegExp(r'(?<![\d.])(\d+(?:\.\d+)?)\s+percent\b');
 /// removed, repeated words dropped. Order follows the text.
 List<String> queryWords(String foodText) => readQuery(foodText).words;
 
-/// [queryWords], and whether the negation cut (5.2 step 6) removed words and
+/// [queryWords], and whether the negation cut (5.2 step 3) removed words and
 /// left nothing: "no sugar", "without milk". Such an item gives no line
-/// (ruling R36), which is not the same as an item with no candidate.
-({List<String> words, bool allNegated}) readQuery(String foodText) {
+/// (ruling R36), which is not the same as an item with no candidate. With
+/// [negation] false the words are not cut (the item holds a protected name
+/// that contains "no" or "without", ruling R39).
+({List<String> words, bool allNegated}) readQuery(
+  String foodText, {
+  bool negation = true,
+}) {
   final folded = foldText(foodText)
       .replaceAllMapped(_percent, (m) => '${m[1]}%');
   var words = rawWords(folded);
-  final neg = words.indexWhere((w) => w == 'without' || w == 'no');
+  final neg = negation
+      ? words.indexWhere((w) => w == 'without' || w == 'no')
+      : -1;
   if (neg >= 0) words = words.sublist(0, neg);
   words = applySynonyms(words);
   final seen = <String>{};

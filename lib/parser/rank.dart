@@ -13,7 +13,6 @@ import 'normalize.dart';
 import 'search_index.dart';
 
 // Kept here for callers that already import it from this file.
-export 'normalize.dart' show editDistance;
 
 /// A candidate food for a query, with the numbers the ranking keys use.
 class Candidate {
@@ -72,7 +71,7 @@ class FoodMatch {
 
   final LineState state;
 
-  /// True when the item had words but the negation cut (5.2 step 6) removed
+  /// True when the item had words but the negation cut (5.2 step 3) removed
   /// every one of them, as in "no sugar". The state is then notFound, but the
   /// parser drops the item instead of showing a not found line (ruling R36).
   final bool allNegated;
@@ -146,8 +145,8 @@ class Ranker {
   List<SearchIndex> get _parts => [?user, usda];
 
   /// The best food for an item's food words, and whether it is confident (5.5).
-  FoodMatch match(String foodText) {
-    final p = _prepare(foodText);
+  FoodMatch match(String foodText, {bool negation = true}) {
+    final p = _prepare(foodText, negation);
     final q = p.words;
     if (q.isEmpty) {
       return FoodMatch(
@@ -156,7 +155,7 @@ class Ranker {
         corrected: false,
         ranked: const [],
         reason: p.allNegated
-            ? '5.2 step 6: every word is negated'
+            ? '5.2 step 3: every word is negated'
             : '5.5: no food words',
         allNegated: p.allNegated,
       );
@@ -229,9 +228,10 @@ class Ranker {
 
   // Typo correction (5.2) and the query words.
   ({List<String> words, bool corrected, bool allNegated}) _prepare(
-    String text,
-  ) {
-    final q = readQuery(text);
+    String text, [
+    bool negation = true,
+  ]) {
+    final q = readQuery(text, negation: negation);
     var corrected = false;
     final out = <String>[];
     for (final w in q.words) {

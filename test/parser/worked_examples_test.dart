@@ -527,15 +527,17 @@ void main() {
   group('the parser gives the expected lines', () {
     late Database db;
     late Parser parser;
+    late SqliteUsdaFoods loader;
 
     setUpAll(() {
       db = sqlite3.open(_dir, mode: OpenMode.readOnly);
-      parser = Parser(
-        SearchIndex.build(readUsdaFoods(db)),
-        sqliteUsdaFoods(db),
-      );
+      loader = SqliteUsdaFoods(db);
+      parser = Parser(SearchIndex.build(readUsdaFoods(db)), loader.call);
     });
-    tearDownAll(() => db.close());
+    tearDownAll(() {
+      loader.dispose();
+      db.close();
+    });
 
     UserSnapshot snapshotOf(ExampleSetup setup) {
       var id = 0;
@@ -651,7 +653,7 @@ void main() {
         final a = flat[i];
         final e = flatExpected[i];
         final w = 'line ${i + 1}';
-        final state = ExpectedState.values[a.state.index];
+        final state = ExpectedState.values.byName(a.state.name);
         if (state != e.state) {
           problems.add('$w: state $state but expected ${e.state}');
         }

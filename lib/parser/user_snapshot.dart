@@ -79,19 +79,18 @@ class UserSnapshot {
 
     final learned = <String, LearnedMatchData>{};
     for (final l in d.learned) {
-      final old = learned[l.key];
-      if (old == null ||
-          l.timesUsed > old.timesUsed ||
-          (l.timesUsed == old.timesUsed &&
-              l.foodRef.compareTo(old.foodRef) < 0)) {
-        learned[l.key] = l;
-      }
+      learned[l.key] = l; // the key is the table's primary key
     }
 
     return UserSnapshot._(
       version: d.version,
       names: UserNames.from([
-        for (final f in foods.values) f.name,
+        // A cached product's name is protected only once it has been logged
+        // (R40); every other food's name always is.
+        for (final f in d.foods)
+          if (foods.containsKey(f.ref) &&
+              (f.kind != 'off' || (d.historyCounts[f.ref] ?? 0) > 0))
+            f.name,
         for (final m in d.savedMeals) m.name,
         for (final a in d.aliases) a.phrase,
       ]),

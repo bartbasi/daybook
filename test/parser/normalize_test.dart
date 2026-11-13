@@ -155,7 +155,7 @@ void main() {
     });
   });
 
-  group('5.2 step 6: negation', () {
+  group('5.2 step 3: negation', () {
     test('without and everything after it is left out', () {
       expect(queryWords('coffee without sugar'), ['coffee']);
       expect(queryWords('coffee without sugar or cream'), ['coffee']);
