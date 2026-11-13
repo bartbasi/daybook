@@ -14,6 +14,7 @@ import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Now at(String date, int h, int m, int offsetMinutes) =>
@@ -73,6 +74,26 @@ void main() {
   /// closes the database.
   void appTest(String name, Future<void> Function(WidgetTester) body) {
     testWidgets(name, (tester) async {
+      // The home_widget plugin has no handler in tests. Answer its channels.
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('home_widget'),
+        (call) async => null,
+      );
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('home_widget/updates'),
+        (call) async => null,
+      );
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('home_widget'),
+          null,
+        );
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('home_widget/updates'),
+          null,
+        );
+      });
       await body(tester);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 10));

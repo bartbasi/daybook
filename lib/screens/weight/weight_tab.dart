@@ -30,7 +30,14 @@ enum WeightRange {
 /// The Weight tab: the trend number, the chart, range chips, and every
 /// weigh-in newest first. Tap a row to edit it; delete is in the edit sheet.
 class WeightTab extends StatefulWidget {
-  const WeightTab({super.key, this.offsetAt = systemOffsetAt});
+  const WeightTab({
+    super.key,
+    required this.today,
+    this.offsetAt = systemOffsetAt,
+  });
+
+  /// Today's date from the clock. The shell computes it on every redraw.
+  final String today;
 
   /// Passed to the sheets, so tests can pick any time zone.
   final OffsetAt offsetAt;
@@ -148,7 +155,7 @@ class _WeightTabState extends State<WeightTab> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final today = AppScope.of(context).clock().localDate;
+    final today = widget.today;
     return ContentWidth(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

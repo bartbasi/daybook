@@ -1,6 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Only for Open Food Facts barcode lookups. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- These four come from WorkManager, which home_widget links for
+         background callbacks that Daybook does not use. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
     <application
         android:label="Daybook"
         android:name="${applicationName}"
@@ -26,7 +33,26 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- The widget opens this activity with the link daybook://weight
+                 in an explicit intent, so no intent filter is needed. Flutter
+                 must not turn the link into a route name. The app reads it
+                 through the home_widget plugin instead. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false" />
         </activity>
+        <!-- The home-screen weight widget. It only shows what the app wrote. -->
+        <receiver
+            android:name=".WeightWidgetProvider"
+            android:exported="false"
+            android:label="@string/weight_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/weight_widget_info"/>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

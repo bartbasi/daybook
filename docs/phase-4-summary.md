@@ -29,6 +29,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 3. **Weigh-ins are listed by their saved day first**, then by time. After travel across time zones, sorting by clock time alone could show an earlier day's weigh-in as the latest.
 4. **The "Weight saved" message on Home is a bar above the buttons, with Undo for 10 seconds.** The usual pop-up message at the bottom of the screen would have covered the + Food, Weight and Cardio buttons.
 5. **A weigh-in cannot be given a time in the future.** The date picker already stopped at today; a time later today is refused too.
+6. **Four Android permissions that the widget library brings in are removed.** The home-screen widget package links Android's WorkManager, which adds wake lock, network state, run at boot and foreground service permissions. Daybook uses none of those features, so the app's manifest removes them. The app still declares only internet access (for barcode lookups) and one standard AndroidX permission.
 
 ## Open questions from the plan, still to confirm
 

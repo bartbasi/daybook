@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="weight_widget_background">#FF1E1E1E</color>
+    <color name="weight_widget_text">#FFF2F2F2</color>
+    <color name="weight_widget_secondary">#FFC8C8C8</color>
+</resources>

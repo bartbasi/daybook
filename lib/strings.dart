@@ -5,6 +5,13 @@ import 'app_info.dart';
 import 'util/dates.dart';
 import 'util/units.dart';
 
+// A few strings can only live in native files. If the app is renamed or the
+// wording changes, look here too:
+//   android/app/src/main/AndroidManifest.xml (app label)
+//   android/app/src/main/res/values/widget_strings.xml (widget name and
+//     description in the widget picker)
+//   ios/Runner/Info.plist (CFBundleDisplayName)
+
 /// All user-facing text, in one place.
 class S {
   static const title = appName;
@@ -100,6 +107,11 @@ class S {
       'Could not delete. The weigh-in is still in your list.';
   static const undoDeleteFailed =
       'Could not undo. The weigh-in is still deleted.';
+
+  // Home-screen widget. Dart writes these words into the widget's data.
+  static const widgetTitle = '$appName weight';
+  static const widgetNoWeight = 'No weight yet';
+  static const widgetTapToLog = 'Tap to log';
 
   // More.
   static const moreTitle = 'More';

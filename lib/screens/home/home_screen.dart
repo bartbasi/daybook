@@ -19,16 +19,23 @@ import '../weight/weight_sheet.dart';
 /// The Today tab. This step has the date, the weight row and the bottom
 /// action bar. The budget card and meals come in later steps.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.onOpenWeightTab});
+  const HomeScreen({
+    super.key,
+    required this.today,
+    required this.onOpenWeightTab,
+  });
+
+  /// Today's date from the clock. The shell computes it on every redraw.
+  final String today;
 
   /// Tapping the weight row opens the Weight tab.
   final VoidCallback onOpenWeightTab;
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   static const _bannerTime = Duration(seconds: 10);
 
   Stream<List<WeightEntry>>? _weights;
@@ -57,7 +64,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _openWeightSheet() async {
+  /// Opens the weight sheet and shows the confirmation bar after a save.
+  /// The + Weight button and the widget link both come here.
+  Future<void> openWeightSheet() async {
     // A second tap while the sheet is opening or open does nothing.
     if (_sheetOpen) return;
     _sheetOpen = true;
@@ -98,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final today = AppScope.of(context).clock().localDate;
+    final today = widget.today;
     final theme = Theme.of(context);
     return Column(
       children: [
@@ -182,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: FilledButton.tonal(
                       style: _barButton,
-                      onPressed: _openWeightSheet,
+                      onPressed: openWeightSheet,
                       child: const Text(S.addWeight),
                     ),
                   ),

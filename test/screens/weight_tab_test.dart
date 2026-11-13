@@ -17,6 +17,7 @@ import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Now at(String date, int h, int m, int offsetMinutes) =>
@@ -99,8 +100,10 @@ void main() {
         db: db,
         clock: () => nowFixed,
         foodsPath: Future.value(''),
-        child: const MaterialApp(
-          home: Scaffold(body: WeightTab(offsetAt: _noOffset)),
+        child: MaterialApp(
+          home: Scaffold(
+            body: WeightTab(today: nowFixed.localDate, offsetAt: _noOffset),
+          ),
         ),
       ),
     );
@@ -478,6 +481,16 @@ void main() {
     tester.view.physicalSize = const Size(400, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    // The home_widget plugin has no handler in tests. Answer its channels.
+    final messenger = tester.binding.defaultBinaryMessenger;
+    for (final name in ['home_widget', 'home_widget/updates']) {
+      messenger.setMockMethodCallHandler(MethodChannel(name), (call) async {
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(MethodChannel(name), null),
+      );
+    }
     await tester.pumpWidget(
       DaybookApp(db: db, clock: () => clockNow, foodsPath: Future.value('')),
     );

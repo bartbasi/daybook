@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weight_widget_name">Daybook weight</string>
+    <string name="weight_widget_description">Your last weight and trend. Tap to log a new one.</string>
+</resources>

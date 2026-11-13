@@ -18,6 +18,7 @@ Direct dependencies:
 | path | 1.9.1 | BSD-3-Clause | File path joins |
 | http | 1.6.0 | BSD-3-Clause | Open Food Facts barcode lookup (the only network call) |
 | archive | 4.6.0 | MIT | Zip file for export and import |
+| home_widget | 0.10.0 | BSD-3-Clause | Passes the last weight to the home-screen widget and reports a tap on it |
 
 SQLite itself is public domain.
 
@@ -29,6 +30,8 @@ Pulled in by the packages above:
 | posix, sqlcipher_flutter_libs, sqlite3_flutter_libs, yaml | MIT |
 | material_color_utilities | Apache-2.0 |
 | sky_engine (Flutter engine) | BSD-3-Clause for Flutter, plus the permissive licenses of its bundled parts |
+
+home_widget adds no other Dart package (it uses path_provider and path_provider_foundation, listed above). Its Android side uses androidx.glance:glance-appwidget 1.2.0, androidx.core, androidx.work and kotlinx-coroutines-android, all Apache-2.0. Its LICENSE in the pub cache is BSD-3-Clause (Anton Borries), and its own Android manifest declares no permissions. androidx.work (a dependency of home_widget) adds four to the merged manifest: WAKE_LOCK, ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED and FOREGROUND_SERVICE. The app manifest removes all four with `tools:node="remove"`, because WorkManager is only used by home_widget's background callbacks, which Daybook does not use.
 
 Flutter's `LicenseRegistry` collects all of these notices, so the License screen in About can show them.
 
