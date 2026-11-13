@@ -101,18 +101,24 @@ void main() {
         .where((f) => f.path.endsWith('.dart'));
     expect(flows, isNotEmpty);
     final direct = RegExp(
-      r'tester\s*\.\s*(tap|tapAt|longPress|drag|fling|enterText|'
-      r'testTextInput)\b|testTextInput',
+      r'tester\s*\.\s*(tap\w*|longPress\w*|drag\w*|fling\w*|timedDrag\w*|'
+      r'scrollUntilVisible|startGesture|createGesture|press|sendKey\w*|'
+      r'showKeyboard|enterText)|testTextInput',
     );
     for (final file in flows) {
-      for (final line in file.readAsLinesSync()) {
-        if (line.trimLeft().startsWith('//')) continue;
-        expect(
-          direct.hasMatch(line),
-          isFalse,
-          reason: '${file.path} drives the screen directly: ${line.trim()}',
-        );
-      }
+      // The whole file, comments removed and whitespace collapsed, so a call
+      // split across lines is still found.
+      final code = file
+          .readAsStringSync()
+          .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), ' ')
+          .replaceAll(RegExp(r'(^|\s)//[^\n]*'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      final hit = direct.firstMatch(code);
+      expect(
+        hit,
+        isNull,
+        reason: '${file.path} drives the screen directly: ${hit?.group(0)}',
+      );
     }
   });
 

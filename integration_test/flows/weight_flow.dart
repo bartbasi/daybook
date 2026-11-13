@@ -21,6 +21,8 @@ import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/strings.dart';
 import 'package:daybook/util/dates.dart';
 import 'package:daybook/util/units.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -74,7 +76,12 @@ Future<void> waitForWeightSheet(WidgetTester tester) async {
 Future<void> deliverWidgetLink(WidgetTester tester) async {
   await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
     'home_widget/updates',
-    const StandardMethodCodec().encodeSuccessEnvelope(weightLaunchLink),
+    // On iOS the widget's URL carries the plugin's query item.
+    const StandardMethodCodec().encodeSuccessEnvelope(
+      defaultTargetPlatform == TargetPlatform.android
+          ? weightLaunchLink
+          : '$weightLaunchLink?homeWidget',
+    ),
     (_) {},
   );
   await waitForWeightSheet(tester);

@@ -33,8 +33,8 @@ Future<SavedWeight?> showWeightSheet(
   BuildContext context, {
   OffsetAt offsetAt = systemOffsetAt,
 }) async {
-  if (_sheetOpen) return null;
-  _sheetOpen = true;
+  if (weightSheetOpen) return null;
+  final token = _openToken = Object();
   try {
     final scope = AppScope.of(context);
     var units = UnitSystem.imperial;
@@ -54,17 +54,27 @@ Future<SavedWeight?> showWeightSheet(
         units: units,
         last: last,
         offsetAt: offsetAt,
+        token: token,
       ),
     );
   } finally {
-    _sheetOpen = false;
+    _release(token);
   }
 }
 
-/// True from the request until the sheet closes, so only one weight sheet is
-/// ever open, whichever screen or widget link asked for it. The sheet also
-/// clears it when it is removed from the tree.
-bool _sheetOpen = false;
+/// Set from the request until the sheet closes, so only one weight sheet is
+/// ever open, whichever screen or widget link asked for it. Each request owns
+/// its own token, and only the owner clears it: a sheet that finishes closing
+/// late cannot clear the flag of the sheet that replaced it. The sheet also
+/// releases it when it is removed from the tree.
+Object? _openToken;
+
+/// True while a weight sheet is being opened or is open.
+bool get weightSheetOpen => _openToken != null;
+
+void _release(Object? token) {
+  if (token != null && identical(_openToken, token)) _openToken = null;
+}
 
 /// Opens the sheet on an existing weigh-in. Completes with the stored row after
 /// a save or a delete, or null if the sheet was closed without either.
@@ -73,20 +83,25 @@ Future<EditedWeight?> showEditWeightSheet(
   WeightEntry row,
   UnitSystem units, {
   OffsetAt offsetAt = systemOffsetAt,
-}) {
-  if (_sheetOpen) return Future.value(null);
-  _sheetOpen = true;
-  final scope = AppScope.of(context);
-  return _present<EditedWeight>(
-    context,
-    WeightSheet(
-      db: scope.db,
-      clock: scope.clock,
-      units: units,
-      editing: row,
-      offsetAt: offsetAt,
-    ),
-  ).whenComplete(() => _sheetOpen = false);
+}) async {
+  if (weightSheetOpen) return null;
+  final token = _openToken = Object();
+  try {
+    final scope = AppScope.of(context);
+    return await _present<EditedWeight>(
+      context,
+      WeightSheet(
+        db: scope.db,
+        clock: scope.clock,
+        units: units,
+        editing: row,
+        offsetAt: offsetAt,
+        token: token,
+      ),
+    );
+  } finally {
+    _release(token);
+  }
 }
 
 Future<T?> _present<T>(BuildContext context, WeightSheet sheet) {
@@ -115,7 +130,11 @@ class WeightSheet extends StatefulWidget {
     this.last,
     this.editing,
     this.offsetAt = systemOffsetAt,
+    this.token,
   });
+
+  /// The request that opened this sheet, released when the sheet is disposed.
+  final Object? token;
 
   final AppDatabase db;
   final Clock clock;
@@ -167,7 +186,7 @@ class _WeightSheetState extends State<WeightSheet> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _sheetOpen = false;
+    _release(widget.token);
     _text.dispose();
     super.dispose();
   }

@@ -362,6 +362,50 @@ void main() {
     expect(sheet(), findsOneWidget);
   });
 
+  appTest('a sheet that finishes closing after the next one was requested '
+      'does not let a third sheet open', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Weight'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), '181.8');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    // The first sheet is popped and still sliding away.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // The second sheet is requested before the first one is disposed.
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      'home_widget/updates',
+      const StandardMethodCodec().encodeSuccessEnvelope('daybook://weight'),
+      (_) {},
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(sheet(), findsOneWidget);
+
+    await sendLink(tester, 'daybook://weight');
+    expect(sheet(), findsOneWidget);
+  });
+
+  appTest('a widget link while the Weight tab add sheet is open leaves the '
+      'Weight tab selected', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Weight'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '+ Log'));
+    await settle(tester);
+    await sendLink(tester, 'daybook://weight');
+    expect(selectedTab(tester), 3);
+    expect(sheet(), findsOneWidget);
+  });
+
   appTest('a widget link while an edit sheet is open leaves one sheet', (
     tester,
   ) async {

@@ -13,6 +13,7 @@ import 'data/weight_data.dart';
 import 'platform/weight_widget.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/more/more_screen.dart';
+import 'screens/weight/weight_sheet.dart' show weightSheetOpen;
 import 'screens/weight/weight_tab.dart';
 import 'strings.dart';
 import 'util/units.dart';
@@ -158,10 +159,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   void _onLink(Uri? link) {
     if (!isWeightLink(link) || !mounted) return;
+    // A weight sheet is already open: leave it in front, on its own tab.
+    if (weightSheetOpen) return;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     setState(() => _index = _today);
-    // Home's own method, so its guard against a second sheet and its
-    // confirmation bar apply here too.
+    // Home's own method, so its confirmation bar applies here too.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _home.currentState?.openWeightSheet(),
     );

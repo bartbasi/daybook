@@ -11,6 +11,9 @@ name: iOS widget target
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   FLUTTER_VERSION: 3.47.7
 
@@ -18,6 +21,7 @@ jobs:
   add-target:
     name: Add the widget target and build
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -83,7 +87,7 @@ jobs:
           mkdir -p widget-target-output
           git ls-files -m -o --exclude-standard -- ios | tee changed-files.txt
           if [ -s changed-files.txt ]; then
-            rsync -R $(cat changed-files.txt) widget-target-output/
+            rsync -R --files-from=changed-files.txt . widget-target-output/
           fi
           cp changed-files.txt widget-target-output/
           if [ -f build-ios.log ]; then cp build-ios.log widget-target-output/; fi

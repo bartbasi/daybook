@@ -86,6 +86,7 @@ struct WeightWidgetView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(spoken))
+    .accessibilityAddTraits(.isButton)
     .widgetURL(weightLink)
     .weightWidgetBackground()
   }

@@ -19,6 +19,7 @@ The iPhone home-screen widget shows the last weight, when it was logged, the tre
 1. On every weight save, edit, delete, Undo, units change, at start and when the app comes back, `lib/platform/weight_widget.dart` writes five ready-made texts (`weight_title`, `weight_value`, `weight_when`, `weight_trend`, `weight_tap`). On iOS it first calls home_widget's `setAppGroupId`, so the plugin stores them in `UserDefaults(suiteName: "group.io.github.bartbasi.daybook")`.
 2. It then calls `updateWidget` with the iOS name `WeightWidget`, which asks WidgetKit to reload that widget kind.
 3. The widget reads the five texts from the same App Group and shows them. If nothing is stored yet (the app has never run), it shows only its name.
+4. While the app is open, the texts are also rewritten at local midnight, so "Today" in the widget moves to the new day without the app being closed and reopened.
 
 ## How a tap reaches the weight sheet
 
@@ -26,7 +27,9 @@ The iPhone home-screen widget shows the last weight, when it was logged, the tre
 2. iOS opens Daybook with that link. From a cold start the plugin keeps it as the initial link; while the app runs it sends it on its `home_widget/updates` channel.
 3. `HomeShell` in `lib/app.dart` reads the initial link at start and listens for later ones. `isWeightLink` checks only the scheme and host, so the query item does not matter, and Home opens the weight sheet.
 
-No URL scheme entry is needed in `ios/Runner/Info.plist`: a widget's link always opens its own app. home_widget's own example app works the same way.
+No URL scheme entry is expected to be needed in `ios/Runner/Info.plist`: a widget's link should open its own app, and home_widget's own example app works that way. That rests on the example app, not on a test here, so it is to be confirmed on the iPhone. If a tap does not open Daybook, add a `CFBundleURLTypes` entry for the `daybook` scheme to `ios/Runner/Info.plist`.
+
+The second thing to watch on the iPhone: if a real widget tap produces a route error in the app, set `FlutterDeepLinkingEnabled` to `false` in `ios/Runner/Info.plist`.
 
 ## How the target was added (no Mac needed)
 
@@ -57,6 +60,10 @@ The CI build is unsigned, and an unsigned build ignores entitlements. Before the
 2. On the App ID `io.github.bartbasi.daybook`, turn on App Groups and pick that group.
 3. Create the App ID `io.github.bartbasi.daybook.WeightWidget`, turn on App Groups and pick the same group.
 4. Make a provisioning profile for each of the two App IDs (development for installing on the iPhone, App Store for TestFlight). The app's profile and the widget's profile both have to include the App Group.
+
+5. In Xcode, under Signing and Capabilities, set the team on both targets, Runner and WeightWidget. Automatic signing fails for an extension with no team, and the project rightly sets none.
+
+A signed export in CI later needs a provisioning profile for both bundle ids, `io.github.bartbasi.daybook` and `io.github.bartbasi.daybook.WeightWidget`.
 
 If the widget shows only its name after a weigh-in on a signed build, the App Group is missing from one of the two profiles.
 
