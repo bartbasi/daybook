@@ -87,7 +87,7 @@ jobs:
           mkdir -p widget-target-output
           git ls-files -m -o --exclude-standard -- ios | tee changed-files.txt
           if [ -s changed-files.txt ]; then
-            rsync -R --files-from=changed-files.txt . widget-target-output/
+            while IFS= read -r f; do mkdir -p "widget-target-output/$(dirname "$f")"; cp "$f" "widget-target-output/$f"; done < changed-files.txt
           fi
           cp changed-files.txt widget-target-output/
           if [ -f build-ios.log ]; then cp build-ios.log widget-target-output/; fi
