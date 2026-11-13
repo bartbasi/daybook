@@ -805,12 +805,11 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // At large text the date, the meals and the menu would leave too little
-    // room above the keyboard, so they scroll with the lines instead.
+    // At large text the meal chips scroll with the lines; the top row (close,
+    // date, menu) and the box always stay put.
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 13;
     final header = Column(
       children: [
-        _topBar(context),
         _slotChips(context),
         if (_editing)
           Padding(
@@ -836,6 +835,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
                   child: LayoutBuilder(
                     builder: (context, box) => Column(
                       children: [
+                        _topBar(context),
                         if (!largeText) header,
                         if (_notice != null)
                           ConfirmBar(
@@ -919,10 +919,15 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
                   child: Center(
-                    child: Text(
-                      S.foodDate(_date, today),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium,
+                    // One line that shrinks to fit, so the row stays compact
+                    // at large text.
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        S.foodDate(_date, today),
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                     ),
                   ),
                 ),
@@ -1168,6 +1173,63 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     final message = _dead
         ? S.foodParserStopped
         : _error ?? (_requestFailed ? S.foodParseFailed : null);
+    // At large text the button goes under the totals, full width, and the
+    // totals stay on one line each, so the bar stays compact.
+    final stacked = MediaQuery.textScalerOf(context).scale(10) > 13;
+    Widget oneLine(Widget w) => FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: w,
+    );
+    final totalsColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // The count of items not counted is in the spoken totals. The seam
+        // below is outside the excluded part, so what task 3.2 puts there is
+        // read on its own.
+        Semantics(
+          label: S.spokenTotals(kcal, p, c, f, fix),
+          excludeSemantics: true,
+          child: oneLine(
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: S.kcal(kcal),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextSpan(text: S.totalsMacros(p, c, f)),
+                ],
+              ),
+              maxLines: 1,
+            ),
+          ),
+        ),
+        _leftTodaySeam,
+        if (fix > 0)
+          ExcludeSemantics(
+            child: oneLine(
+              Text(
+                S.itemsNotCounted(fix),
+                maxLines: 1,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+      ],
+    );
+    final button = FilledButton(
+      style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
+      onPressed: _canSave ? _save : null,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          fix > 0 ? S.fixItems(fix) : S.save,
+          maxLines: 1,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
     return Material(
       color: theme.colorScheme.surfaceContainer,
       elevation: 3,
@@ -1200,66 +1262,28 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
                       ),
                   ],
                 ),
-              Row(
-                children: [
-                  Expanded(
-                    child: _dead
-                        ? const SizedBox.shrink()
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // The count of items not counted is in the
-                              // spoken totals. The seam below is outside the
-                              // excluded part, so what task 3.2 puts there is
-                              // read on its own.
-                              Semantics(
-                                label: S.spokenTotals(kcal, p, c, f, fix),
-                                excludeSemantics: true,
-                                child: Text.rich(
-                                  TextSpan(
-                                    children: [
-                                      TextSpan(
-                                        text: S.kcal(kcal),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      TextSpan(text: S.totalsMacros(p, c, f)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              _leftTodaySeam,
-                              if (fix > 0)
-                                ExcludeSemantics(
-                                  child: Text(
-                                    S.itemsNotCounted(fix),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(width: 8),
-                  // At large text the label wraps rather than squeezing the
-                  // totals out.
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 168),
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(88, 48),
-                      ),
-                      onPressed: _canSave ? _save : null,
-                      child: Text(
-                        fix > 0 ? S.fixItems(fix) : S.save,
-                        textAlign: TextAlign.center,
-                      ),
+              if (stacked)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!_dead) totalsColumn,
+                    if (!_dead) const SizedBox(height: 4),
+                    button,
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: _dead ? const SizedBox.shrink() : totalsColumn,
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 168),
+                      child: button,
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

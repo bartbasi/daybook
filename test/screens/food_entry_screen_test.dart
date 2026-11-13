@@ -1978,6 +1978,59 @@ void main() {
       expectBoxAndCaretVisible(tester, 'after the next change');
     });
 
+    for (final (name, text, fix) in [
+      ('Save', brief, false),
+      ('Fix', '$brief, 1 zorbo, 1 apple', true),
+    ]) {
+      appTest('at 2x text on 344 dp with the keyboard up, the $name state '
+          'keeps the top row, the box and a compact bar in view', (
+        tester,
+      ) async {
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await openApp(tester, size: const Size(344, 800));
+        await openFood(tester);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await type(tester, text);
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+
+        final button = find.byType(FilledButton);
+        expect(
+          find.descendant(
+            of: button,
+            matching: find.text(fix ? 'Fix 1 item' : 'Save'),
+          ),
+          findsOneWidget,
+        );
+        final boxRect = tester.getRect(box());
+        final close = tester.getRect(find.byTooltip('Close'));
+        expect(close.top, greaterThanOrEqualTo(0));
+        expect(close.bottom, lessThanOrEqualTo(boxRect.top));
+        expect(boxRect.bottom, lessThanOrEqualTo(500));
+        expect(tester.getRect(button).bottom, lessThanOrEqualTo(500));
+        final area = tester.getRect(linesArea());
+        expect(500 - area.bottom, lessThanOrEqualTo(500 / 3 + 1));
+        expect(area.top, greaterThanOrEqualTo(boxRect.bottom - 0.5));
+        final seen = [
+          for (final t in tiles().evaluate())
+            tester.getRect(find.byWidget(t.widget)).overlaps(area),
+        ];
+        expect(seen, contains(true));
+        expectBoxAndCaretVisible(tester, 'at 2x');
+
+        await tester.tap(find.byTooltip('Previous day'));
+        await tester.pump();
+        expect(find.text('Yesterday, Nov 11'), findsOneWidget);
+        await tester.tap(find.byTooltip('Next day'));
+        await tester.pump();
+        expect(find.text('Today, Nov 12'), findsOneWidget);
+        await tester.tap(find.byTooltip('Close'));
+        await settle(tester);
+        expect(find.byType(FoodEntryScreen), findsNothing);
+      });
+    }
+
     appTest('folding keeps the typed text', (tester) async {
       await openApp(tester, size: const Size(344, 800));
       await openFood(tester);
