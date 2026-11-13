@@ -18,6 +18,7 @@ import 'package:daybook/main.dart' as app;
 import 'package:daybook/platform/weight_widget.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/util/units.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,9 +28,13 @@ import 'package:integration_test/integration_test.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('the widget provider is in the app and its data is stored', (
-    tester,
-  ) async {
+  // The iOS widget does not exist yet (task 1.5), and on iOS the plugin has no
+  // App Group id, so its data calls answer with an error. The skip argument
+  // takes only a bool, so the reason is in the test name.
+  final android = defaultTargetPlatform == TargetPlatform.android;
+
+  testWidgets('the widget provider is in the app and its data is stored '
+      '(Android only until the iOS widget exists)', (tester) async {
     // The plugin looks the class up by name and fails if it is missing.
     final asked = await HomeWidget.updateWidget(
       qualifiedAndroidName: androidWidgetProvider,
@@ -42,7 +47,7 @@ void main() {
       'No weight yet',
     );
     expect(await HomeWidget.getWidgetData<String>(widgetKeyTap), 'Tap to log');
-  });
+  }, skip: !android);
 
   testWidgets('the widget link opens the weight sheet and a save updates the '
       'widget data', (tester) async {
@@ -80,6 +85,9 @@ void main() {
     expect(find.textContaining('Weight saved: 181.8 lb'), findsOneWidget);
 
     // The widget data now holds the saved weight, in the phone's storage.
+    // Android only until the iOS widget exists: on iOS the plugin has no App
+    // Group id, so reading the data back fails.
+    if (!android) return;
     String? stored;
     waited = 0;
     while (stored != '181.8 lb' && waited < 50) {

@@ -273,6 +273,7 @@ void main() {
     saved.clear();
 
     clockNow = at('2026-11-13', 7, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await settle(tester);
 
