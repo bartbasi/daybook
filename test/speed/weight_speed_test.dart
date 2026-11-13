@@ -6,6 +6,8 @@
 // whole app runs here, with an in-memory database and a fixed clock. The same
 // flow runs on a real build in integration_test/weight_test.dart.
 
+import 'dart:io';
+
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
@@ -90,6 +92,30 @@ void main() {
     return (await tester.runAsync(() => db.saveWeight(value, units, when)))!;
   }
 
+  test('no flow under integration_test/flows drives the screen without the '
+      'tap counter', () async {
+    await db.close(); // setUp opened one this test does not use
+    final flows = Directory('integration_test/flows')
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'));
+    expect(flows, isNotEmpty);
+    final direct = RegExp(
+      r'tester\s*\.\s*(tap|tapAt|longPress|drag|fling|enterText|'
+      r'testTextInput)\b|testTextInput',
+    );
+    for (final file in flows) {
+      for (final line in file.readAsLinesSync()) {
+        if (line.trimLeft().startsWith('//')) continue;
+        expect(
+          direct.hasMatch(line),
+          isFalse,
+          reason: '${file.path} drives the screen directly: ${line.trim()}',
+        );
+      }
+    }
+  });
+
   testWidgets('the tap counter counts taps and keyboard actions, not typing', (
     tester,
   ) async {
@@ -102,6 +128,7 @@ void main() {
           body: Column(
             children: [
               TextField(
+                autofocus: true,
                 controller: controller,
                 onChanged: changes.add,
                 textInputAction: TextInputAction.done,
@@ -131,6 +158,24 @@ void main() {
       reason: 'a wrong count is reported',
     );
     await tester.runAsync(db.close); // setUp opened one this test does not use
+  });
+
+  testWidgets('typing into a field that is not focused fails, because that '
+      'field needs a counted tap first', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: TextField())),
+    );
+    final taps = TapCounter(tester);
+    expect(
+      () => taps.type(find.byType(TextField), '181.8'),
+      throwsA(isA<TestFailure>()),
+    );
+    // After a counted tap the field has focus and typing works.
+    await taps.tap(find.byType(TextField));
+    await tester.pump();
+    await taps.type(find.byType(TextField), '181.8');
+    taps.expectCount(1);
+    await tester.runAsync(db.close);
   });
 
   group('from Home', () {

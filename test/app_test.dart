@@ -256,6 +256,135 @@ void main() {
     expect(sheet(), findsNothing);
   });
 
+  /// The app opened with a clock the test can move.
+  Future<void> openAppAt(WidgetTester tester, Now Function() clock) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      DaybookApp(db: db, clock: clock, foodsPath: Completer<String>().future),
+    );
+    await settle(tester);
+  }
+
+  void pauseAndResume(WidgetTester tester) {
+    final b = tester.binding;
+    for (final s in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      b.handleAppLifecycleStateChanged(s);
+    }
+  }
+
+  appTest('a sheet left open overnight, with the app in the background, '
+      'saves the time after the app comes back', (tester) async {
+    var now = Now.fromLocal('2026-11-12', 23 * 60, -360);
+    await openAppAt(tester, () => now);
+    await tester.tap(find.widgetWithText(FilledButton, 'Weight'));
+    await settle(tester);
+    expect(find.text('Today, 11:00 pm'), findsOneWidget);
+
+    now = Now.fromLocal('2026-11-13', 7 * 60, -360);
+    pauseAndResume(tester);
+    await tester.pump();
+    expect(find.text('Today, 7:00 am'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '181.8');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    final stored = (await tester.runAsync(
+      () => db.select(db.weightEntries).get(),
+    ))!;
+    expect(stored.single.localDate, '2026-11-13');
+    expect(stored.single.measuredAtMs, now.utcMs);
+    expect(find.text('Weight saved: 181.8 lb, today 7:00 am'), findsOneWidget);
+  });
+
+  appTest('a time picked with Change survives the app coming back', (
+    tester,
+  ) async {
+    var now = Now.fromLocal('2026-11-12', 23 * 60, -360);
+    await openAppAt(tester, () => now);
+    await tester.tap(find.widgetWithText(FilledButton, 'Weight'));
+    await settle(tester);
+
+    await tester.tap(find.text('Change'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('5'));
+    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.keyboard_outlined));
+    await tester.pumpAndSettle();
+    final boxes = find.descendant(
+      of: find.byType(TimePickerDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(boxes.at(0), '9');
+    await tester.enterText(boxes.at(1), '30');
+    // The sheet opened at 11 pm, so the picker starts on pm.
+    await tester.tap(find.text('AM'));
+    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('Thu, Nov 5, 9:30 am'), findsOneWidget);
+
+    now = Now.fromLocal('2026-11-13', 7 * 60, -360);
+    pauseAndResume(tester);
+    await tester.pump();
+    expect(find.text('Thu, Nov 5, 9:30 am'), findsOneWidget);
+  });
+
+  appTest('a widget link while the Weight tab add sheet is open leaves one '
+      'sheet', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Weight'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '+ Log'));
+    await settle(tester);
+    expect(sheet(), findsOneWidget);
+
+    await sendLink(tester, 'daybook://weight');
+    expect(sheet(), findsOneWidget);
+
+    await tester.tapAt(const Offset(200, 20));
+    await settle(tester);
+    expect(sheet(), findsNothing);
+
+    // The next request opens it again.
+    await sendLink(tester, 'daybook://weight');
+    expect(sheet(), findsOneWidget);
+  });
+
+  appTest('a widget link while an edit sheet is open leaves one sheet', (
+    tester,
+  ) async {
+    await tester.runAsync(
+      () => db.saveWeight(
+        181.8,
+        UnitSystem.imperial,
+        Now.fromLocal('2026-11-12', 7 * 60, -360),
+      ),
+    );
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Weight'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(ListTile, '181.8 lb'));
+    await settle(tester);
+    expect(sheet(), findsOneWidget);
+    expect(find.text('Edit weigh-in'), findsOneWidget);
+
+    await sendLink(tester, 'daybook://weight');
+    expect(sheet(), findsOneWidget);
+    expect(find.text('Edit weigh-in'), findsOneWidget);
+  });
+
   appTest('a save from the widget sheet shows the confirmation on Home', (
     tester,
   ) async {

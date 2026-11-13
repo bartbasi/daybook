@@ -36,6 +36,7 @@ void main() {
       tester,
       () => find.byType(NavigationBar).evaluate().isNotEmpty,
       'the app to start',
+      tries: 480, // about 60 seconds, as in app_launch_test.dart
     );
     final db = appDatabase(tester);
     final rowsBefore = {for (final r in await storedWeights(tester)) r.id};
@@ -97,11 +98,13 @@ void main() {
       ];
       expect(added, hasLength(5));
     } finally {
-      final added = [
-        for (final r in await storedWeights(tester))
-          if (!rowsBefore.contains(r.id)) r.id,
-      ];
+      // The handle from the start, not the widget tree: the cleanup must work
+      // even if a failure left no app on screen.
       await tester.runAsync(() async {
+        final added = [
+          for (final r in await db.select(db.weightEntries).get())
+            if (!rowsBefore.contains(r.id)) r.id,
+        ];
         await (db.delete(
           db.weightEntries,
         )..where((w) => w.id.isIn(added))).go();

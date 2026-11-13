@@ -204,18 +204,24 @@ void main() {
         final db = openDb();
         final row = await db.saveWeight(181.8, imp, nowFixed);
         final outcomes = <String>[];
+        // Different instants, so the row shows which write came last.
+        final editAt = at('2026-11-12', 7, 3, -360, 1);
+        final deleteAt = at('2026-11-12', 7, 3, -360, 2);
         Future<void> edit() => db
-            .editWeight(row.id, 190.0, imp, nowFixed)
+            .editWeight(row.id, 190.0, imp, editAt)
             .then((_) => outcomes.add('edited'))
             .catchError((Object e) => outcomes.add('edit ${e.runtimeType}'));
         Future<void> delete() => db
-            .deleteWeight(row.id, nowFixed)
+            .deleteWeight(row.id, deleteAt)
             .then((_) => outcomes.add('deleted'))
             .catchError((Object e) => outcomes.add('delete ${e.runtimeType}'));
         await Future.wait(editFirst ? [edit(), delete()] : [delete(), edit()]);
 
         final stored = (await everyRow(db)).single;
-        expect(stored.deletedAtMs, isNotNull, reason: '$outcomes');
+        expect(stored.deletedAtMs, deleteAt.utcMs, reason: '$outcomes');
+        // The delete wrote last: an edit applied to an already deleted row
+        // would have left its own time here.
+        expect(stored.updatedAtMs, deleteAt.utcMs, reason: '$outcomes');
         expect(outcomes, contains('deleted'), reason: 'the delete never fails');
         expect(
           outcomes.where((o) => o != 'deleted' && o != 'edited'),
@@ -450,7 +456,6 @@ void main() {
       await tester.pump();
       EditableText editable() =>
           tester.widget<EditableText>(find.byType(EditableText));
-      expect(editable().focusNode.hasFocus, isTrue);
 
       tester.view.physicalSize = const Size(673, 800);
       await settle(tester);

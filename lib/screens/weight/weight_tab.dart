@@ -52,7 +52,6 @@ class _WeightTabState extends State<WeightTab> {
   Stream<List<WeightEntry>>? _weights;
   Stream<UnitSystem>? _units;
   WeightRange _range = WeightRange.month;
-  bool _sheetOpen = false;
 
   @override
   void didChangeDependencies() {
@@ -88,14 +87,7 @@ class _WeightTabState extends State<WeightTab> {
   }
 
   Future<void> _log() async {
-    if (_sheetOpen) return;
-    _sheetOpen = true;
-    SavedWeight? saved;
-    try {
-      saved = await showWeightSheet(context, offsetAt: widget.offsetAt);
-    } finally {
-      _sheetOpen = false;
-    }
+    final saved = await showWeightSheet(context, offsetAt: widget.offsetAt);
     if (saved == null || !mounted) return;
     final scope = AppScope.of(context);
     final row = saved.row;
@@ -115,19 +107,12 @@ class _WeightTabState extends State<WeightTab> {
   }
 
   Future<void> _edit(WeightEntry row, UnitSystem units) async {
-    if (_sheetOpen) return;
-    _sheetOpen = true;
-    EditedWeight? result;
-    try {
-      result = await showEditWeightSheet(
-        context,
-        row,
-        units,
-        offsetAt: widget.offsetAt,
-      );
-    } finally {
-      _sheetOpen = false;
-    }
+    final result = await showEditWeightSheet(
+      context,
+      row,
+      units,
+      offsetAt: widget.offsetAt,
+    );
     if (result == null || !mounted) return;
     final scope = AppScope.of(context);
     final stored = result.row;

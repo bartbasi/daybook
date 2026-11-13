@@ -33,27 +33,38 @@ Future<SavedWeight?> showWeightSheet(
   BuildContext context, {
   OffsetAt offsetAt = systemOffsetAt,
 }) async {
-  final scope = AppScope.of(context);
-  var units = UnitSystem.imperial;
-  WeightEntry? last;
+  if (_sheetOpen) return null;
+  _sheetOpen = true;
   try {
-    units = await scope.db.getUnits();
-    last = await scope.db.latestWeight();
-  } catch (_) {
-    // The sheet still opens. Saving will say if the database is not working.
+    final scope = AppScope.of(context);
+    var units = UnitSystem.imperial;
+    WeightEntry? last;
+    try {
+      units = await scope.db.getUnits();
+      last = await scope.db.latestWeight();
+    } catch (_) {
+      // The sheet still opens. Saving will say if the database is not working.
+    }
+    if (!context.mounted) return null;
+    return await _present<SavedWeight>(
+      context,
+      WeightSheet(
+        db: scope.db,
+        clock: scope.clock,
+        units: units,
+        last: last,
+        offsetAt: offsetAt,
+      ),
+    );
+  } finally {
+    _sheetOpen = false;
   }
-  if (!context.mounted) return null;
-  return _present<SavedWeight>(
-    context,
-    WeightSheet(
-      db: scope.db,
-      clock: scope.clock,
-      units: units,
-      last: last,
-      offsetAt: offsetAt,
-    ),
-  );
 }
+
+/// True from the request until the sheet closes, so only one weight sheet is
+/// ever open, whichever screen or widget link asked for it. The sheet also
+/// clears it when it is removed from the tree.
+bool _sheetOpen = false;
 
 /// Opens the sheet on an existing weigh-in. Completes with the stored row after
 /// a save or a delete, or null if the sheet was closed without either.
@@ -63,6 +74,8 @@ Future<EditedWeight?> showEditWeightSheet(
   UnitSystem units, {
   OffsetAt offsetAt = systemOffsetAt,
 }) {
+  if (_sheetOpen) return Future.value(null);
+  _sheetOpen = true;
   final scope = AppScope.of(context);
   return _present<EditedWeight>(
     context,
@@ -73,7 +86,7 @@ Future<EditedWeight?> showEditWeightSheet(
       editing: row,
       offsetAt: offsetAt,
     ),
-  );
+  ).whenComplete(() => _sheetOpen = false);
 }
 
 Future<T?> _present<T>(BuildContext context, WeightSheet sheet) {
@@ -119,9 +132,12 @@ class WeightSheet extends StatefulWidget {
   State<WeightSheet> createState() => _WeightSheetState();
 }
 
-class _WeightSheetState extends State<WeightSheet> {
+class _WeightSheetState extends State<WeightSheet> with WidgetsBindingObserver {
   late final TextEditingController _text;
-  late final Now _opened;
+
+  /// When the sheet was opened, or when the app last came back with nothing
+  /// picked. Its label shows this time and Save stores it.
+  late Now _opened;
 
   /// The date and time picked, or null for "now" (adding) or "as stored"
   /// (editing).
@@ -137,6 +153,7 @@ class _WeightSheetState extends State<WeightSheet> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _opened = widget.clock();
     final row = _row;
     final source = row ?? widget.last;
@@ -149,8 +166,19 @@ class _WeightSheetState extends State<WeightSheet> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _sheetOpen = false;
     _text.dispose();
     super.dispose();
+  }
+
+  /// A sheet left open while the phone was away would keep the old time.
+  /// Move "now" to the present unless a time was picked or a save is running.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_row != null || _at != null || _saving) return;
+    setState(() => _opened = widget.clock());
   }
 
   /// The date and time the sheet shows right now.

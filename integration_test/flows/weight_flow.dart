@@ -40,13 +40,15 @@ Future<List<WeightEntry>> storedWeights(WidgetTester tester) async {
 }
 
 /// Pumps, with real time passing for the database, until [done] is true. Fails
-/// with [what] after about twenty seconds.
+/// with [what] after [tries] rounds, about 0.125 seconds each (twenty-five
+/// seconds by default).
 Future<void> waitFor(
   WidgetTester tester,
   bool Function() done,
-  String what,
-) async {
-  for (var i = 0; i < 200; i++) {
+  String what, {
+  int tries = 200,
+}) async {
+  for (var i = 0; i < tries; i++) {
     if (done()) return;
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 25)),
@@ -81,7 +83,7 @@ Future<void> deliverWidgetLink(WidgetTester tester) async {
 /// From Home: tap Weight, type [type] if given (leave the number alone when
 /// null), then save with the Save button, or with the keyboard's done key when
 /// [doneKey] is true. Counts one tap to open and one to save. Returns the row
-/// that was stored.
+/// that was stored. Waits first for any earlier "Weight saved" bar to go away.
 Future<WeightEntry> logWeightFromHome(
   WidgetTester tester,
   TapCounter taps, {
@@ -106,6 +108,13 @@ Future<WeightEntry> saveOpenWeightSheet(
   bool doneKey = false,
 }) async {
   expect(find.byType(WeightSheet), findsOneWidget);
+  // An earlier save's bar stays for ten seconds. If it were still showing,
+  // the check below could pass on the old bar, so wait it out first.
+  await waitFor(
+    tester,
+    () => find.textContaining('Weight saved').evaluate().isEmpty,
+    'the earlier "Weight saved" bar to go away',
+  );
   final before = {for (final r in await storedWeights(tester)) r.id};
 
   if (type != null) await taps.type(find.byType(TextField), type);

@@ -45,7 +45,6 @@ class HomeScreenState extends State<HomeScreen> {
   SavedWeight? _saved;
   bool _undoFailed = false;
   Timer? _bannerTimer;
-  bool _sheetOpen = false;
 
   @override
   void didChangeDependencies() {
@@ -67,15 +66,9 @@ class HomeScreenState extends State<HomeScreen> {
   /// Opens the weight sheet and shows the confirmation bar after a save.
   /// The + Weight button and the widget link both come here.
   Future<void> openWeightSheet() async {
-    // A second tap while the sheet is opening or open does nothing.
-    if (_sheetOpen) return;
-    _sheetOpen = true;
-    SavedWeight? saved;
-    try {
-      saved = await showWeightSheet(context);
-    } finally {
-      _sheetOpen = false;
-    }
+    // A request while a sheet is opening or open does nothing: the sheet
+    // functions share one guard.
+    final saved = await showWeightSheet(context);
     if (saved == null || !mounted) return;
     _bannerTimer?.cancel();
     _bannerTimer = Timer(_bannerTime, _hideBanner);

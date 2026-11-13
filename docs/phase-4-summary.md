@@ -32,7 +32,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 6. **Four Android permissions that the widget library brings in are removed.** The home-screen widget package links Android's WorkManager, which adds wake lock, network state, run at boot and foreground service permissions. Daybook uses none of those features, so the app's manifest removes them. The app still declares only internet access (for barcode lookups) and one standard AndroidX permission.
 7. **The widget shows the date of the last weigh-in, not "Today".** For example "Thu, Nov 12, 7:02 am". The widget is only redrawn when the app runs, so "Today" would still be showing the next morning.
 8. **The widget's bottom line is always "Tap to log".** The wireframe had "Logged today. Tap to log again" after a weigh-in, which has the same stale-text problem.
-9. **The time shown on the weight sheet is the time saved.** A sheet opened at 11:59 pm and saved at 12:01 am stores the weigh-in at 11:59 pm on the day it showed, not on the next day.
+9. **The time shown on the weight sheet is the time saved.** That is the moment the sheet opened, or the moment the app last came back to the front with the sheet open, not the moment Save was tapped. A sheet opened at 11:59 pm and saved at 12:01 am stores the weigh-in at 11:59 pm on the day it showed. A sheet left open overnight and saved in the morning stores the morning.
 
 ## Open questions from the plan, still to confirm
 
@@ -46,6 +46,10 @@ Found in review of the widget, and true since Phase 2. Android backs up every ap
 - (b) Opt out on both platforms, so the data never leaves the phone except through Export. A lost or replaced phone then means lost history unless the user exported.
 
 Nothing has been changed yet. The brief says "All user data stays on the device", so this is yours to decide.
+
+## The model rule in CLAUDE.md
+
+CLAUDE.md says agents use Sonnet 5.5 or Opus 5.5 only, never Fable. In this phase every implementation agent ran on Sonnet 5.5 or Opus 5.5 and every reviewer on Opus 5.5. The session that coordinates them, makes the rulings recorded above, writes this summary and makes the commits has been running on Fable 5.2, and the commits carry that name in their co-author line. That goes against the rule as written. It needs your answer: either add a line to CLAUDE.md allowing the coordinating session to run on Fable, or switch the session's model. Carrying on with the work is not an answer to it.
 
 ## Review findings worth knowing
 
