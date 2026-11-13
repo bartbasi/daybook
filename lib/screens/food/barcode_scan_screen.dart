@@ -22,10 +22,12 @@ sealed class ScanOutcome {
 }
 
 /// The product is saved on the phone; [foodId] is its food row (a barcode that
-/// is the user's own food gives that food's id).
+/// is the user's own food gives that food's id). [serving] is false only for a
+/// cached product that has no serving size, so its line is 100 g and Assumed.
 class ScanFound extends ScanOutcome {
-  const ScanFound(this.foodId);
+  const ScanFound(this.foodId, {required this.serving});
   final int foodId;
+  final bool serving;
 }
 
 /// Nothing was found or saved; [message] says why, in plain words. When
@@ -36,14 +38,25 @@ class ScanMessage extends ScanOutcome {
   final String? barcode;
 }
 
-/// Looks [code] up on Open Food Facts (one request) and saves the product on
-/// the phone. A product with no name or no energy cannot be used and counts as
-/// not found, and nothing is saved for it.
+/// Finds the food for [code], which is already in its [barcodeForm]. A stored
+/// food with that barcode that is not archived (the user's own, or a product
+/// cached by an earlier scan) is used with no request at all. Otherwise one
+/// request goes to Open Food Facts and the product is saved on the phone. A
+/// product with no name or no energy cannot be used and counts as not found,
+/// and nothing is saved for it.
 Future<ScanOutcome> lookUpBarcode(
   AppDatabase db,
   OffClient? off,
   String code,
 ) async {
+  try {
+    final stored = await findFoodByBarcode(db, code);
+    if (stored != null) {
+      return ScanFound(stored.id, serving: stored.serving);
+    }
+  } catch (_) {
+    // The search failed; the request below is still worth a try.
+  }
   final OffProduct? product;
   try {
     if (off == null) return const ScanMessage(S.scanNoConnection);
@@ -61,7 +74,10 @@ Future<ScanOutcome> lookUpBarcode(
     return ScanMessage(S.scanNotFound(code), barcode: code);
   }
   try {
-    return ScanFound(await saveOffProduct(db, product));
+    return ScanFound(
+      await saveOffProduct(db, product),
+      serving: product.servingQuantity != null,
+    );
   } catch (_) {
     return const ScanMessage(S.scanSaveFailed);
   }
@@ -114,12 +130,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   /// One lookup at a time: a second code, from the camera or typed, while one
   /// is running does nothing.
-  Future<void> _submit(String code) async {
+  Future<void> _submit(String code, bool upcE) async {
     if (_looking) return;
     setState(() => _looking = true);
     final ScanOutcome outcome;
     try {
-      outcome = await widget.lookup(code);
+      outcome = await widget.lookup(barcodeForm(code, upcE: upcE));
     } catch (_) {
       if (!mounted) return;
       Navigator.of(context).pop(const ScanMessage(S.scanNoConnection));
@@ -136,12 +152,15 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   void _lookUpTyped() {
     final code = _number.text.trim();
-    if (!RegExp(r'^\d{8,14}$').hasMatch(code)) {
-      setState(() => _numberError = S.scanNumberBad);
+    final shape = RegExp(r'^(\d{8}|\d{12,14})$').hasMatch(code);
+    if (!shape || !barcodeCheckOk(code)) {
+      setState(
+        () => _numberError = shape ? S.scanNumberCheck : S.scanNumberBad,
+      );
       return;
     }
     setState(() => _numberError = null);
-    _submit(code);
+    _submit(code, false);
   }
 
   @override

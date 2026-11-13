@@ -109,6 +109,7 @@ Line? foodLineFor(
     state: l.state,
     foodRef: l.foodRef,
     foodName: l.foodName,
+    dataset: l.dataset,
     quantity: l.quantity,
     unitLabel: l.unitLabel,
     baseQuantity: l.baseQuantity,

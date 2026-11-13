@@ -1220,6 +1220,7 @@ void main() {
             state: LineState.matched,
             foodRef: 'local:1',
             foodName: 'Skyr',
+            dataset: 'off',
             quantity: 1,
             unitLabel: 'container',
             baseQuantity: 150,

@@ -32,6 +32,10 @@ final _logCall = RegExp(
 final _netUse = RegExp(
   r'\b(HttpClient|HttpServer|(Raw|Secure)?Socket|WebSocket|RawDatagramSocket)\b',
 );
+// flutter_zxing can fetch an image from a web address, with these functions:
+// readBarcodeImageUrl, readBarcodesImageUrl, zxingReadBarcodeImageUrl and
+// zxingReadBarcodesImageUrl. Any name with ImageUrl in it is refused.
+final _imageUrl = RegExp('imageurl', caseSensitive: false);
 final _httpImport = RegExp('''^\\s*(import|export)\\s+['"]package:http/''');
 
 /// Dart files under lib/ as 'lib/a/b.dart' paths, without generated files.
@@ -180,14 +184,14 @@ void main() {
   });
 
   test('the barcode plugin image download is never called', () {
-    // flutter_zxing can fetch a barcode image from a web address. Daybook
-    // fetches no product image, so the name must not appear in lib/.
+    // Daybook fetches no product image, so no ImageUrl name may appear in
+    // lib/.
     final found = <String>[];
     for (final file in _libFiles()) {
       final lines = _codeLines(file.readAsStringSync());
       for (var n = 0; n < lines.length; n++) {
-        if (lines[n].contains('readBarcodeImageUrl')) {
-          found.add('${_name(file)}:${n + 1} uses readBarcodeImageUrl');
+        if (_imageUrl.hasMatch(lines[n])) {
+          found.add('${_name(file)}:${n + 1} uses an ImageUrl function');
         }
       }
     }
@@ -237,6 +241,15 @@ void main() {
     expect(_logCall.hasMatch('stderr.writeln(x)'), isTrue);
     expect(_netUse.hasMatch('final c = HttpClient();'), isTrue);
     expect(_netUse.hasMatch('MySocketThing()'), isFalse);
+    for (final name in [
+      'readBarcodeImageUrl',
+      'readBarcodesImageUrl',
+      'zxingReadBarcodeImageUrl',
+      'zxingReadBarcodesImageUrl',
+    ]) {
+      expect(_imageUrl.hasMatch('  zx.$name(u, p);'), isTrue, reason: name);
+    }
+    expect(_imageUrl.hasMatch('readBarcode(image)'), isFalse);
     final code = _codeLines("// print(1)\nfinal a = 'log(';\n/* log(\n*/ log(2);");
     expect(code.where(_logCall.hasMatch), hasLength(1));
   });

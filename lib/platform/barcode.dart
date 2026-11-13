@@ -22,11 +22,12 @@ abstract class BarcodeCamera {
   const BarcodeCamera();
 
   /// The camera view. The phone asks for camera permission the first time this
-  /// is built. [onCode] gets the digits of a barcode that was read, and may
-  /// be called again for the same barcode; [onProblem] says the camera cannot
-  /// be used.
+  /// is built. [onCode] gets the digits of a barcode that was read and
+  /// whether it was a UPC-E code (which the app expands to UPC-A), and may be
+  /// called again for the same barcode; [onProblem] says the camera cannot be
+  /// used.
   Widget view({
-    required void Function(String code) onCode,
+    required void Function(String code, bool upcE) onCode,
     required void Function(CameraProblem problem) onProblem,
   });
 }
@@ -37,7 +38,7 @@ class ZxingCamera extends BarcodeCamera {
 
   @override
   Widget view({
-    required void Function(String code) onCode,
+    required void Function(String code, bool upcE) onCode,
     required void Function(CameraProblem problem) onProblem,
   }) {
     return ReaderWidget(
@@ -49,7 +50,9 @@ class ZxingCamera extends BarcodeCamera {
       showGallery: false,
       onScan: (Code code) {
         final text = code.text;
-        if (code.isValid && text != null && text.isNotEmpty) onCode(text);
+        if (code.isValid && text != null && text.isNotEmpty) {
+          onCode(text, code.format == Format.upce);
+        }
       },
       onControllerCreated: (controller, error) {
         if (error == null) return;

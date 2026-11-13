@@ -138,6 +138,7 @@ class Line {
     required this.state,
     this.foodRef,
     this.foodName,
+    this.dataset,
     this.quantity,
     this.unitLabel,
     this.baseQuantity,
@@ -197,6 +198,7 @@ class Line {
     state: state ?? this.state,
     foodRef: foodRef,
     foodName: foodName,
+    dataset: dataset,
     quantity: quantity,
     unitLabel: unitLabel,
     baseQuantity: baseQuantity,
@@ -229,6 +231,12 @@ class Line {
 
   /// The food's name at the time, or the saved meal's name for a header line.
   final String? foodName;
+
+  /// Where the food comes from: a USDA dataset ('fndds', 'sr_legacy',
+  /// 'foundation'), 'local' for the user's own food, or 'off' for a cached
+  /// Open Food Facts product. Null when the line does not know (a stored
+  /// entry being edited, a saved meal's item, a header).
+  final String? dataset;
 
   /// What is stored in `meal_entries` (4.7): the quantity after multipliers and
   /// its unit label (empty string for a bare count).

@@ -272,11 +272,14 @@ class S {
   static const scanNumberLabel = 'Barcode number';
   static const scanLookUp = 'Look up';
   static const scanNumberBad =
-      'Enter the 8 to 14 digits printed under the barcode.';
+      'Enter the 8, 12, 13 or 14 digits printed under the barcode.';
+  static const scanNumberCheck =
+      'That number does not look right. Check the digits under the barcode '
+      'and try again.';
   static const scanLooking = 'Looking it up on Open Food Facts...';
   static const scanNoPermission =
-      'Camera access is off, so Daybook cannot scan. To scan a barcode, '
-      'allow the camera for Daybook in your phone\'s settings. You can also '
+      'Camera access is off, so $appName cannot scan. To scan a barcode, '
+      'allow the camera for $appName in your phone\'s settings. You can also '
       'type the number instead.';
   static const scanCameraFailed =
       'The camera could not start. You can type the number instead.';
@@ -297,9 +300,10 @@ class S {
       '$unit, ${_gramsText(grams)} g';
   static String sheetRowLabel(String name, String sub) => '$name. $sub';
 
-  /// The dataset of a food, for a row of the sheet. Null for a food whose
-  /// dataset is not known (an added line).
+  /// The dataset of a food, for a row of the sheet. Empty for a food whose
+  /// dataset is not known (a stored entry being edited): no label then.
   static String datasetName(String? dataset) => switch (dataset) {
+    null => '',
     'fndds' => 'USDA FNDDS',
     'sr_legacy' => 'USDA SR Legacy',
     'foundation' => 'USDA Foundation',
@@ -328,7 +332,7 @@ class S {
       if (kcalValue != null) kcal(kcalValue),
     ].join(', ');
     return [
-      dataset,
+      if (dataset.isNotEmpty) dataset,
       if (tail.isNotEmpty) tail,
       if (current) sheetCurrentPick,
     ].join('. ');

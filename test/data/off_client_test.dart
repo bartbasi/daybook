@@ -222,4 +222,183 @@ void main() {
       expect(f.baseUnit, 'ml');
     });
   });
+
+  group('the form of a barcode', () {
+    // The check digit of an 11 digit UPC-A body.
+    String withCheck(String body) {
+      var sum = 0, w = 3;
+      for (var i = body.length - 1; i >= 0; i--) {
+        sum += int.parse(body[i]) * w;
+        w = w == 3 ? 1 : 3;
+      }
+      return '$body${(10 - sum % 10) % 10}';
+    }
+
+    test('a UPC-A is padded to 13 digits, an EAN-8 and an EAN-13 are not '
+        'changed', () {
+      expect(barcodeForm('049000028911'), '0049000028911');
+      expect(barcodeForm('0049000028911'), '0049000028911');
+      expect(barcodeForm('96385074'), '96385074');
+      expect(barcodeForm('4006381333931'), '4006381333931');
+      // A typed 8 digit number is an EAN-8, as typed.
+      expect(barcodeForm('04252614'), '04252614');
+    });
+
+    test('a UPC-E code expands to its UPC-A, in all four zero rules', () {
+      // The published example: UPC-E 04252614 is UPC-A 042100005264.
+      expect(barcodeCheckOk('042100005264'), isTrue);
+      expect(barcodeForm('04252614', upcE: true), '0042100005264');
+      expect(barcodeForm('01234565', upcE: true), '0012345000065');
+      expect(barcodeCheckOk('012345000065'), isTrue);
+      // The other three rules: the last of the six digits is 3, 4 and 0.
+      for (final (e6, a11) in [
+        ('123453', '01230000045'),
+        ('123454', '01234000005'),
+        ('123450', '01200000345'),
+      ]) {
+        final upcA = withCheck(a11);
+        final e = '0$e6${upcA[11]}';
+        expect(barcodeForm(e, upcE: true), '0$upcA', reason: e);
+      }
+    });
+
+    test('the check digit of typed numbers', () {
+      for (final ok in [
+        '96385074',
+        '049000028911',
+        '0049000028911',
+        '4006381333931',
+        '10012345678902',
+      ]) {
+        expect(barcodeCheckOk(ok), isTrue, reason: ok);
+      }
+      for (final bad in [
+        '96385075',
+        '049000028910',
+        '4006381333932',
+        '10012345678903',
+        '123456789',
+        '1234567890',
+        '12345678901',
+        '12ab5678',
+      ]) {
+        expect(barcodeCheckOk(bad), isFalse, reason: bad);
+      }
+    });
+  });
+
+  group('odd product data is left out', () {
+    Future<OffProduct?> look(Map<String, Object?> nutriments) {
+      final body = jsonEncode({
+        'status': 1,
+        'product': {'product_name': 'Odd', 'nutriments': nutriments},
+      });
+      return _client(MockClient((_) async => http.Response(body, 200)))
+          .lookup(_code);
+    }
+
+    test('negative, huge, NaN and too many calories are absent', () async {
+      final p = (await look({
+        'energy-kcal_100g': -50,
+        'proteins_100g': 1e9,
+        'fat_100g': 'NaN',
+        'carbohydrates_100g': 12,
+        'fiber_100g': -1,
+        'sodium_100g': 0.5,
+      }))!;
+      expect(p.nutrients.containsKey(Nutrients.energy), isFalse);
+      expect(p.nutrients.containsKey(Nutrients.protein), isFalse);
+      expect(p.nutrients.containsKey(Nutrients.fat), isFalse);
+      expect(p.nutrients[Nutrients.carbs], 12);
+      expect(p.nutrients.containsKey(Nutrients.fiber), isFalse);
+      expect(p.nutrients[Nutrients.sodium], closeTo(500, 1e-9));
+    });
+
+    test('2500 kcal in 100 g is absent, 900 is kept, and kJ is checked '
+        'after conversion', () async {
+      expect(
+        (await look({'energy-kcal_100g': 2500}))!.nutrients
+            .containsKey(Nutrients.energy),
+        isFalse,
+      );
+      expect(
+        (await look({'energy-kcal_100g': 900}))!.nutrients[Nutrients.energy],
+        900,
+      );
+      expect(
+        (await look({'energy_100g': 4000}))!.nutrients
+            .containsKey(Nutrients.energy),
+        isFalse,
+      );
+      expect(
+        (await look({'energy_100g': 418.4}))!.nutrients[Nutrients.energy],
+        closeTo(100, 1e-9),
+      );
+    });
+  });
+
+  group('the stored food for a barcode', () {
+    late AppDatabase db;
+    setUp(() => db = AppDatabase(NativeDatabase.memory()));
+    tearDown(() => db.close());
+
+    Future<int> insert(String kind, {bool archived = false}) => db
+        .into(db.foods)
+        .insert(
+          FoodsCompanion.insert(
+            kind: kind,
+            name: 'X',
+            barcode: const Value(_code),
+            baseAmount: 100,
+            baseUnit: 'g',
+            archived: Value(archived),
+            createdAtMs: 1,
+            updatedAtMs: 1,
+          ),
+        );
+
+    test('nothing, an archived food, the own food and a cached '
+        'product with and without a serving', () async {
+      expect(await findFoodByBarcode(db, _code), isNull);
+      final archived = await insert('custom', archived: true);
+      expect(await findFoodByBarcode(db, _code), isNull);
+      await (db.delete(db.foods)..where((f) => f.id.equals(archived))).go();
+
+      final own = await insert('custom');
+      expect(await findFoodByBarcode(db, _code), (id: own, serving: true));
+      await (db.delete(db.foods)..where((f) => f.id.equals(own))).go();
+
+      final off = await insert('off');
+      expect(await findFoodByBarcode(db, _code), (id: off, serving: false));
+      await db
+          .into(db.foodPortions)
+          .insert(
+            FoodPortionsCompanion.insert(
+              foodId: off,
+              label: '1 pot',
+              baseQuantity: 150,
+            ),
+          );
+      expect(await findFoodByBarcode(db, _code), (id: off, serving: true));
+    });
+
+    test('saving a product again brings an archived cached row back', () async {
+      final off = await insert('off', archived: true);
+      final id = await saveOffProduct(
+        db,
+        OffProduct(
+          barcode: _code,
+          name: 'Nutella',
+          brand: null,
+          baseUnit: 'g',
+          nutrients: {Nutrients.energy: 539},
+          servingQuantity: null,
+          servingLabel: null,
+          rawNutrimentsJson: '{}',
+        ),
+      );
+      expect(id, off);
+      expect((await db.select(db.foods).get()).single.archived, isFalse);
+    });
+  });
 }

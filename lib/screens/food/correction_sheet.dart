@@ -225,7 +225,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
             FoodChoice(
               ref,
               _line.foodName ?? '',
-              ref.startsWith('local:') ? 'local' : '',
+              _line.dataset ?? '',
               _line.nutrients[Nutrients.energy],
             ),
             const [],

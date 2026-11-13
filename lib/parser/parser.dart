@@ -207,6 +207,7 @@ class Parser {
       food: food,
       ref: ref!,
       name: name,
+      dataset: _dataset(ref, s),
       base: base,
       words: words,
       learned: learnedAmount,
@@ -239,6 +240,7 @@ class Parser {
       food: food,
       ref: ref,
       name: _name(ref, s) ?? ref,
+      dataset: _dataset(ref, s),
       base: LineState.matched,
       words: readQuery(d.matchText, negation: !d.negationProtected).words,
       learned: q == null ? null : LearnedAmount(q, learned!.unitLabel ?? ''),
@@ -253,6 +255,7 @@ class Parser {
     required PortionFood food,
     required String ref,
     required String? name,
+    required String? dataset,
     required LineState base,
     required List<String> words,
     required LearnedAmount? learned,
@@ -271,6 +274,7 @@ class Parser {
       state: state,
       foodRef: ref,
       foodName: name,
+      dataset: dataset,
       quantity: r.quantity,
       unitLabel: r.unitLabel,
       baseQuantity: r.baseQuantity,
@@ -287,6 +291,11 @@ class Parser {
 
   PortionFood? _food(String ref, UserSnapshot s) =>
       ref.startsWith('local:') ? s.foods[ref]?.food : loadUsda(ref);
+
+  /// Where the food [ref] comes from: a USDA dataset, 'local' or 'off'.
+  String? _dataset(String ref, UserSnapshot s) => ref.startsWith('local:')
+      ? s.foods[ref]?.dataset
+      : _usdaFoods[ref]?.dataset;
 
   String? _name(String ref, UserSnapshot s) => ref.startsWith('local:')
       ? s.foods[ref]?.name

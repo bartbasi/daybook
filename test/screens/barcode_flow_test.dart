@@ -36,21 +36,26 @@ import 'food_entry_screen_test.dart' show nowFixed, settle;
 // correction sheet and the real data, with a fake camera and a mock HTTP
 // client. No camera is opened and nothing leaves the test.
 
-const yogurtCode = '5000000000017';
+const yogurtCode = '5000000000012';
 // Words no USDA food has, so typing them can only mean this product.
 const yogurtName = 'Zorblat Yogurt';
 
 /// A product as Open Food Facts answers: 60 kcal per 100 g, one serving of
 /// 150 g, so 90 kcal a serving (food-entry frame 10).
-String yogurt({String? name = yogurtName, bool energy = true}) => jsonEncode({
+String yogurt({
+  String? name = yogurtName,
+  bool energy = true,
+  bool serving = true,
+  String code = yogurtCode,
+}) => jsonEncode({
   'status': 1,
-  'code': yogurtCode,
+  'code': code,
   'product': {
-    'code': yogurtCode,
+    'code': code,
     'product_name': ?name,
     'brands': 'Test Dairy',
-    'serving_quantity': 150,
-    'serving_size': '1 container',
+    if (serving) 'serving_quantity': 150,
+    if (serving) 'serving_size': '1 container',
     'nutriments': {
       if (energy) 'energy-kcal_100g': 60,
       'proteins_100g': 10,
@@ -63,14 +68,14 @@ String yogurt({String? name = yogurtName, bool energy = true}) => jsonEncode({
 /// Stands in for the camera. A test says what the camera sees with [emit] or
 /// what went wrong with [fail].
 class FakeCamera extends BarcodeCamera {
-  void Function(String)? onCode;
+  void Function(String, bool)? onCode;
   void Function(CameraProblem)? onProblem;
   var views = 0;
   CameraProblem? failWith;
 
   @override
   Widget view({
-    required void Function(String code) onCode,
+    required void Function(String code, bool upcE) onCode,
     required void Function(CameraProblem problem) onProblem,
   }) {
     views++;
@@ -81,7 +86,7 @@ class FakeCamera extends BarcodeCamera {
     return const SizedBox.expand(key: ValueKey('fake-camera'));
   }
 
-  void emit(String code) => onCode!(code);
+  void emit(String code, {bool upcE = false}) => onCode!(code, upcE);
 }
 
 void main() {
@@ -207,9 +212,14 @@ void main() {
   }
 
   /// Opens the scan screen and sees [code].
-  Future<void> scan(WidgetTester tester, String code, {Finder? button}) async {
+  Future<void> scan(
+    WidgetTester tester,
+    String code, {
+    Finder? button,
+    bool upcE = false,
+  }) async {
     await openScan(tester, button: button);
-    camera.emit(code);
+    camera.emit(code, upcE: upcE);
     await settleMore(tester);
   }
 
@@ -243,6 +253,9 @@ void main() {
       final line = lineOf(tester, 0);
       expect(line.foodName, contains(yogurtName));
       expect(line.markers, contains(Marker.scanned));
+      expect(line.markers, isNot(contains(Marker.assumed)));
+      expect(line.state, LineState.matched);
+      expect(find.text('Assumed'), findsNothing);
       expect(line.quantity, 1);
       expect(line.baseQuantity, 150);
       expect(line.nutrients[Nutrients.energy], closeTo(90, 1e-6));
@@ -299,15 +312,14 @@ void main() {
       expect(inSheet(find.textContaining('My food')), findsNothing);
     });
 
-    appTest('a second scan of the same barcode reuses the cached row', (
-      tester,
-    ) async {
+    appTest('a second scan of the same barcode reuses the cached row and '
+        'sends no request', (tester) async {
       await openApp(tester);
       await openFood(tester);
       await scan(tester, yogurtCode);
       await scan(tester, yogurtCode);
       expect(tiles(), findsNWidgets(2));
-      expect(requests, hasLength(2));
+      expect(requests, hasLength(1));
       final foods = await foodRows(tester);
       expect(foods, hasLength(1));
       expect(lineOf(tester, 0).foodRef, lineOf(tester, 1).foodRef);
@@ -464,8 +476,9 @@ void main() {
       expect(r.headers['User-Agent'], 'Daybook/1.0.0 (bartbasi@gmail.com)');
       expect(r.headers['User-Agent'], offUserAgent(appVersion));
       expect(r.url.queryParameters['fields'], isNot(contains('image')));
-      await scan(tester, yogurtCode);
+      await scan(tester, '4006381333931');
       expect(requests, hasLength(2));
+      expect(requests.last.url.path, '/api/v2/product/4006381333931.json');
       for (final q in requests) {
         expect(q.url.host, 'world.openfoodfacts.org');
         expect(q.url.path, isNot(contains('image')));
@@ -514,7 +527,9 @@ void main() {
       await tester.tap(find.text('Look up'));
       await tester.pump();
       expect(
-        find.text('Enter the 8 to 14 digits printed under the barcode.'),
+        find.text(
+          'Enter the 8, 12, 13 or 14 digits printed under the barcode.',
+        ),
         findsOneWidget,
       );
       expect(requests, isEmpty);
@@ -619,6 +634,15 @@ void main() {
         meal.entries.map((e) => e.entry.foodRef),
         contains('local:${foods.single.id}'),
       );
+      // A pick made in the sheet is sticky and learned: the typed words now
+      // point at the scanned product.
+      final learned = await real(
+        tester,
+        () => db.select(db.learnedMatches).get(),
+      );
+      expect(learned, hasLength(1));
+      expect(learned.single.foodRef, 'local:${foods.single.id}');
+      expect(learned.single.foodName, contains(yogurtName));
     });
 
     appTest('a barcode with no product shows the message in the sheet and '
@@ -658,6 +682,234 @@ void main() {
       expect(sheet(), findsOneWidget);
       expect(requests, isEmpty);
       expect(find.text('Not found'), findsOneWidget);
+    });
+  });
+
+  group('serving, credit and dataset', () {
+    appTest('a product with a serving is Scanned and not Assumed, on screen '
+        'and spoken, and reads as one serving of 150 g', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(find.text('Scanned'), findsOneWidget);
+      expect(find.text('Assumed'), findsNothing);
+      expect(find.textContaining('150 g'), findsWidgets);
+      expect(
+        find.bySemanticsLabel(RegExp(r'^Scanned\. .*Double tap to change\.$')),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel(RegExp('Assumed')), findsNothing);
+      semantics.dispose();
+    });
+
+    appTest('a product with no serving is 100 g, Scanned and Assumed', (
+      tester,
+    ) async {
+      answer = (_) async => http.Response(yogurt(serving: false), 200);
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      final line = lineOf(tester, 0);
+      expect(line.baseQuantity, 100);
+      expect(line.markers, containsAll([Marker.scanned, Marker.assumed]));
+      expect(find.text('Assumed'), findsOneWidget);
+      expect(find.text('Scanned'), findsOneWidget);
+      // A second scan of the cached product still knows it has no serving.
+      await scan(tester, yogurtCode);
+      expect(requests, hasLength(1));
+      expect(lineOf(tester, 1).markers, contains(Marker.assumed));
+    });
+
+    appTest('the sheet of a scanned product says Open Food Facts, not My '
+        'food', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsOneWidget);
+      await tester.tap(tiles().first);
+      await settle(tester);
+      expect(sheet(), findsOneWidget);
+      expect(
+        inSheet(find.textContaining('Open Food Facts (ODbL)')),
+        findsWidgets,
+      );
+      expect(inSheet(find.textContaining('My food')), findsNothing);
+    });
+
+    appTest('a scan of the own food of the user has no Open Food Facts '
+        'credit, and its sheet says My food', (tester) async {
+      await real(
+        tester,
+        () => db.createCustomFood(
+          const CustomFoodInput(
+            name: 'My own yogurt',
+            basis: FoodBasis.perServing,
+            nutrients: {Nutrients.energy: 123},
+            barcode: yogurtCode,
+          ),
+          nowFixed,
+        ),
+      );
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(tiles(), findsOneWidget);
+      expect(find.text('Scanned'), findsOneWidget);
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsNothing);
+      await tester.tap(tiles().first);
+      await settle(tester);
+      expect(inSheet(find.textContaining('My food')), findsWidgets);
+    });
+
+    appTest('a typed line matched to a cached product shows the credit', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      await type(tester, 'zorblat yogurt');
+      expect(tiles(), findsNWidgets(2));
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsNWidgets(2));
+    });
+  });
+
+  group('looking in the stored foods first', () {
+    appTest('a cached product is used with no request, also with no '
+        'connection', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(requests, hasLength(1));
+      answer = (_) async => throw http.ClientException('offline');
+      await scan(tester, yogurtCode);
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(2));
+      expect(lineOf(tester, 1).foodName, contains(yogurtName));
+      expect(lineOf(tester, 1).markers, contains(Marker.scanned));
+      expect(
+        find.textContaining('Could not reach Open Food Facts'),
+        findsNothing,
+      );
+    });
+
+    appTest('the own food of the user is used with no request, also when '
+        'Open Food Facts would say 404', (tester) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      final own = await real(
+        tester,
+        () => db.createCustomFood(
+          const CustomFoodInput(
+            name: 'My own yogurt',
+            basis: FoodBasis.perServing,
+            nutrients: {Nutrients.energy: 123},
+            barcode: yogurtCode,
+          ),
+          nowFixed,
+        ),
+      );
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(requests, isEmpty);
+      expect(lineOf(tester, 0).foodRef, own.ref);
+      expect(find.textContaining('No product found'), findsNothing);
+    });
+
+    appTest('an archived food with that barcode is ignored and one request '
+        'goes out', (tester) async {
+      final id = await real(
+        tester,
+        () => db
+            .into(db.foods)
+            .insert(
+              FoodsCompanion.insert(
+                kind: 'off',
+                name: 'Old yogurt',
+                barcode: const Value(yogurtCode),
+                baseAmount: 100,
+                baseUnit: 'g',
+                archived: const Value(true),
+                createdAtMs: 1,
+                updatedAtMs: 1,
+              ),
+            ),
+      );
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, yogurtCode);
+      expect(requests, hasLength(1));
+      expect(tiles(), findsOneWidget);
+      expect(lineOf(tester, 0).foodRef, 'local:$id');
+      expect(lineOf(tester, 0).foodName, contains(yogurtName));
+    });
+  });
+
+  group('the form of a barcode', () {
+    Finder numberField() => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Barcode number',
+    );
+
+    appTest('a scanned UPC-A and the same number typed as 13 digits are one '
+        'product and one row', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, '049000028911');
+      expect(requests, hasLength(1));
+      expect(requests.single.url.path, '/api/v2/product/0049000028911.json');
+      await openScan(tester);
+      await tester.tap(find.text('Type the number instead'));
+      await settle(tester);
+      await tester.enterText(numberField(), '0049000028911');
+      await tester.tap(find.text('Look up'));
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(2));
+      final foods = await foodRows(tester);
+      expect(foods, hasLength(1));
+      expect(foods.single.barcode, '0049000028911');
+    });
+
+    appTest('a UPC-E code is looked up as its UPC-A, an EAN-8 as it is', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, '04252614', upcE: true);
+      expect(requests.single.url.path, '/api/v2/product/0042100005264.json');
+      await scan(tester, '96385074');
+      expect(requests.last.url.path, '/api/v2/product/96385074.json');
+      expect((await foodRows(tester)).map((f) => f.barcode).toSet(), {
+        '0042100005264',
+        '96385074',
+      });
+    });
+
+    appTest('a typed number with a wrong last digit is refused in plain '
+        'words and nothing is sent', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await openScan(tester);
+      await tester.tap(find.text('Type the number instead'));
+      await settle(tester);
+      for (final bad in ['4006381333932', '96385075', '049000028910']) {
+        await tester.enterText(numberField(), bad);
+        await tester.tap(find.text('Look up'));
+        await tester.pump();
+        expect(
+          find.text(
+            'That number does not look right. Check the digits under the '
+            'barcode and try again.',
+          ),
+          findsOneWidget,
+          reason: bad,
+        );
+      }
+      expect(requests, isEmpty);
+      await tester.enterText(numberField(), '4006381333931');
+      await tester.tap(find.text('Look up'));
+      await settleMore(tester);
+      expect(requests, hasLength(1));
     });
   });
 

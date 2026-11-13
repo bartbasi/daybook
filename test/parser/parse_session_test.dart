@@ -1386,6 +1386,11 @@ void main() {
       s.pickFood(s.lines[0].span!, 'local:2');
       expect(s.alternatives(s.lines[0].span!).current!.ref, 'local:2');
       expect(s.alternatives(s.lines[0].span!).current!.dataset, 'off');
+      // The line itself knows where its food comes from.
+      expect(s.lines[0].dataset, 'off');
+      final usda = newSession()..setText('2 slices toast, protein bar', 27);
+      expect(usda.lines[0].dataset, isIn(['fndds', 'sr_legacy', 'foundation']));
+      expect(usda.lines[1].dataset, 'local');
     });
   });
 

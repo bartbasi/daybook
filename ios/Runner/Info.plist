@@ -27,7 +27,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Daybook uses the camera only to read the barcode on a food package. It takes no photos and records no video.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Daybook never records sound. This text is here only because a library inside the app mentions the microphone.</string>
+	<string>The camera library can also record video with sound. Daybook never turns that on and never records sound.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Daybook never opens your photos. This text is here only because a library inside the app mentions the photo library.</string>
 	<key>LSRequiresIPhoneOS</key>

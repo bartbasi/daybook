@@ -13,6 +13,46 @@ import 'nutrients.dart';
 // Open Food Facts barcode lookup. Data is ODbL: show "Data from Open Food
 // Facts (ODbL)" next to scanned products. Never log barcodes or responses.
 
+/// A barcode's one stored form, used for the request, the cache and the
+/// search for a stored food: a UPC-E code (8 digits, only when the scanner
+/// says it read UPC-E) is expanded to UPC-A, and a 12 digit UPC-A is padded to
+/// 13 digits with a leading 0. Any other code, such as an EAN-8 or an EAN-13,
+/// is returned as it is.
+String barcodeForm(String code, {bool upcE = false}) {
+  var c = code;
+  if (upcE && c.length == 8) c = _upcEToUpcA(c);
+  if (c.length == 12) c = '0$c';
+  return c;
+}
+
+// The zero suppression rules of UPC-E: the last of the six digits says where
+// the zeros go. The number system digit and the check digit are kept.
+String _upcEToUpcA(String e) {
+  final ns = e[0], d = e.substring(1, 7), check = e[7], last = d[5];
+  final body = switch (last) {
+    '0' || '1' || '2' => '${d.substring(0, 2)}${last}0000${d.substring(2, 5)}',
+    '3' => '${d.substring(0, 3)}00000${d.substring(3, 5)}',
+    '4' => '${d.substring(0, 4)}00000${d[4]}',
+    _ => '${d.substring(0, 5)}0000$last',
+  };
+  return '$ns$body$check';
+}
+
+/// True when [code] has 8, 12, 13 or 14 digits and its last digit is the
+/// standard mod 10 check digit of the others.
+bool barcodeCheckOk(String code) {
+  if (!RegExp(r'^\d+$').hasMatch(code) ||
+      !const [8, 12, 13, 14].contains(code.length)) {
+    return false;
+  }
+  var sum = 0, weight = 3;
+  for (var i = code.length - 2; i >= 0; i--) {
+    sum += int.parse(code[i]) * weight;
+    weight = weight == 3 ? 1 : 3;
+  }
+  return (10 - sum % 10) % 10 == int.parse(code[code.length - 1]);
+}
+
 class OffException implements Exception {
   OffException(this.message);
   final String message;
@@ -107,14 +147,21 @@ class OffClient {
   OffProduct _parse(String barcode, Map<String, dynamic> p) {
     final raw = (p['nutriments'] as Map?)?.cast<String, dynamic>() ?? {};
     final nutrients = <int, double>{};
+    // A value that is not a number, is negative, or is more than 100 g in 100
+    // g (900 kcal for energy) is wrong data: it is left out, as if absent.
     for (final n in Nutrients.tracked) {
       final v = _num(raw['${n.offKey}_100g']);
-      if (v != null) nutrients[n.id] = v * _scale(n.unit);
+      if (v == null) continue;
+      if (n.unit == 'g' && v > 100) continue;
+      if (n.id == Nutrients.energy && v > _maxKcal) continue;
+      nutrients[n.id] = v * _scale(n.unit);
     }
     // OFF stores every nutrient except energy in grams per 100 g.
     if (!nutrients.containsKey(Nutrients.energy)) {
       final kj = _num(raw['energy_100g']);
-      if (kj != null) nutrients[Nutrients.energy] = kj / 4.184;
+      if (kj != null && kj / 4.184 <= _maxKcal) {
+        nutrients[Nutrients.energy] = kj / 4.184;
+      }
     }
     final baseUnit = p['product_quantity_unit'] == 'ml' ? 'ml' : 'g';
     // A serving in another unit than the base unit cannot be used. A missing
@@ -139,14 +186,43 @@ class OffClient {
     );
   }
 
-  static double? _num(Object? v) =>
-      v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
+  static const _maxKcal = 900;
+
+  /// A number that is finite and at least 0, else null.
+  static double? _num(Object? v) {
+    final x = v is num
+        ? v.toDouble()
+        : (v is String ? double.tryParse(v) : null);
+    return x != null && x.isFinite && x >= 0 ? x : null;
+  }
 
   static double _scale(String unit) => switch (unit) {
     'mg' => 1000,
     'µg' => 1e6,
     _ => 1,
   };
+}
+
+/// The food stored with [barcode] (in its [barcodeForm]) that is not archived:
+/// the user's own food or a cached product. [serving] is false only for a
+/// cached product that has no serving size. Null when there is none.
+Future<({int id, bool serving})?> findFoodByBarcode(
+  AppDatabase db,
+  String barcode,
+) async {
+  final f =
+      await (db.select(
+            db.foods,
+          )..where((f) => f.barcode.equals(barcode) & f.archived.equals(false)))
+          .getSingleOrNull();
+  if (f == null) return null;
+  if (f.kind != 'off') return (id: f.id, serving: true);
+  final portion =
+      await (db.select(db.foodPortions)
+            ..where((p) => p.foodId.equals(f.id))
+            ..limit(1))
+          .getSingleOrNull();
+  return (id: f.id, serving: portion != null);
 }
 
 /// Inserts or updates the cached product (matched by barcode). Returns the
@@ -182,6 +258,7 @@ Future<int> saveOffProduct(AppDatabase db, OffProduct p) {
       await (db.update(db.foods)..where((f) => f.id.equals(id))).write(
         FoodsCompanion(
           kind: const Value('off'),
+          archived: const Value(false),
           baseAmount: const Value(100),
           name: Value(p.name),
           brand: Value(p.brand),

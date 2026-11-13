@@ -191,7 +191,9 @@ class FoodLineTile extends StatelessWidget {
             _numbers(context, small),
           ],
         ),
-        if (line.markers.contains(Marker.scanned))
+        // The credit follows the data, not the marker: a scan of the user's
+        // own food has none, and a typed line matched to a cached product has.
+        if (line.dataset == 'off')
           Text(S.offCredit, style: theme.textTheme.bodySmall),
       ],
     );

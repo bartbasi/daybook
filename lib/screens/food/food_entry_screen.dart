@@ -1138,11 +1138,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// found): a scan while one is running does nothing.
   var _scanning = false;
 
-  /// The versions of the user data this screen sends itself after saving a
-  /// scanned product. They start high so they never meet the versions of the
-  /// app's own stream (1, 2, 3, ...); a version only names the data.
-  var _sentSnapshots = 1000000;
-
   /// Task 2.12 adds "Add it as your own food" next to the message, with
   /// [barcode] filled in. For now there is only the message.
   void _productNotFound(String barcode) {}
@@ -1153,9 +1148,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   Future<bool> _publishUserData() async {
     final w = await sheetWorker();
     if (w == null) return false;
-    final data = await _guard(
-      () => _db.loadUserSnapshot(version: ++_sentSnapshots),
-    );
+    // The version is only a label. This screen waits on the request id that
+    // setSnapshot returns, not on the version.
+    final data = await _guard(() => _db.loadUserSnapshot());
     if (data == null) return false;
     final id = await _guard(() async => w.setSnapshot(data));
     if (id == null) return false;
@@ -1173,8 +1168,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// Opens the scan screen, looks the product up and saves it. The ref of its
   /// food when it is saved and known to the parser; a plain message when not;
   /// both null when the user cancelled or a scan was already running.
-  Future<({String? ref, String? message})> _scanFood() async {
-    const none = (ref: null, message: null);
+  Future<({String? ref, String? message, bool serving})> _scanFood() async {
+    const none = (ref: null, message: null, serving: true);
     if (_scanning || _busy || _closed) return none;
     setState(() => _scanning = true);
     final hadFocus = _focus.hasFocus;
@@ -1185,12 +1180,16 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         case ScanMessage():
           final code = out.barcode;
           if (code != null) _productNotFound(code);
-          return (ref: null, message: out.message);
+          return (ref: null, message: out.message, serving: true);
         case ScanFound():
           if (!await _publishUserData()) {
-            return (ref: null, message: S.foodSheetRefusedFood);
+            return (ref: null, message: S.foodSheetRefusedFood, serving: true);
           }
-          return (ref: 'local:${out.foodId}', message: null);
+          return (
+            ref: 'local:${out.foodId}',
+            message: null,
+            serving: out.serving,
+          );
       }
     } finally {
       if (mounted) {
@@ -1201,7 +1200,10 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   }
 
   /// "Scan its barcode" in the not found sheet.
-  Future<({String? ref, String? message})> sheetScan() => _scanFood();
+  Future<({String? ref, String? message})> sheetScan() async {
+    final r = await _scanFood();
+    return (ref: r.ref, message: r.message);
+  }
 
   /// The Scan button: a scanned product becomes one added line, 1 serving,
   /// marked Scanned (grammar 9.3).
@@ -1221,7 +1223,18 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     }
     if (!mounted || _closed) return;
     if (priced == null) return _refused(S.foodSheetRefusedFood);
-    final line = priced.line;
+    var line = priced.line;
+    // Grammar 9.3: one serving. A product with a serving size comes out of
+    // the default amount with exactly that, so it is not Assumed; one with
+    // none keeps the default amount and its Assumed marker.
+    if (r.serving) {
+      line = line.copyWith(
+        state: line.state == LineState.amountAssumed
+            ? LineState.matched
+            : line.state,
+        markers: {...line.markers}..remove(Marker.assumed),
+      );
+    }
     addLines([
       AddedLine(line.copyWith(markers: {...line.markers, Marker.scanned})),
     ]);
