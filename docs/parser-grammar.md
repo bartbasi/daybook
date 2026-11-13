@@ -676,7 +676,7 @@ For a line that has a food:
 - **Candidates**: the current pick first, marked as chosen, then up to **7 others** in ranking order (5.4), skipping the current food. The list scrolls. Each row shows the food name, its dataset or "My food", and kcal for the line's amount. Added lines have no typed text to rank, so they show only the current food here.
 - **A note under the list**: "Your pick is remembered when you save the meal." (For added lines and saved meal items, which are never learned, the note is left out.)
 - **Search box**: below the list, as in 5.7.
-- **Amount**: a quantity field and a unit picker. The picker lists g, oz, the food's portions (except any whose label starts with "Quantity not specified"), and the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion.
+- **Amount**: a quantity field and a unit picker. The picker offers only amounts that typed text can express for that food: g and oz always; the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion; and each of the food's own portions that can be typed, meaning that writing that unit into the item and re-parsing it gives the same food and that portion's grams. A portion whose label cannot be typed back (for example "drink (12 fl oz)", or "medium or regular slice" when typing it would pick another portion or another food) is not offered, and neither is any portion whose label starts with "Quantity not specified".
 - **Forget this match**: only when a learned match produced the line (7.4).
 - **Remove from meal**: for a typed line, deletes the item's text from the box; for an added line, deletes the line.
 
@@ -688,7 +688,7 @@ For a **not found** line there are no candidate rows. The sheet has:
 
 **Picking a food** on a typed line makes a sticky correction for that item (9.1), marked "Your pick". The text is not changed.
 
-**Changing the amount** on a typed line rewrites only the item's amount in the text box: the old quantity and unit are replaced, or `<quantity> <unit> ` is put at the start of the item if there was none. Only numbers and units are ever written, never food names. Re-parsing the new text gives the same amount. See [open question 8](#142-open-questions). On an added line, the amount is changed on the line itself.
+**Changing the amount** on a typed line rewrites only the item's amount in the text box: the old quantity and unit are replaced, or, if there was none, `<quantity> <unit> ` is put immediately before the item's first food word, after any leading filler (`I had toast` becomes `I had 2 slice toast`). When the new amount has no unit, an `of` left right after the old amount is removed (`2 slices of toast` set to 3 gives `3 toast`). Only numbers and units are ever written, never food names. The rewrite is checked by re-parsing: the new text must give the same amount. If the text cannot express the amount, the change is refused and nothing is rewritten. See [open question 8](#142-open-questions). On an added line, the amount is changed on the line itself.
 
 ### 8.4 Save
 
@@ -708,12 +708,14 @@ Each typed line remembers the span of text it came from, and, when the user pick
 
 1. Find the changed region: the longest common start and the longest common end of the old and new text.
 2. Items wholly before the region keep their correction. Items wholly after it keep theirs, with spans shifted by the change in length.
-3. An item that overlaps the region keeps its correction only if its new learned key (7.1) equals the old one.
+3. An item that overlaps the region keeps its correction only if its new learned key (7.1) equals the old one. Otherwise the correction is suspended, as described below.
 
 So:
 - typing `, 1 banana` at the end keeps every correction above it;
 - changing `2 slices toast` to `3 slices toast` keeps the chosen bread and recomputes the grams;
-- changing it to `3 slices white toast` changes the key, so the correction is dropped and normal matching (learned row, then ranking) applies.
+- changing it to `3 slices white toast` changes the key, so the correction no longer applies and normal matching (learned row, then ranking) gives the line; once the user edits elsewhere, it is dropped (see below).
+
+**A changed key suspends the pick; it does not drop it at once.** Changing an amount by backspacing must not lose a pick. When an edit changes the key of a picked item, the pick is suspended for as long as later edits keep touching that same item. If the item's key becomes equal to the picked key again, the pick is restored. The suspended pick is dropped for good as soon as an edit lands entirely outside that item, or when the screen is closed. While suspended, the line shows what a fresh parse shows, without "Your pick". For example, take `2 slices toast` with a picked bread. Backspacing the 2 gives `slices toast`; the key is now different, so the pick is suspended. Typing 3 gives `3 slices toast`; the key matches again, so the pick is back.
 
 Sticky corrections live in memory until Save. The phone's undo does not bring back a dropped correction. Added lines (9.3) are not tied to the text, so typing never changes them.
 
@@ -721,7 +723,7 @@ Sticky corrections live in memory until Save. The phone's undo does not bring ba
 
 The parser has no special case for it. `2 sl` is not found, because "sl" is not a unit and matches no food.
 
-The screen softens it. While the cursor is inside or at the end of a **not found** item, that line is drawn as plain typed text, with no marker, and it does not count toward the Save button's "Fix" label (8.4). It changes to the not found look when the cursor leaves the item, or when Save is tapped. A half-typed word never matches anything (5.2), so partial words do not flash odd foods.
+The screen softens it. While the cursor is inside or at the end of a **not found** item, that line is drawn as plain typed text, with no marker, and it does not count toward the Save button's "Fix" label (8.4). It changes to the not found look when the cursor leaves the item, or when Save is tapped. While the cursor is at the end of the text and only spaces or tabs lie between the item's end and the cursor, the item still counts as under the cursor, so typing `2 ` does not show "Not found" for a moment. A new line or a comma ends the item as usual. A half-typed word never matches anything (5.2), so partial words do not flash odd foods.
 
 ### 9.3 Added lines
 
@@ -982,7 +984,7 @@ The text field must never wait for the parser. The parser runs on **every** text
 
 | Target | Value |
 |---|---|
-| Where it runs | Parsing and matching run on a background isolate. The text field is never blocked; when a parse finishes after newer typing, its result is discarded and the newer one is shown. |
+| Where it runs | Parsing and matching run on a background isolate. The text field is never blocked. Results arrive in the order the parses were requested, and a result is discarded only if a result for newer text has already been shown. |
 | Search index | Built once in the background at app start: all USDA descriptions, local foods and history counts. Ready within 1 second of launch on the test phones. |
 | Re-parse after one keystroke | p95 of 16 ms or less on the Android test phone. Items whose text did not change reuse their cached result, keyed by item text and a version number that changes whenever user foods, learned matches, aliases or saved meals change. |
 | Full parse of 10 new items | 50 ms or less on the Android test phone. |
@@ -1063,7 +1065,7 @@ Each has two or more reasonable readings. The recommendation is listed first.
    - (b) Add a hand-checked table mapping the most common single words to a food id.
 
 8. **Changing the amount of a typed line in the correction sheet.**
-   - **(a) Recommended:** rewrite the amount (numbers and unit only) in the text.
+   - **(a) Recommended:** rewrite the amount (numbers and unit only) in the text. The unit picker offers only amounts the text can express for that food, the rewrite is checked by re-parsing, and a change the text cannot express is refused (8.3).
    - (b) Keep a sticky amount override and leave the text alone. The text and the line would then disagree.
 
 9. **When learning is written.**
@@ -1130,5 +1132,8 @@ In these places the document was silent or two of its rules disagreed. The lead 
 - Every user name of two or more words is kept whole, whatever words it contains: with a logged cached product "Big Mac", `big mac` is "big mac", not a large "mac". A one-word name gets no protection, so a recipe named "Bowl" does not stop `1 bowl of rice` (2.3).
 - Negation is not applied inside the user's own names: with a food named "No sugar cola", `2 cans no sugar cola` finds that food (2.3, 5.2 step 3).
 - A scanned product's name is protected only once the product has been logged, so a never logged "Large eggs" does not change what `2 large eggs` means (2.3).
+- The unit picker in the correction sheet offers only amounts the text can express for that food. A new amount goes right before the first food word (`I had toast` becomes `I had 2 slice toast`), a leftover `of` is removed when the new amount has no unit, and a change the text cannot express is refused (8.3).
+- Backspacing an amount no longer loses a pick: a changed key suspends the pick while the user keeps editing that item, and the pick comes back if the key matches again (9.1).
+- Trailing spaces or tabs after a not found item at the end of the text keep it under the cursor, so typing `2 ` does not flash "Not found" (9.2).
 - Alias and saved meal names are compared after the same clean-up as typed text, so an alias saved as "pb&j" expands for `pb and j`, and the two cannot be saved as different aliases (6.1).
 - New synonyms: `skim milk` and `nonfat milk` find "Milk, fat free (skim)", `bbq` reads as "barbecue", and `cereal` finds "Cereal, ready-to-eat, NFS" except in `cooked cereal` and `cereal bar` (5.3).
