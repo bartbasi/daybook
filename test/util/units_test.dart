@@ -32,8 +32,8 @@ void main() {
     }
   });
 
-  test('every 0.1 kg from 23.0 to 450.0 survives store and display', () {
-    for (var i = 230; i <= 4500; i++) {
+  test('every 0.1 kg from 22.7 to 453.6 survives store and display', () {
+    for (var i = 227; i <= 4536; i++) {
       final typed = (i / 10).toStringAsFixed(1);
       final value = parseWeight(typed)!;
       final stored = weightToKg(value, UnitSystem.metric);
@@ -41,12 +41,24 @@ void main() {
     }
   });
 
-  test('switching units twice returns the typed number', () {
-    for (var i = 500; i <= 10000; i += 7) {
-      final typed = (i / 10).toStringAsFixed(1);
-      final stored = weightToKg(parseWeight(typed)!, UnitSystem.imperial);
-      formatWeight(stored, UnitSystem.metric); // shown in kg in between
-      expect(formatWeight(stored, UnitSystem.imperial), typed);
+  test('the lb range and the kg range accept the same weights', () {
+    for (var i = 500; i <= 10000; i++) {
+      final kg = lbToKg(i / 10);
+      expect(
+        weightInRange(kgToWeight(kg, UnitSystem.metric), UnitSystem.metric),
+        isTrue,
+        reason: '${i / 10} lb',
+      );
+    }
+    for (var i = 227; i <= 4536; i++) {
+      expect(
+        weightInRange(
+          kgToWeight(i / 10, UnitSystem.imperial),
+          UnitSystem.imperial,
+        ),
+        isTrue,
+        reason: '${i / 10} kg',
+      );
     }
   });
 
@@ -60,20 +72,27 @@ void main() {
     expect(parseWeight('181.85'), 181.9);
   });
 
+  test('parseWeight returns null for absurdly long or large numbers', () {
+    expect(parseWeight('9' * 400), isNull);
+    expect(parseWeight('1${'0' * 308}'), isNull);
+    expect(parseWeight('100001'), isNull);
+    expect(parseWeight('100000'), 100000.0);
+  });
+
   test('parseWeight refuses text that is not a plain positive number', () {
     for (final bad in ['', ' ', '.', 'abc', '-5', '1e3', '1.2.3', '1 000', '+5']) {
       expect(parseWeight(bad), isNull, reason: bad);
     }
   });
 
-  test('range is 50 to 1,000 lb and 23 to 450 kg, inclusive', () {
+  test('range is 50 to 1,000 lb and 22.7 to 453.6 kg, inclusive', () {
     expect(weightInRange(50.0, UnitSystem.imperial), isTrue);
     expect(weightInRange(1000.0, UnitSystem.imperial), isTrue);
     expect(weightInRange(49.9, UnitSystem.imperial), isFalse);
     expect(weightInRange(1000.1, UnitSystem.imperial), isFalse);
-    expect(weightInRange(23.0, UnitSystem.metric), isTrue);
-    expect(weightInRange(450.0, UnitSystem.metric), isTrue);
-    expect(weightInRange(22.9, UnitSystem.metric), isFalse);
-    expect(weightInRange(450.1, UnitSystem.metric), isFalse);
+    expect(weightInRange(22.7, UnitSystem.metric), isTrue);
+    expect(weightInRange(453.6, UnitSystem.metric), isTrue);
+    expect(weightInRange(22.6, UnitSystem.metric), isFalse);
+    expect(weightInRange(453.7, UnitSystem.metric), isFalse);
   });
 }

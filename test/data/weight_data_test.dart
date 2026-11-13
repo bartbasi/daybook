@@ -6,6 +6,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/util/units.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -232,6 +233,25 @@ void main() {
       ]);
     });
 
+    test('after travel the latest is the newest day, not the newest instant',
+        () async {
+      final now = at('2026-11-12', 7, 0, 9);
+      final tokyo = await db.saveWeight(181, imp, now); // Nov 12 07:00 +9
+      final chicago = await db.saveWeight(
+        182,
+        imp,
+        now,
+        at: at('2026-11-11', 20, 0, -6), // a later instant, an earlier day
+      );
+      expect(chicago.measuredAtMs, greaterThan(tokyo.measuredAtMs));
+      expect((await db.latestWeight())!.id, tokyo.id);
+      expect((await db.watchWeights().first).map((r) => r.id), [
+        tokyo.id,
+        chicago.id,
+      ]);
+      expect((await db.watchTrend().first).last.localDate, '2026-11-12');
+    });
+
     test('two weigh-ins at the same instant keep a stable order', () async {
       final now = at('2026-11-12', 7, 0, 0);
       final a = await db.saveWeight(181, imp, now);
@@ -248,20 +268,13 @@ void main() {
         final typed = (i / 10).toStringAsFixed(1);
         final row = await db.saveWeight(parseWeight(typed)!, imp, now);
         expect(formatWeight(row.weightKg, imp), typed);
-        if (i % 97 == 0) {
-          // After the switch to kg and back, nothing was stored differently.
-          formatWeight(row.weightKg, met);
-          final again = (await db.latestWeight())!;
-          expect(again.weightKg, row.weightKg);
-          expect(formatWeight(again.weightKg, imp), typed);
-        }
       }
     });
 
-    test('every 0.1 kg from 23.0 to 450.0 survives store and display',
+    test('every 0.1 kg from 22.7 to 453.6 survives store and display',
         () async {
       final now = at('2026-11-12', 7, 0, 0);
-      for (var i = 230; i <= 4500; i++) {
+      for (var i = 227; i <= 4536; i++) {
         final typed = (i / 10).toStringAsFixed(1);
         final row = await db.saveWeight(parseWeight(typed)!, met, now);
         expect(formatWeight(row.weightKg, met), typed);
@@ -279,6 +292,78 @@ void main() {
       expect(await db.getUnits(), imp);
       expect(await db.select(db.weightEntries).get(), before);
       expect(formatWeight(before.single.weightKg, imp), '181.8');
+    });
+
+    test('a time-only edit made after a unit switch keeps the stored value',
+        () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      final other = at('2026-11-12', 8, 0, 0);
+      final row = await db.saveWeight(180.4, imp, now);
+      await db.setUnits(met);
+      final shown = parseWeight(formatWeight(row.weightKg, met))!; // 81.8
+      final edited = await db.editWeight(row.id, shown, met, now, at: other);
+      expect(edited.weightKg, row.weightKg);
+      expect(edited.measuredAtMs, other.utcMs);
+      expect(formatWeight(edited.weightKg, imp), '180.4');
+    });
+
+    test('a time-only edit keeps an imported value with more precision',
+        () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      final id = await db.into(db.weightEntries).insert(
+        WeightEntriesCompanion.insert(
+          localDate: '2026-11-12',
+          measuredAtMs: now.utcMs,
+          tzOffsetMinutes: 0,
+          weightKg: 81.83,
+          source: const Value('health'),
+          sourceId: const Value('abc'),
+          createdAtMs: now.utcMs,
+          updatedAtMs: now.utcMs,
+        ),
+      );
+      final edited = await db.editWeight(
+        id,
+        81.8,
+        met,
+        now,
+        at: at('2026-11-12', 9, 0, 0),
+      );
+      expect(edited.weightKg, 81.83);
+    });
+
+    test('50.6 lb survives a time-only edit made in kg', () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      final row = await db.saveWeight(50.6, imp, now);
+      expect(formatWeight(row.weightKg, met), '23.0');
+      final edited = await db.editWeight(
+        row.id,
+        23.0,
+        met,
+        now,
+        at: at('2026-11-12', 8, 0, 0),
+      );
+      expect(edited.weightKg, row.weightKg);
+      expect(formatWeight(edited.weightKg, imp), '50.6');
+    });
+
+    test('a changed number in the other unit does change the stored value',
+        () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      final row = await db.saveWeight(180.4, imp, now);
+      final edited = await db.editWeight(row.id, 82.0, met, now);
+      expect(edited.weightKg, 82.0);
+    });
+
+    test('every lb value survives a time-only edit made in kg', () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      final later = at('2026-11-12', 8, 0, 0);
+      for (var i = 500; i <= 10000; i += 13) {
+        final row = await db.saveWeight(i / 10, imp, now);
+        final shown = parseWeight(formatWeight(row.weightKg, met))!;
+        final edited = await db.editWeight(row.id, shown, met, now, at: later);
+        expect(edited.weightKg, row.weightKg, reason: '${i / 10} lb');
+      }
     });
   });
 
@@ -299,10 +384,10 @@ void main() {
       expect(await db.select(db.weightEntries).get(), hasLength(2));
     });
 
-    test('below 23 or above 450 kg is refused, the limits are accepted',
+    test('below 22.7 or above 453.6 kg is refused, the limits are accepted',
         () async {
       final now = at('2026-11-12', 7, 0, 0);
-      for (final bad in [22.9, 0.0, 450.1, 1000.0]) {
+      for (final bad in [22.6, 0.0, 453.7, 1000.0]) {
         await expectLater(
           db.saveWeight(bad, met, now),
           throwsA(isA<WeightOutOfRange>()),
@@ -310,8 +395,8 @@ void main() {
         );
       }
       expect(await db.select(db.weightEntries).get(), isEmpty);
-      await db.saveWeight(23.0, met, now);
-      await db.saveWeight(450.0, met, now);
+      await db.saveWeight(22.7, met, now);
+      await db.saveWeight(453.6, met, now);
       expect(await db.select(db.weightEntries).get(), hasLength(2));
     });
 
@@ -325,6 +410,17 @@ void main() {
       expect(await db.select(db.weightEntries).get(), isEmpty);
       await db.saveWeight(24, met, now);
       expect(await db.select(db.weightEntries).get(), hasLength(1));
+    });
+
+    test('huge numbers are refused with WeightOutOfRange', () async {
+      final now = at('2026-11-12', 7, 0, 0);
+      for (final big in [1e6, 1e300, 1e308, double.maxFinite]) {
+        await expectLater(
+          db.saveWeight(big, imp, now),
+          throwsA(isA<WeightOutOfRange>()),
+        );
+      }
+      expect(await db.select(db.weightEntries).get(), isEmpty);
     });
 
     test('NaN and infinity are refused', () async {

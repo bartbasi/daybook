@@ -27,7 +27,7 @@ class WeightOutOfRange implements Exception {
 extension WeightData on AppDatabase {
   /// The value rounded to one decimal, or throws [WeightOutOfRange].
   double _checked(double value, UnitSystem units) {
-    if (!value.isFinite) throw WeightOutOfRange(value, units);
+    if (!(value.abs() < 1e6)) throw WeightOutOfRange(value, units);
     final v = roundToTenth(value);
     if (!weightInRange(v, units)) throw WeightOutOfRange(value, units);
     return v;
@@ -44,17 +44,19 @@ extension WeightData on AppDatabase {
   }) async {
     final kg = weightToKg(_checked(value, units), units);
     final when = at ?? now;
-    final id = await into(weightEntries).insert(
-      WeightEntriesCompanion.insert(
-        localDate: when.localDate,
-        measuredAtMs: when.utcMs,
-        tzOffsetMinutes: when.offsetMinutes,
-        weightKg: kg,
-        createdAtMs: now.utcMs,
-        updatedAtMs: now.utcMs,
-      ),
-    );
-    return _read(id);
+    return transaction(() async {
+      final id = await into(weightEntries).insert(
+        WeightEntriesCompanion.insert(
+          localDate: when.localDate,
+          measuredAtMs: when.utcMs,
+          tzOffsetMinutes: when.offsetMinutes,
+          weightKg: kg,
+          createdAtMs: now.utcMs,
+          updatedAtMs: now.utcMs,
+        ),
+      );
+      return _read(id);
+    });
   }
 
   /// Changes the weight and, when [at] is given, the date and time. Without
@@ -66,23 +68,32 @@ extension WeightData on AppDatabase {
     Now now, {
     Now? at,
   }) async {
-    final kg = weightToKg(_checked(value, units), units);
-    final changed =
-        await (update(
-          weightEntries,
-        )..where((w) => w.id.equals(id) & w.deletedAtMs.isNull())).write(
-          WeightEntriesCompanion(
-            weightKg: Value(kg),
-            updatedAtMs: Value(now.utcMs),
-            localDate: at == null ? const Value.absent() : Value(at.localDate),
-            measuredAtMs: at == null ? const Value.absent() : Value(at.utcMs),
-            tzOffsetMinutes: at == null
-                ? const Value.absent()
-                : Value(at.offsetMinutes),
-          ),
-        );
-    if (changed == 0) throw StateError('No such weigh-in');
-    return _read(id);
+    final typed = _checked(value, units);
+    return transaction(() async {
+      final old =
+          await (select(weightEntries)
+                ..where((w) => w.id.equals(id) & w.deletedAtMs.isNull()))
+              .getSingleOrNull();
+      if (old == null) throw StateError('No such weigh-in');
+      // The sheet shows the stored weight rounded in the current unit. If the
+      // number is unchanged, keep the stored value exactly, so an edit of the
+      // date or time never loses precision to a unit switch or an import.
+      final kg = typed == kgToWeight(old.weightKg, units)
+          ? old.weightKg
+          : weightToKg(typed, units);
+      await (update(weightEntries)..where((w) => w.id.equals(id))).write(
+        WeightEntriesCompanion(
+          weightKg: Value(kg),
+          updatedAtMs: Value(now.utcMs),
+          localDate: at == null ? const Value.absent() : Value(at.localDate),
+          measuredAtMs: at == null ? const Value.absent() : Value(at.utcMs),
+          tzOffsetMinutes: at == null
+              ? const Value.absent()
+              : Value(at.offsetMinutes),
+        ),
+      );
+      return _read(id);
+    });
   }
 
   /// Marks the row deleted. The row stays so a health sync cannot bring it back.
@@ -110,6 +121,9 @@ extension WeightData on AppDatabase {
       select(weightEntries)
         ..where((w) => w.deletedAtMs.isNull())
         ..orderBy([
+          // Local date first, so a trip west does not make an earlier day
+          // look newer. It matches the trend's last day.
+          (w) => OrderingTerm.desc(w.localDate),
           (w) => OrderingTerm.desc(w.measuredAtMs),
           (w) => OrderingTerm.desc(w.id),
         ]);

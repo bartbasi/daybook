@@ -43,11 +43,14 @@ final _number = RegExp(r'^(\d+\.?\d*|\.\d+)$');
 double? parseWeight(String text) {
   final t = text.trim().replaceAll(',', '.');
   if (!_number.hasMatch(t)) return null;
-  return roundToTenth(double.parse(t));
+  final v = double.parse(t);
+  if (!v.isFinite || v > 100000) return null;
+  return roundToTenth(v);
 }
 
-/// The accepted range: 50.0 to 1,000.0 lb, 23.0 to 450.0 kg, inclusive.
+/// The accepted range: 50.0 to 1,000.0 lb, which is 22.7 to 453.6 kg as
+/// shown, so a weight at either edge is in range in both units. Inclusive.
 bool weightInRange(double value, UnitSystem units) =>
     units == UnitSystem.imperial
     ? value >= 50.0 && value <= 1000.0
-    : value >= 23.0 && value <= 450.0;
+    : value >= 22.7 && value <= 453.6;
