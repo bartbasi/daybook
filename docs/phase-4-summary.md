@@ -48,6 +48,8 @@ Each is the recommended option from the plan's open questions, or a small call m
 18. **Undo of a saved meal keeps what the app learned from it.** If you corrected "toast" to a bread, saved, then tapped Undo, the meal is removed but the correction is still remembered.
 19. **Home lists each meal's foods by the first word of their names** ("Egg, Bread, Butter, Coffee, Cream"). The wireframe showed the words as typed; a stored line keeps the food's name, not the typed words.
 20. **A count with no unit is shown as "2, 100 g".** Some wireframe frames showed "2 egg, 100 g"; the grammar gives a count no unit word.
+21. **On the food screen the text box is always at the top, under the meal chips.** Lines that were not typed (a logged meal being edited, and later scans and chips) are listed under it, before the typed lines. Two wireframe frames drew them above the box; keeping the box fixed is what stops it scrolling out of view while you type.
+22. **Changing one item of a typed saved meal turns it into its items for that meal.** If you type "usual breakfast" and then change or remove one of its items, the saved meal's name is replaced by its items as ordinary lines, and the change applies to that line. The saved meal itself is not altered and nothing is learned from it.
 
 ## Open questions from the plan: answered
 
