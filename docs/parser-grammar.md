@@ -32,7 +32,7 @@ The text box is the source of truth. Every time the text changes, the parser run
 
 1. **Clean up characters** (unicode fractions, `&`, `w/`, curly quotes).
 2. **Split into chunks** at hard separators: new line, comma, semicolon, `+`, `plus`, end of sentence.
-3. **Mark protected phrases** inside each chunk: food names that contain "and" or "with", such as "half and half".
+3. **Mark protected phrases** inside each chunk: a short built-in list of food names such as "half and half", and the user's own names of two or more words (2.3).
 4. **Join number phrases** that contain "and": "one and a half", "a cup and a half".
 5. **Split into pieces** at the remaining soft separators: "and", "&", "with", "w/".
 6. **Split pieces into items** where a new quantity starts after food words (this handles dictation without commas).
@@ -103,7 +103,7 @@ A comma is never a decimal point (see [section 12](#12-limits-and-speed)).
 
 ### 2.3 Protected phrases
 
-A protected phrase is a food name whose words are kept together. Its words are never split, never read as quantities and never dropped as filler (2.6 rule 1); the user's own names are also never read as sizes or units (item 2 below). Protected phrases are found first, longest match first, scanning left to right. A phrase protects only text that contains the whole phrase.
+A protected phrase is a food name whose words are kept together. Its words are never split, never read as quantities and never dropped as filler (2.6 rule 1); the user's own names are also never read as sizes or units (item 2 below). Protected phrases are found first, longest match first, scanning left to right. A phrase protects only text that contains the whole phrase. Phrases are compared ignoring case and accents, the same folding as the name key in 6.1, so `cafe and croissant` is kept whole when the user has a food named "Café and croissant".
 
 The protected list is:
 
@@ -113,7 +113,7 @@ The protected list is:
 
    One more phrase is protected only so that its `a` is never read as a quantity: `a la` (as in "chicken a la king", "pie a la mode").
 
-2. **The user's own names of two or more words**: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. Each is protected in full, whatever words it contains: against splitting, against quantity, size and unit reading, and against filler removal. So with a cached product "Big Mac", `big mac` gives the food words "big mac", not a large "mac"; "Thin Mints" and "Mini Wheats" work the same way. A saved meal called "eggs and toast" stays whole, and with an alias "my oatmeal", the "my" in `I had my oatmeal` is kept.
+2. **The user's own names of two or more words**: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. Each is protected in full, whatever words it contains: against splitting, against quantity, size and unit reading, against filler removal, and against the negation cut (5.2 step 3). A cached Open Food Facts product's name counts only once the user has logged that product at least once, the same condition sort key 2 uses in 5.4; custom foods, recipes, alias phrases and saved meal names always count. So a scanned, never logged product "Large eggs" does not change what `2 large eggs` means (example 38) until it has been logged. With a logged cached product "Big Mac", `big mac` gives the food words "big mac", not a large "mac"; "Thin Mints" and "Mini Wheats" work the same way. A saved meal called "eggs and toast" stays whole, and with an alias "my oatmeal", the "my" in `I had my oatmeal` is kept.
 
    A one-word name needs no protection and gets none, so a recipe named "Bowl" never stops `1 bowl of rice` reading "bowl" as a unit. The one exception is the 2.1 rule that keeps a one-word name containing digits whole (a product named "7up").
 
@@ -406,7 +406,7 @@ The same steps are applied to typed food words and to food descriptions:
 
 1. Lower case. Accents removed (é becomes e). Apostrophes removed.
 2. Split into words made of letters, digits and `%`. Descriptions are also split into **segments** at commas and opening brackets.
-3. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box. An item whose words are all removed by this cut gives no line at all (8.1): `coffee with no sugar` splits at "with", and the second item, "no sugar", gives no line, so it cannot block Save.
+3. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box. The cut does not apply inside a protected user name (2.3): with a custom food named "No sugar cola", `no sugar cola` and `2 cans no sugar cola` find that food. An item with no amount whose words are all removed by this cut gives no line at all (8.1): `coffee with no sugar` splits at "with", and the second item, "no sugar", gives no line, so it cannot block Save. With a typed amount, such an item is not found: `2 no sugar` gives a not found line.
 4. **Synonyms** (5.3) are applied to typed text. This comes before filler words are removed, because "pb and j" needs its "and".
 5. **Filler words** are dropped from typed text: `a an the of and or with in on for to my i im had have ate eaten drank then also just made prepared topped plus about around approximately roughly`.
 6. **Plurals**: words of 4 letters or more lose a plural ending, in this order:
@@ -561,6 +561,7 @@ If two saved meals have the same normalized name, the newest (highest id) wins. 
 - A multiplier or range works the same way (a range also adds the "Assumed" marker to the header).
 - `serving` or `portion` as the unit means the same as a plain quantity: `1 serving usual breakfast`.
 - Any other unit means the text is not a saved meal. It is matched as food text instead.
+- A size word before the name (`large usual breakfast`) also means the text is not a saved meal; it is read as ordinary food text.
 
 ### 6.3 Precedence
 
@@ -646,7 +647,7 @@ Two more markers describe where a food came from rather than a state:
 
 A line can carry "Guess" and "Assumed" together, or "Your pick" and "Assumed". Precedence for the single state name used in prose and tests: not found, then alias or saved meal, then guess, then amount assumed, then matched.
 
-An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`. The same goes for any item with neither food words nor an amount: a vague word alone (`some`), or a lone `a` or `an`, which on its own is not an amount (2.6 rule 5). So `vitamin a` gives one line, for "vitamin". An item that has an amount but no food words is still not found, as in the table above and example 61. An item whose words are all removed by the negation cut (5.2 step 3) also gives no line: in `coffee with no sugar`, "no sugar" gives no line.
+An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`. The same goes for any item with neither food words nor an amount: a vague word alone (`some`), or a lone `a` or `an`, which on its own is not an amount (2.6 rule 5). So `vitamin a` gives one line, for "vitamin". An item that has an amount but no food words is still not found, as in the table above and example 61. An item with no amount whose words are all removed by the negation cut (5.2 step 3) also gives no line: in `coffee with no sugar`, "no sugar" gives no line. With a typed amount, such an item has an amount but no food words, so it is not found: `2 no sugar` gives a not found line.
 
 ### 8.2 Not by color alone
 
@@ -756,12 +757,14 @@ soft_sep      = "and" | "with" ;                  (* "&" and "w/" were replaced 
 piece         = item , { item } ;                 (* split by rule 2.6 *)
 
 item          = { lead_filler } , [ amount ] , { lead_filler } , food , [ post_amount ] , [ negation ]
-              | { lead_filler } , amount          (* no food words: not found. A vague word or a
+              | { lead_filler } , amount , [ negation ]
+                                                  (* no food words: not found. A vague word or a
                                                      lone "a" alone is no amount and gives no line: 8.1 *)
-              | { lead_filler } , negation ;      (* every word cut by negation: no line, 8.1 *)
+              | { lead_filler } , negation ;      (* no amount, every word cut by negation: no line, 8.1 *)
 lead_filler   = filler - ( "a" | "an" ) ;         (* "a" before any food word is the quantity 1 *)
 
-amount        = [ lead_mult ] , measure , [ trail_mult ] ;
+amount        = lead_mult , [ measure ] , [ trail_mult ]
+              | measure , [ trail_mult ] ;
 measure       = quantity , [ size ] , [ unit , [ unit_half | unit_add , { unit_add } ] ] , [ "of" ]
               | size , [ unit ] , [ "of" ]          (* "large coffee" means 1 large *)
               | unit , "of"                       (* "cup of coffee" means 1 cup *)
@@ -1116,12 +1119,14 @@ In these places the document was silent or two of its rules disagreed. The lead 
 - The antipasto food gets 1 cup as its default, because its two "Quantity not specified" labels are not the exact default label (4.4).
 - The portion pickers hide every label that starts with "Quantity not specified" (4.4, 8.3, 13).
 - A learned match's key leaves out the negation cut and synonyms, so `coffee without sugar` and `coffee` have different keys (7.1).
-- An item whose words are all cut by negation gives no line: in `coffee with no sugar`, "no sugar" gives no line and cannot block Save (5.2 step 3, 8.1).
+- An item with no amount whose words are all cut by negation gives no line: in `coffee with no sugar`, "no sugar" gives no line and cannot block Save. With an amount it is not found: `2 no sugar` (5.2 step 3, 8.1).
 - A lone describing word after a separator is not handled specially: `coffee, black` reads "black" as its own item, which may match a food as a guess (12.1).
 - A product name ending in a size or percentage still fits the typed words: a logged "Fage Greek yogurt 0%" comes first for `greek yogurt` (5.4 key 2).
 - A user food with a base amount of zero or less is never matched (4.5).
 - A default shows the portion its rule picked when that portion's amount is 1 ("1 leek"), and only otherwise a portion of the same weight ("1 small" for coffee) (4.6).
 - A bare count compares the portion's word with the plural rule, so `2 cookies` uses a "1 cookie" portion (4.5 rule 2).
-- Every user name of two or more words is kept whole, whatever words it contains: with a cached product "Big Mac", `big mac` is "big mac", not a large "mac". A one-word name gets no protection, so a recipe named "Bowl" does not stop `1 bowl of rice` (2.3).
+- Every user name of two or more words is kept whole, whatever words it contains: with a logged cached product "Big Mac", `big mac` is "big mac", not a large "mac". A one-word name gets no protection, so a recipe named "Bowl" does not stop `1 bowl of rice` (2.3).
+- Negation is not applied inside the user's own names: with a food named "No sugar cola", `2 cans no sugar cola` finds that food (2.3, 5.2 step 3).
+- A scanned product's name is protected only once the product has been logged, so a never logged "Large eggs" does not change what `2 large eggs` means (2.3).
 - Alias and saved meal names are compared after the same clean-up as typed text, so an alias saved as "pb&j" expands for `pb and j`, and the two cannot be saved as different aliases (6.1).
 - New synonyms: `skim milk` and `nonfat milk` find "Milk, fat free (skim)", `bbq` reads as "barbecue", and `cereal` finds "Cereal, ready-to-eat, NFS" except in `cooked cereal` and `cereal bar` (5.3).
