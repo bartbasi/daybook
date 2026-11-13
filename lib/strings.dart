@@ -255,10 +255,27 @@ class S {
       'Your pick is remembered when you save the meal.';
   static const sheetSearchHint = 'Search all foods';
   static const sheetNoResults = 'No foods found.';
-  static String sheetNothingMatches(String words, {bool canScan = false}) =>
-      'Nothing in the food list or your own foods matches "$words". '
-      'Search with other words${canScan ? ', or scan the package' : ''}.';
+  static String sheetNothingMatches(
+    String words, {
+    bool canScan = false,
+    bool canCreate = false,
+  }) {
+    final ways = [
+      if (canScan) 'scan the package',
+      if (canCreate) 'make it your own food',
+    ];
+    final tail = switch (ways.length) {
+      0 => '',
+      1 => ', or ${ways[0]}',
+      _ => ', ${ways[0]}, or ${ways[1]}',
+    };
+    return 'Nothing in the food list or your own foods matches "$words". '
+        'Search with other words$tail.';
+  }
+
   static const sheetScan = 'Scan its barcode';
+  static String sheetCreate(String name) => 'Create a food called "$name"';
+  static const sheetAddOwn = 'Add it as your own food';
 
   // Barcode scanning (food-entry frames 9, 10 and 7).
   static const scanButton = 'Scan';
@@ -584,6 +601,121 @@ class S {
   static const savedMealsLoadFailed = 'Could not read the saved meals.';
   static const savedMealDeleteFailed =
       'Could not delete. The saved meal is still there.';
+
+  // My foods and recipes (food-editor frames 1 and 2).
+  static const moreMyFoods = 'My foods and recipes';
+  static const moreMyFoodsSub = 'Foods you made and recipes';
+  static const myFoodsTitle = 'My foods and recipes';
+  static const myFoodsNew = '+ New';
+  static const myFoodsNewLabel = 'New food or recipe';
+  static const myFoodsNewFood = 'New food';
+  static const myFoodsNewRecipe = 'New recipe';
+  static const myFoodsEmpty =
+      'Nothing here yet. Tap + New to make a food or a recipe.';
+  static const myFoodsHelp =
+      'A food or recipe you make here can be typed in Food entry like any '
+      'other food.';
+  static const myFoodsLoadFailed = 'Could not read your foods.';
+  static const myFoodsMenu = 'More options';
+  static const foodDelete = 'Delete food';
+  static const recipeDelete = 'Delete recipe';
+  static String myFoodSaved(String name) => '"$name" saved.';
+  static String myFoodDeleted(String name) => '"$name" deleted.';
+  static const myFoodUndoFailed = 'Could not undo. It is still deleted.';
+  static String myFoodBarcodeTaken(String name) =>
+      '"$name" is back. Its barcode now belongs to another food, so it was '
+      'left off.';
+  static const myFoodDeleteFailed = 'Could not delete. It is still there.';
+  static const myFoodWriteFailed =
+      'Could not save. Nothing was changed. Try again.';
+
+  /// '120 kcal per serving', with the brand in front when there is one.
+  static String foodRowSub(String? brand, double? kcalValue, String basis) =>
+      '${brand == null ? '' : '$brand, '}${kcal(kcalValue)} $basis';
+  static const basisServing = 'per serving';
+  static const basisPer100g = 'per 100 g';
+  static const basisPer100ml = 'per 100 ml';
+
+  /// 'Recipe, 4 servings, 309 kcal a serving'.
+  static String recipeRowSub(double servings, double? kcalPerServing) =>
+      'Recipe, ${servingsText(servings)}, ${kcal(kcalPerServing)} a serving';
+  static String servingsText(double n) =>
+      n == 1 ? '1 serving' : '${quantityText(n)} servings';
+  static String myFoodRowLabel(String name, String sub) =>
+      '$name. $sub. Double tap to edit.';
+
+  /// A number typed back into a field: up to 4 decimals, no trailing zeros.
+  static String numberText(double v) => _trimmed(v, 4);
+
+  // The custom food editor.
+  static const foodEditNew = 'New food';
+  static const foodEditName = 'Name';
+  static const foodEditNameEmpty = 'Give it a name.';
+  static const foodEditBrand = 'Brand (optional)';
+  static const foodEditBarcode = 'Barcode (optional)';
+  static const foodEditBarcodeBad =
+      'That barcode does not look right. Check the digits under the barcode.';
+  static const foodEditBarcodeTaken = 'Another food already has this barcode.';
+  static const foodEditFor = 'Nutrition is for';
+  static const foodEditAmount = 'Amount';
+  static const foodEditUnit = 'Unit';
+  static const foodUnitServing = 'serving';
+  static const foodUnitG = 'grams';
+  static const foodUnitMl = 'milliliters';
+  static const foodEditAmountBad = 'Enter an amount above 0.';
+  static const foodEditWeight = 'One serving weighs (optional)';
+  static const foodEditWeightBad = 'Enter a weight above 0, or leave it empty.';
+  static const foodEditCaloriesEmpty = 'Enter the calories.';
+  static const foodEditNumberBad = 'Enter a number, or leave it empty.';
+  static const foodEditFix =
+      'Some fields need a look. Each one says what is wrong.';
+  static const foodEditMore = 'More nutrients';
+  static String foodEditMoreHint(int others) =>
+      'Fiber, sugar, sodium and $others more. Optional.';
+  static const foodEditPortions = 'Portions';
+  static const foodEditPortionsNone = 'None yet.';
+  static const foodEditPortionsNeedWeight =
+      'Give the weight of one serving above to use portions.';
+  static const foodEditPortionAdd = '+ Add';
+  static const foodEditPortionName = 'Portion name';
+  static const foodEditPortionWeight = 'Weight';
+  static const foodEditPortionBad =
+      'Give each portion a name and a weight above 0.';
+  static String foodEditPortionRemove(int n) => 'Remove portion $n';
+
+  // The recipe editor.
+  static const recipeEditNew = 'New recipe';
+  static const recipeName = 'Name';
+  static const recipeNameEmpty = 'Give it a name.';
+  static const recipeIngredients = 'Ingredients';
+  static const recipeIngredientsEmpty = 'No ingredients yet.';
+  static const recipeBoxHint = 'Type to add ingredients';
+  static const recipeBoxLabel = 'Ingredients to add';
+  static const recipeMakes = 'Makes';
+  static const recipeServingsUnit = 'servings';
+  static const recipeServingsBad =
+      'Enter how many servings it makes, a number above 0.';
+  static const recipeNeedsIngredients = 'Add at least one ingredient.';
+  static const recipeIngredientUnpriced =
+      'An ingredient could not be worked out. Tap it to remove it or pick '
+      'another food.';
+  static const recipeFailed = 'Could not save the recipe. Try again.';
+  static String recipeKcalServing(double kcalValue) =>
+      '${count(kcalValue.round())} kcal a serving';
+  static String recipeWhole(double kcalValue) =>
+      'Whole: ${count(kcalValue.round())} kcal';
+  static String recipeSpokenTotals(
+    double kcalPerServing,
+    double? p,
+    double? c,
+    double? f,
+    double whole,
+    int notCounted,
+  ) =>
+      'Each serving: ${count(kcalPerServing.round())} calories, '
+      'protein ${_spokenGrams(p)}, carbs ${_spokenGrams(c)}, '
+      'fat ${_spokenGrams(f)}. Whole recipe: ${count(whole.round())} '
+      'calories.${notCounted > 0 ? ' ${itemsNotCounted(notCounted)}.' : ''}';
 
   // Home: the meals.
   static const homeMeals = 'Meals';

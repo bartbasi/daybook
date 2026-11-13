@@ -8,10 +8,11 @@ import '../../app_scope.dart';
 import '../../data/food_library_data.dart';
 import '../../strings.dart';
 import '../data_check_screen.dart';
+import '../my_foods/my_foods_screen.dart';
 import '../saved_meals/saved_meals_screen.dart';
 
-/// Things set up once and changed rarely: the saved meals, and for now the
-/// Data check screen.
+/// Things set up once and changed rarely: the saved meals, the foods and
+/// recipes you made, and for now the Data check screen.
 class MoreScreen extends StatefulWidget {
   const MoreScreen({super.key});
 
@@ -61,6 +62,15 @@ class _MoreScreenState extends State<MoreScreen> {
                   builder: (_) => const SavedMealsScreen(),
                 ),
               ),
+            ),
+          ),
+          ListTile(
+            minTileHeight: 56,
+            title: const Text(S.moreMyFoods),
+            subtitle: const Text(S.moreMyFoodsSub),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const MyFoodsScreen()),
             ),
           ),
           ListTile(

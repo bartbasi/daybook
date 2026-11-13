@@ -13,6 +13,7 @@ import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/util/units.dart';
 import 'package:daybook/screens/home/home_screen.dart';
 import 'package:daybook/screens/more/more_screen.dart';
+import 'package:daybook/screens/my_foods/my_foods_screen.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/screens/weight/weight_tab.dart';
 import 'package:drift/native.dart';
@@ -481,6 +482,23 @@ void main() {
     expect(selectedTab(tester), 0);
   });
 
+  appTest('More has a My foods and recipes row that opens its list, with no '
+      'tab bar', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
+    await tester.pumpAndSettle();
+    expect(find.text('My foods and recipes'), findsOneWidget);
+    expect(find.text('Foods you made and recipes'), findsOneWidget);
+    await tester.tap(find.text('My foods and recipes'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MyFoodsScreen), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(
+      find.text('Nothing here yet. Tap + New to make a food or a recipe.'),
+      findsOneWidget,
+    );
+  });
+
   for (final width in [344.0, 673.0]) {
     appTest('shell and More have no overflow at ${width.toInt()} dp', (
       tester,
@@ -498,6 +516,11 @@ void main() {
       );
       expect(saved.height, greaterThanOrEqualTo(48));
       expect(saved.width, lessThanOrEqualTo(600));
+      final mine = tester.getSize(
+        find.widgetWithText(ListTile, 'My foods and recipes'),
+      );
+      expect(mine.height, greaterThanOrEqualTo(48));
+      expect(mine.width, lessThanOrEqualTo(600));
     });
   }
 

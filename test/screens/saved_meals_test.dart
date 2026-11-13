@@ -481,6 +481,27 @@ void main() {
       expect((await detail(tester, m.id)).items, hasLength(2));
     });
 
+    appTest('the sheet of a not found item has no Scan and no Create a food: '
+        "those are Food entry's", (tester) async {
+      await usualBreakfast(tester);
+      await openApp(tester);
+      await goToList(tester);
+      await openEditor(tester, 'Usual breakfast');
+      await type(tester, '1 zorbo, 1 apple');
+      await tap(tester, find.widgetWithText(FilledButton, 'Fix 1 item'));
+      expect(sheet(), findsOneWidget);
+      expect(
+        inSheet(find.textContaining('Nothing in the food list')),
+        findsOneWidget,
+      );
+      expect(inSheet(find.text('Scan its barcode')), findsNothing);
+      expect(inSheet(find.textContaining('Create a food')), findsNothing);
+      expect(
+        inSheet(find.textContaining('make it your own food')),
+        findsNothing,
+      );
+    });
+
     appTest('change an item through the sheet and save: only that item '
         'changes', (tester) async {
       final m = await usualBreakfast(tester);

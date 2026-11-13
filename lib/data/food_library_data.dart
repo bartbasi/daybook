@@ -660,17 +660,36 @@ extension FoodLibraryData on AppDatabase {
 
   /// Archives a food (or brings it back with [archived] false). Foods are
   /// never deleted, because logged meals and saved meals point to them.
+  ///
+  /// Archiving frees the food's barcode (the column is unique, and a scan
+  /// must not find a food that cannot be used). Bringing a food back with
+  /// [restoreBarcode] puts that barcode back unless another food has it now;
+  /// check the returned food's barcode to see which happened.
   Future<FoodDetail> archiveFood(
     int id,
     Now now, {
     bool archived = true,
-  }) async {
+    String? restoreBarcode,
+  }) => transaction(() async {
+    Value<String?> barcode = const Value.absent();
+    if (archived) {
+      barcode = const Value(null);
+    } else if (restoreBarcode != null) {
+      final taken = await (select(
+        foods,
+      )..where((f) => f.barcode.equals(restoreBarcode))).getSingleOrNull();
+      if (taken == null || taken.id == id) barcode = Value(restoreBarcode);
+    }
     final changed = await (update(foods)..where((f) => f.id.equals(id))).write(
-      FoodsCompanion(archived: Value(archived), updatedAtMs: Value(now.utcMs)),
+      FoodsCompanion(
+        archived: Value(archived),
+        barcode: barcode,
+        updatedAtMs: Value(now.utcMs),
+      ),
     );
     if (changed == 0) throw StateError('No such food');
     return (await loadFood(id))!;
-  }
+  });
 
   Future<FoodDetail?> loadFood(int id) async {
     final rows = await (select(foods)..where((f) => f.id.equals(id))).get();

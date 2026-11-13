@@ -78,6 +78,7 @@ class CorrectionSheet extends StatefulWidget {
     required this.tap,
     required this.handle,
     this.scan,
+    this.create,
   });
 
   final CorrectionHost host;
@@ -85,8 +86,22 @@ class CorrectionSheet extends StatefulWidget {
 
   /// "Scan its barcode" on a not found line: scans a product and answers with
   /// its food ref, or with a plain message when nothing was found (both null
-  /// when the scan was cancelled). Null hides the button.
-  final Future<({String? ref, String? message})> Function()? scan;
+  /// when the scan was cancelled). [barcode] is set when Open Food Facts has no
+  /// product for it: the sheet then offers "Add it as your own food". Null
+  /// hides the button.
+  final Future<({String? ref, String? message, String? barcode})> Function()?
+  scan;
+
+  /// "Create a food called ..." and "Add it as your own food" on a not found
+  /// line: opens the food editor (with [name] or [barcode] filled in) and
+  /// answers with the new food's ref once it is saved and known to the
+  /// parser, or with a plain message; both null when the editor was cancelled.
+  /// Null hides both buttons.
+  final Future<({String? ref, String? message})> Function({
+    String? name,
+    String? barcode,
+  })?
+  create;
 
   /// The handle the screen had when the sheet opened.
   final SessionHandle? handle;
@@ -112,6 +127,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   var _closed = false;
   var _busy = false;
   String? _scanMessage;
+  String? _scanBarcode;
   final _searchKey = GlobalKey();
 
   LineTap get _tap => widget.tap;
@@ -413,14 +429,17 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
     final scan = widget.scan;
     if (scan == null || _busy || _closed) return;
     _busy = true;
-    ({String? ref, String? message}) result;
+    ({String? ref, String? message, String? barcode}) result;
     try {
       result = await scan();
     } finally {
       _busy = false;
     }
     if (!mounted || _closed) return;
-    setState(() => _scanMessage = result.message);
+    setState(() {
+      _scanMessage = result.message;
+      _scanBarcode = result.barcode;
+    });
     final ref = result.ref;
     if (ref == null) return;
     await _act(() => widget.host.sheetPick(_tap, ref, marker: Marker.scanned));
@@ -443,16 +462,61 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
               padding: const EdgeInsets.only(top: 8),
               child: Semantics(liveRegion: true, child: Text(_scanMessage!)),
             ),
+          if (_scanBarcode != null && widget.create != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                ),
+                onPressed: () => _create(barcode: _scanBarcode),
+                child: const Text(S.sheetAddOwn, textAlign: TextAlign.center),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  // 2.12 "Create a food called ...": a button here that opens the custom food
-  // editor with `_line.foodText` as the name; when it is saved, send the
-  // snapshot, wait the same way, and call `widget.host.sheetPick(_tap, ref)`
-  // (marked "Your pick") inside `_act`.
-  static const _createSeam = SizedBox.shrink();
+  // "Create a food called ..." (task 2.12), shown on a not found typed line
+  // only. The screen opens the food editor, and once the food is saved sends
+  // the user data that holds it and waits for this box's result (plan rule
+  // 7); the new food then becomes this item's food, marked Your pick, exactly
+  // as a pick from the search. A cancel or a message leaves the sheet open.
+  // "Add it as your own food" after a scan finds nothing goes the same way,
+  // with the barcode filled in instead of the name.
+  String get _createName => (_line.foodText ?? _tap.typedText ?? '').trim();
+
+  Future<void> _create({String? name, String? barcode}) async {
+    final create = widget.create;
+    if (create == null || _busy || _closed) return;
+    _busy = true;
+    ({String? ref, String? message}) result;
+    try {
+      result = await create(name: name, barcode: barcode);
+    } finally {
+      _busy = false;
+    }
+    if (!mounted || _closed) return;
+    // A cancel leaves the sheet, and any message in it, as it was.
+    if (result.message != null) setState(() => _scanMessage = result.message);
+    final ref = result.ref;
+    if (ref == null) return;
+    await _act(() => widget.host.sheetPick(_tap, ref));
+  }
+
+  Widget _createPart() {
+    final name = _createName;
+    if (widget.create == null || name.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+        onPressed: () => _create(name: name),
+        child: Text(S.sheetCreate(name), textAlign: TextAlign.center),
+      ),
+    );
+  }
 
   // Layout.
 
@@ -579,7 +643,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       const SizedBox(height: 8),
       ..._searchPart(autofocus: true),
       _scanPart(),
-      _createSeam,
+      _createPart(),
     ];
   }
 
@@ -711,6 +775,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
                 ? S.sheetNothingMatches(
                     _lastQuery,
                     canScan: widget.scan != null,
+                    canCreate: widget.create != null,
                   )
                 : S.sheetNoResults,
           ),

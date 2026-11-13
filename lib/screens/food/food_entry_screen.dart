@@ -19,6 +19,7 @@ import '../../parser/parse_worker.dart';
 import '../../strings.dart';
 import '../../util/dates.dart';
 import '../../util/units.dart';
+import '../my_foods/food_editor.dart';
 import '../weight/weight_sheet.dart';
 import 'barcode_scan_screen.dart';
 import 'confirm_bar.dart';
@@ -46,6 +47,9 @@ import 'meal_chips.dart';
 //   2.11 The Scan button in the top bar ([_scanButton]) adds a scanned product
 //        as an added line; "Scan its barcode" in the not found sheet makes it
 //        that item's food ([sheetScan]).
+//   2.12 "Create a food called ..." in the not found sheet and "Add it as your
+//        own food" after a barcode is not found open the custom food editor
+//        ([sheetCreate]); the new food is picked like any other.
 //   3.2  [_leftTodaySeam] in the totals bar: the "left today" line.
 
 /// A line that is not typed: it holds its food and amount itself (grammar 9.3).
@@ -292,9 +296,14 @@ class FoodEntryScreen extends StatefulWidget {
 }
 
 class _Notice {
-  const _Notice(this.text, [this.undo]);
+  const _Notice(this.text, [this.undo, this.actionLabel, this.onAction]);
   final String text;
   final Future<void> Function()? undo;
+
+  /// A second button beside the message (not Undo), such as "Add it as your
+  /// own food" after a barcode is not found.
+  final String? actionLabel;
+  final VoidCallback? onAction;
 }
 
 class _Signal extends ChangeNotifier {
@@ -722,6 +731,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
           tap: tap,
           handle: _handle,
           scan: sheetScan,
+          create: sheetCreate,
         ),
       );
     } finally {
@@ -1138,10 +1148,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// found): a scan while one is running does nothing.
   var _scanning = false;
 
-  /// Task 2.12 adds "Add it as your own food" next to the message, with
-  /// [barcode] filled in. For now there is only the message.
-  void _productNotFound(String barcode) {}
-
   /// Sends the user data that holds a product just saved, and waits for this
   /// box's result for it (plan rule 7), so the product can be priced or
   /// picked. False when it could not be sent.
@@ -1168,8 +1174,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// Opens the scan screen, looks the product up and saves it. The ref of its
   /// food when it is saved and known to the parser; a plain message when not;
   /// both null when the user cancelled or a scan was already running.
-  Future<({String? ref, String? message, bool serving})> _scanFood() async {
-    const none = (ref: null, message: null, serving: true);
+  Future<({String? ref, String? message, bool serving, String? barcode})>
+  _scanFood() async {
+    const none = (ref: null, message: null, serving: true, barcode: null);
     if (_scanning || _busy || _closed) return none;
     setState(() => _scanning = true);
     final hadFocus = _focus.hasFocus;
@@ -1178,17 +1185,26 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       if (!mounted || _closed || out == null) return none;
       switch (out) {
         case ScanMessage():
-          final code = out.barcode;
-          if (code != null) _productNotFound(code);
-          return (ref: null, message: out.message, serving: true);
+          return (
+            ref: null,
+            message: out.message,
+            serving: true,
+            barcode: out.barcode,
+          );
         case ScanFound():
           if (!await _publishUserData()) {
-            return (ref: null, message: S.foodSheetRefusedFood, serving: true);
+            return (
+              ref: null,
+              message: S.foodSheetRefusedFood,
+              serving: true,
+              barcode: null,
+            );
           }
           return (
             ref: 'local:${out.foodId}',
             message: null,
             serving: out.serving,
+            barcode: null,
           );
       }
     } finally {
@@ -1200,9 +1216,62 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   }
 
   /// "Scan its barcode" in the not found sheet.
-  Future<({String? ref, String? message})> sheetScan() async {
+  Future<({String? ref, String? message, String? barcode})> sheetScan() async {
     final r = await _scanFood();
-    return (ref: r.ref, message: r.message);
+    return (ref: r.ref, message: r.message, barcode: r.barcode);
+  }
+
+  /// True while the food editor is open from here: a second tap on a button
+  /// that opens it does nothing.
+  var _creating = false;
+
+  /// "Create a food called ..." and "Add it as your own food": opens the food
+  /// editor with [name] or [barcode] filled in. When the food is saved, sends
+  /// the user data that holds it and waits for this box's result (plan rule
+  /// 7), then answers with its ref. Both null when the editor was cancelled.
+  Future<({String? ref, String? message})> sheetCreate({
+    String? name,
+    String? barcode,
+  }) async {
+    const none = (ref: null, message: null);
+    if (_creating || _busy || _closed) return none;
+    setState(() => _creating = true);
+    try {
+      final out = await Navigator.of(context).push<MyFoodResult>(
+        MaterialPageRoute(
+          builder: (_) => FoodEditor(name: name, barcode: barcode),
+        ),
+      );
+      if (!mounted || _closed || out is! MyFoodSaved) return none;
+      if (!await _publishUserData()) {
+        return (ref: null, message: S.foodSheetRefusedFood);
+      }
+      return (ref: 'local:${out.food.food.id}', message: null);
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
+  }
+
+  /// "Add it as your own food" on the message under the Scan button: the new
+  /// food is one added line at 1 serving, not marked Scanned (it has no Open
+  /// Food Facts credit).
+  Future<void> _addOwnLine(String barcode) async {
+    final r = await sheetCreate(barcode: barcode);
+    if (!mounted) return;
+    final message = r.message;
+    if (message != null) return _showNotice(_Notice(message));
+    final ref = r.ref;
+    if (ref == null) return;
+    setState(() => _foodsPricing++);
+    final ({Line line, bool reset})? priced;
+    try {
+      priced = await _priceFood(ref, tries: const [AmountTry(1, 'serving')]);
+    } finally {
+      if (mounted) setState(() => _foodsPricing--);
+    }
+    if (!mounted || _closed) return;
+    if (priced == null) return _refused(S.foodSheetRefusedFood);
+    addLines([AddedLine(priced.line)]);
   }
 
   /// The Scan button: a scanned product becomes one added line, 1 serving,
@@ -1211,7 +1280,19 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     final r = await _scanFood();
     if (!mounted) return;
     final message = r.message;
-    if (message != null) return _showNotice(_Notice(message));
+    if (message != null) {
+      final code = r.barcode;
+      return _showNotice(
+        code == null
+            ? _Notice(message)
+            : _Notice(
+                message,
+                null,
+                S.sheetAddOwn,
+                () => unawaited(_addOwnLine(code)),
+              ),
+      );
+    }
     final ref = r.ref;
     if (ref == null) return;
     setState(() => _foodsPricing++);
@@ -1676,6 +1757,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                         ConfirmBar(
                           message: _notice!.text,
                           onUndo: _notice!.undo == null ? null : _undoNotice,
+                          actionLabel: _notice!.actionLabel,
+                          onAction: _notice!.onAction,
                         ),
                       // What is left is shared by the box and the lines. The
                       // box stays in a fixed area, outside the scrolling

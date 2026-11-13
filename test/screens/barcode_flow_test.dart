@@ -21,6 +21,7 @@ import 'package:daybook/screens/food/barcode_scan_screen.dart';
 import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
+import 'package:daybook/screens/my_foods/food_editor.dart';
 import 'package:daybook/strings.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
@@ -370,6 +371,7 @@ void main() {
       expect(scanScreen(), findsNothing);
       expect(tiles(), findsNothing);
       expect(find.text('No product found for 0123456789012.'), findsOneWidget);
+      expect(find.text('Add it as your own food'), findsOneWidget);
       expect(await foodRows(tester), isEmpty);
       expect(requests, hasLength(1));
     });
@@ -597,7 +599,9 @@ void main() {
       await openFood(tester);
       await openNotFoundSheet(tester);
       expect(
-        inSheet(find.textContaining('or scan the package')),
+        inSheet(
+          find.textContaining('scan the package, or make it your own food'),
+        ),
         findsOneWidget,
       );
       await scan(
@@ -684,6 +688,186 @@ void main() {
       expect(sheet(), findsOneWidget);
       expect(requests, isEmpty);
       expect(find.text('Not found'), findsOneWidget);
+    });
+  });
+
+  group('add it as your own food', () {
+    const code = '0123456789012';
+    Finder editor() => find.byType(FoodEditor);
+    Finder field(String label) => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == label,
+    );
+    Finder addOwn() =>
+        find.widgetWithText(TextButton, 'Add it as your own food');
+
+    Future<void> notFound(WidgetTester tester) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, code);
+      expect(find.text('No product found for $code.'), findsOneWidget);
+    }
+
+    Future<void> tap(WidgetTester tester, Finder f) async {
+      await tester.tap(f);
+      await settle(tester);
+    }
+
+    Future<void> openNotFoundSheet(WidgetTester tester) async {
+      await type(tester, '2 eggs, 1 zorbo, 1 apple');
+      await tap(tester, find.text('Fix 1 item'));
+      expect(sheet(), findsOneWidget);
+    }
+
+    Future<void> makeFood(WidgetTester tester) async {
+      await tester.enterText(field('Name'), 'Zorbo bar');
+      await tester.enterText(field('Calories'), '210');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await settleMore(tester);
+    }
+
+    appTest('the message has the button, 48 dp, and it opens the editor with '
+        'the barcode in its stored form', (tester) async {
+      await notFound(tester);
+      expect(addOwn(), findsOneWidget);
+      expect(tester.getSize(addOwn()).height, greaterThanOrEqualTo(48));
+      await tap(tester, addOwn());
+      expect(editor(), findsOneWidget);
+      expect(
+        tester.widget<TextField>(field('Barcode (optional)')).controller!.text,
+        code,
+      );
+      expect(tester.widget<TextField>(field('Name')).controller!.text, '');
+    });
+
+    appTest('a 12 digit scan is filled in as its 13 digit form', (
+      tester,
+    ) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester);
+      await openFood(tester);
+      await scan(tester, '036000291452');
+      await tap(tester, addOwn());
+      expect(
+        tester.widget<TextField>(field('Barcode (optional)')).controller!.text,
+        '0036000291452',
+      );
+    });
+
+    appTest('saving adds the food as an added line at 1 serving, not marked '
+        'Scanned, with no Open Food Facts credit; the next scan finds it with '
+        'no request', (tester) async {
+      await notFound(tester);
+      await tap(tester, addOwn());
+      await makeFood(tester);
+      expect(editor(), findsNothing);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      expect(tiles(), findsOneWidget);
+      final line = lineOf(tester, 0);
+      expect(line.foodName, 'Zorbo bar');
+      expect(line.quantity, 1);
+      expect(line.markers, isNot(contains(Marker.scanned)));
+      expect(line.markers, isNot(contains(Marker.assumed)));
+      expect(find.text('Scanned'), findsNothing);
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsNothing);
+      expect(find.text('Added'), findsOneWidget);
+      expect(line.nutrients[Nutrients.energy], 210);
+      expect(requests, hasLength(1));
+
+      await scan(tester, code);
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(2));
+      expect(lineOf(tester, 1).foodRef, line.foodRef);
+      expect(lineOf(tester, 1).markers, contains(Marker.scanned));
+
+      await tester.tap(saveButton());
+      await settleMore(tester);
+      final meal = await theMeal(tester);
+      final foods = await foodRows(tester);
+      expect(foods.single.kind, 'custom');
+      expect(foods.single.barcode, code);
+      expect(meal.entries, hasLength(2));
+      expect(meal.entries.first.entry.foodRef, 'local:${foods.single.id}');
+      expect(
+        await real(tester, () => db.select(db.learnedMatches).get()),
+        isEmpty,
+      );
+    });
+
+    appTest('cancelling the editor adds nothing and creates nothing', (
+      tester,
+    ) async {
+      await notFound(tester);
+      await tap(tester, addOwn());
+      await tester.pageBack();
+      await settleMore(tester);
+      expect(editor(), findsNothing);
+      expect(tiles(), findsNothing);
+      expect(await foodRows(tester), isEmpty);
+    });
+
+    appTest("from the sheet the new food becomes that line's food, marked "
+        'Your pick and not Scanned', (tester) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester);
+      await openFood(tester);
+      await openNotFoundSheet(tester);
+      await scan(
+        tester,
+        code,
+        button: inSheet(
+          find.widgetWithText(OutlinedButton, 'Scan its barcode'),
+        ),
+      );
+      expect(sheet(), findsOneWidget);
+      final button = inSheet(
+        find.widgetWithText(OutlinedButton, 'Add it as your own food'),
+      );
+      expect(button, findsOneWidget);
+      await tap(tester, button);
+      expect(editor(), findsOneWidget);
+      expect(
+        tester.widget<TextField>(field('Barcode (optional)')).controller!.text,
+        code,
+      );
+      await makeFood(tester);
+      expect(editor(), findsNothing);
+      expect(sheet(), findsNothing);
+      expect(find.textContaining('Fix'), findsNothing);
+      expect(find.text('Your pick'), findsOneWidget);
+      expect(find.text('Scanned'), findsNothing);
+      expect(find.text('Data from Open Food Facts (ODbL)'), findsNothing);
+      final foods = await foodRows(tester);
+      expect(foods.single.barcode, code);
+      expect(
+        tester.widget<TextField>(box()).controller!.text,
+        '2 eggs, 1 zorbo, 1 apple',
+      );
+    });
+
+    appTest('cancelling the editor from the sheet leaves the sheet and its '
+        'message as they were', (tester) async {
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester);
+      await openFood(tester);
+      await openNotFoundSheet(tester);
+      await scan(
+        tester,
+        code,
+        button: inSheet(
+          find.widgetWithText(OutlinedButton, 'Scan its barcode'),
+        ),
+      );
+      await tap(
+        tester,
+        inSheet(find.widgetWithText(OutlinedButton, 'Add it as your own food')),
+      );
+      await tester.pageBack();
+      await settleMore(tester);
+      expect(sheet(), findsOneWidget);
+      expect(inSheet(find.text('No product found for $code.')), findsOneWidget);
+      expect(await foodRows(tester), isEmpty);
     });
   });
 

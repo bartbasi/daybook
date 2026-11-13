@@ -18,6 +18,7 @@ import 'package:daybook/parser/search_index.dart';
 import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
+import 'package:daybook/screens/my_foods/food_editor.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
@@ -610,7 +611,7 @@ void main() {
 
   group('a line that was not found', () {
     appTest('opens with the typed words in a search that already shows '
-        'results, no list, a scan button and no create', (tester) async {
+        'results, no list, a scan button and a create button', (tester) async {
       await openApp(tester);
       await openFood(tester);
       await type(tester, '2 eggs, 1 zorbo, 1 apple');
@@ -622,13 +623,21 @@ void main() {
       expect(inSheet(find.byIcon(Icons.radio_button_checked)), findsNothing);
       expect(inSheet(find.text('Remove from meal')), findsOneWidget);
       expect(inSheet(find.text('Scan its barcode')), findsOneWidget);
-      expect(inSheet(find.textContaining('Create a food')), findsNothing);
+      expect(
+        inSheet(find.text('Create a food called "zorbo"')),
+        findsOneWidget,
+      );
       expect(
         inSheet(find.textContaining('Nothing in the food list')),
         findsOneWidget,
       );
       expect(
-        inSheet(find.textContaining('Search with other words, or scan the')),
+        inSheet(
+          find.textContaining(
+            'Search with other words, scan the package, or make it your own '
+            'food.',
+          ),
+        ),
         findsOneWidget,
       );
     });
@@ -1708,5 +1717,119 @@ void main() {
         expect(pos.maxScrollExtent, greaterThanOrEqualTo(0));
       });
     }
+  });
+
+  group('create a food from a not found line', () {
+    Finder createButton() => inSheet(find.text('Create a food called "zorbo"'));
+    Finder editorName() => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Name',
+    );
+    Finder editorField(String label) => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == label,
+    );
+    Finder editor() => find.byType(FoodEditor);
+
+    Future<void> toCreate(WidgetTester tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 zorbo, 1 apple');
+      await tap(tester, find.text('Fix 1 item'));
+      expect(sheet(), findsOneWidget);
+      await tap(tester, createButton());
+      expect(editor(), findsOneWidget);
+    }
+
+    appTest('opens the food editor with the typed words as the name, and '
+        'the button is a 48 dp target', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 zorbo, 1 apple');
+      await tap(tester, find.text('Fix 1 item'));
+      expect(
+        tester
+            .getSize(
+              find.widgetWithText(
+                OutlinedButton,
+                'Create a food called "zorbo"',
+              ),
+            )
+            .height,
+        greaterThanOrEqualTo(48),
+      );
+      await tap(tester, createButton());
+      expect(editor(), findsOneWidget);
+      expect(tester.widget<TextField>(editorName()).controller!.text, 'zorbo');
+    });
+
+    appTest('Save returns with the line matched and marked Your pick; after '
+        'the meal is saved the entry and the learned row point at the new '
+        'food', (tester) async {
+      await toCreate(tester);
+      await tester.enterText(editorField('Calories'), '120');
+      await tester.pump();
+      await tap(tester, find.widgetWithText(FilledButton, 'Save'));
+      expect(editor(), findsNothing);
+      expect(sheet(), findsNothing);
+      expect(boxText(tester), '2 eggs, 1 zorbo, 1 apple');
+      expect(find.textContaining('Fix'), findsNothing);
+      expect(tileOf('zorbo'), findsOneWidget);
+      expect(find.text('Your pick'), findsOneWidget);
+      final food = (await real(tester, () => db.myFoods())).single;
+      expect(food.food.name, 'zorbo');
+
+      await tester.tap(saveButton());
+      await settle(tester);
+      final m = await theMeal(tester);
+      expect(m.entries, hasLength(3));
+      expect(
+        m.entries.map((e) => e.entry.foodRef),
+        contains('local:${food.food.id}'),
+      );
+      final learned = await real(
+        tester,
+        () => db.select(db.learnedMatches).get(),
+      );
+      expect(learned.map((l) => l.foodRef), ['local:${food.food.id}']);
+    });
+
+    appTest('the same through a worker that answers one request at a time '
+        '(the snapshot is waited for before the pick)', (tester) async {
+      useLink = true;
+      await toCreate(tester);
+      await tester.enterText(editorField('Calories'), '120');
+      await tester.pump();
+      await tap(tester, find.widgetWithText(FilledButton, 'Save'));
+      await settle(tester);
+      expect(editor(), findsNothing);
+      expect(find.text('Your pick'), findsOneWidget);
+      expect(tileOf('zorbo'), findsOneWidget);
+    });
+
+    appTest('Cancel leaves the sheet as it was and creates nothing', (
+      tester,
+    ) async {
+      await toCreate(tester);
+      await tester.enterText(editorField('Calories'), '120');
+      await tester.pump();
+      await tester.pageBack();
+      await settle(tester);
+      expect(editor(), findsNothing);
+      expect(sheet(), findsOneWidget);
+      expect(createButton(), findsOneWidget);
+      expect(tester.widget<TextField>(searchField()).controller!.text, 'zorbo');
+      expect(await real(tester, () => db.myFoods()), isEmpty);
+      expect(find.text('Fix 1 item'), findsOneWidget);
+      expect(find.text('Your pick'), findsNothing);
+    });
+
+    appTest('a refused save keeps the editor, and the sheet waits under it', (
+      tester,
+    ) async {
+      await toCreate(tester);
+      await tap(tester, find.widgetWithText(FilledButton, 'Save'));
+      expect(editor(), findsOneWidget);
+      expect(find.text('Enter the calories.'), findsOneWidget);
+      expect(await real(tester, () => db.myFoods()), isEmpty);
+    });
   });
 }
