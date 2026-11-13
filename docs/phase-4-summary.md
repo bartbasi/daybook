@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. The parser passes all 88 worked examples; screens not started |
+| 2 Food parser and meal entry | In progress. Parser, food data layer and live re-parsing are done, reviewed and pushed. Screens not started |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -36,6 +36,10 @@ Each is the recommended option from the plan's open questions, or a small call m
 10. **Thirty-eight places where the parser grammar was silent or contradicted itself were settled while building it.** None changes a worked example. They are written into parser-grammar.md, and section 14.3 there lists the ones you would notice, each of which you can overrule. The main ones: a period after a word that only looks like a unit ends the sentence ("I ate a candy bar. Coffee."); a product called "Coca-Cola 330ml" does not stop "330ml milk" meaning 330 ml of milk; your own names of two or more words are kept whole, so a saved "Big Mac" is not read as a large "mac"; "coffee with no sugar" gives one line, not a second "not found" one; "cookie" and "cookies" find the same food; "pb&j" and "pb and j" are the same alias.
 11. **Deleting a meal is a real delete, and Undo works while the app stays open.** Weigh-ins are only marked deleted, because a health sync could otherwise bring them back; meals are never synced. Marking meals instead would mean every total in the app has to remember to skip them, and one miss would silently count a deleted meal.
 12. **Four synonyms were added to the parser's list:** "skim milk" and "nonfat milk" mean fat free milk, "bbq" means barbecue, and "cereal" alone means ready-to-eat cereal (it had been matching hot cooked cereal with no Guess marker).
+13. **Backspacing does not lose a correction.** As first specified, changing "2 slices toast" to "3 slices toast" by backspacing the 2 dropped the bread you had picked, because for one keystroke the item read as a different food. A picked food is now held while you keep editing that same item and comes back when its words match again. It is dropped once you move on to another item, or if you delete the item.
+14. **The unit picker in the correction sheet offers only what can be typed.** Changing an amount there rewrites the text, and some portion names cannot be typed back ("drink (12 fl oz)"). The picker lists grams, ounces and the portions that read back as the same thing, and every rewrite is checked before it is applied.
+15. **Aliases are stored as you typed them.** They are compared on the fly, so a later change to the comparison rules cannot make saved aliases stop working. A test also pins the keys the app stores for learned corrections: after release, changing one means migrating stored data.
+16. **The speed tests run in their own CI step.** Run beside the rest of the suite they failed once from machine load alone. The budgets are unchanged.
 
 ## Open questions from the plan, still to confirm
 
@@ -82,8 +86,18 @@ A reviewer tried about 190 everyday foods through the parser. Most were right. T
 | tea | Ginger tea |
 | cream | Ice cream |
 
+Parser speed on the development machine, against the budgets (a phone will be slower, and must be measured):
+
+| What | Budget | Measured |
+|---|---|---|
+| Typing the example meal, per keystroke, through the background worker | 8 ms at the 95th percentile | about 2 ms |
+| Typing misspelled words, per keystroke | 8 ms at the 95th percentile | about 3.8 ms; worst single keystrokes 8 to 10 ms |
+| A 10-item meal of foods not seen before | 25 ms | about 10 ms |
+| Building the food index at start | 1,500 ms | about 350 ms |
+
 Two more behaviors to know about:
 - "coffee, black" reads "black" as a second food and guesses black beans. "black coffee" is fine.
+- "kiwis" and other plurals of words ending in "i" ("zucchinis", "martinis") are not reduced to the singular, because of an exception meant for words like "basis". They still find the food through typo correction, as a guess.
 - A word that is spelled right but is not in the USDA data can be "corrected" into another food as a guess: "skyr" becomes a Skor toffee bar.
 
 ## Not finished
