@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | Not started |
+| 2 Food parser and meal entry | In progress. The parser passes all 88 worked examples; screens not started |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
@@ -33,6 +33,9 @@ Each is the recommended option from the plan's open questions, or a small call m
 7. **The widget shows the date of the last weigh-in, not "Today".** For example "Thu, Nov 12, 7:02 am". The widget is only redrawn when the app runs, so "Today" would still be showing the next morning.
 8. **The widget's bottom line is always "Tap to log".** The wireframe had "Logged today. Tap to log again" after a weigh-in, which has the same stale-text problem.
 9. **The time shown on the weight sheet is the time saved.** That is the moment the sheet opened, or the moment the app last came back to the front with the sheet open, not the moment Save was tapped. A sheet opened at 11:59 pm and saved at 12:01 am stores the weigh-in at 11:59 pm on the day it showed. A sheet left open overnight and saved in the morning stores the morning.
+10. **Thirty-eight places where the parser grammar was silent or contradicted itself were settled while building it.** None changes a worked example. They are written into parser-grammar.md, and section 14.3 there lists the ones you would notice, each of which you can overrule. The main ones: a period after a word that only looks like a unit ends the sentence ("I ate a candy bar. Coffee."); a product called "Coca-Cola 330ml" does not stop "330ml milk" meaning 330 ml of milk; your own names of two or more words are kept whole, so a saved "Big Mac" is not read as a large "mac"; "coffee with no sugar" gives one line, not a second "not found" one; "cookie" and "cookies" find the same food; "pb&j" and "pb and j" are the same alias.
+11. **Deleting a meal is a real delete, and Undo works while the app stays open.** Weigh-ins are only marked deleted, because a health sync could otherwise bring them back; meals are never synced. Marking meals instead would mean every total in the app has to remember to skip them, and one miss would silently count a deleted meal.
+12. **Four synonyms were added to the parser's list:** "skim milk" and "nonfat milk" mean fat free milk, "bbq" means barbecue, and "cereal" alone means ready-to-eat cereal (it had been matching hot cooked cereal with no Guess marker).
 
 ## Open questions from the plan, still to confirm
 
@@ -55,6 +58,33 @@ CLAUDE.md says agents use Sonnet 5.5 or Opus 5.5 only, never Fable. In this phas
 
 - **Weight edit after a unit switch (fixed before release).** Editing only the time of a weigh-in after switching between pounds and kilograms rewrote the stored weight from the rounded number on screen. 50.6 lb could come back as 50.7 lb. An edit now keeps the stored weight unless the number was changed.
 - **Two midnight bugs found by the independent test pass (fixed).** With the app left open across midnight, Home kept showing yesterday as today and a new weigh-in was not called "today". And a weigh-in typed before midnight but saved after it was stored under the next day although the sheet showed the earlier time.
+
+## First guesses that are plainly wrong
+
+A reviewer tried about 190 everyday foods through the parser. Most were right. These come back wrong, all marked Guess, so one correction fixes each for good. In Phase 3 you chose to accept poor single-word defaults and look again after using the app (grammar open question 7). This is the list to look at then.
+
+| Typed | First guess |
+|---|---|
+| tofu | Tofu yogurt |
+| spaghetti | Spaghetti sauce |
+| granola | Cookie, granola |
+| chocolate | Chocolate milk |
+| peas | Blackeyed peas |
+| salad | Cabbage salad |
+| caesar salad | Caesar dressing |
+| egg roll | Egg bread roll |
+| pop tart | Freezer pop |
+| curry | Beef curry |
+| oreos | A McFlurry with Oreo cookies |
+| sparkling water | A branded mineral water |
+| walnuts | Walnut oil |
+| pizza | Pizza rolls |
+| tea | Ginger tea |
+| cream | Ice cream |
+
+Two more behaviors to know about:
+- "coffee, black" reads "black" as a second food and guesses black beans. "black coffee" is fine.
+- A word that is spelled right but is not in the USDA data can be "corrected" into another food as a guess: "skyr" becomes a Skor toffee bar.
 
 ## Not finished
 
