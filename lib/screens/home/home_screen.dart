@@ -18,7 +18,6 @@ import '../../util/dates.dart';
 import '../../util/units.dart';
 import '../food/confirm_bar.dart';
 import '../food/food_entry_screen.dart';
-import '../food/meal_slots.dart';
 import '../weight/weight_sheet.dart';
 
 /// The Today tab: the date, the meals, the weight row and the bottom action
@@ -69,7 +68,7 @@ class HomeScreenState extends State<HomeScreen> {
       _weights = db.watchWeights();
       _trend = db.watchTrend();
       _units = db.watchUnits();
-      _slots = watchMealSlots(db);
+      _slots = db.watchMealSlots();
     }
     // The meals follow the day: a new stream when "today" changes.
     if (_dayFor != widget.today) {
@@ -123,16 +122,22 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _undo() async {
     final notice = _notice;
     if (notice == null || notice.undo == null) return;
+    // Single flight: the message is taken and cleared before anything is
+    // awaited, so a second tap finds nothing to undo.
+    _bannerTimer?.cancel();
+    setState(() => _notice = null);
     try {
       await notice.undo!();
-      if (!mounted) return;
-      _bannerTimer?.cancel();
-      setState(() => _notice = null);
     } catch (_) {
       // Includes a missing row. The row stays as it was, and the bar says so.
-      if (!mounted) return;
-      setState(() => _notice = _Notice(() => notice.failed));
+      if (mounted) _showNotice(_Notice(() => notice.failed));
     }
+  }
+
+  /// The day a meal was logged for, or null when it is today.
+  String? _dayNamed(String localDate) {
+    final today = AppScope.of(context).clock().localDate;
+    return localDate == today ? null : S.dayWord(localDate, today);
   }
 
   Future<void> _undoWeight(SavedWeight saved) {
@@ -174,7 +179,11 @@ class HomeScreenState extends State<HomeScreen> {
         // An edit has no Undo: the previous version is not kept.
         _showNotice(
           _Notice(
-            () => S.mealSaved(meal.slotName, meal.totals[Nutrients.energy]),
+            () => S.mealSaved(
+              meal.slotName,
+              meal.totals[Nutrients.energy],
+              _dayNamed(meal.meal.localDate),
+            ),
             // Undo of a save deletes the meal. The rows it returns for a later
             // Undo are not kept: a save's Undo is offered once.
             undo: edited ? null : () => db.deleteMeal(meal.meal.id),
@@ -185,7 +194,11 @@ class HomeScreenState extends State<HomeScreen> {
         final m = deleted.meal;
         _showNotice(
           _Notice(
-            () => S.mealDeleted(m.slotName, m.totals[Nutrients.energy]),
+            () => S.mealDeleted(
+              m.slotName,
+              m.totals[Nutrients.energy],
+              _dayNamed(m.meal.localDate),
+            ),
             undo: () => db.undoDeleteMeal(deleted),
             failed: S.undoDeleteMealFailed,
           ),
@@ -193,7 +206,9 @@ class HomeScreenState extends State<HomeScreen> {
       case FoodAbandoned(:final draft):
         _showNotice(
           _Notice(
-            () => S.mealNotSaved(draft.slotName),
+            () => draft.editingMealId != null
+                ? S.mealChangesNotSaved(draft.slotName)
+                : S.mealNotSaved(draft.slotName),
             undo: () async {
               // Undo opens the screen again with the text and the picks. It
               // does not wait for the screen: that screen's own result shows
@@ -425,9 +440,9 @@ class _Meals extends StatelessWidget {
   final _OpenFood onOpen;
 
   /// The foods in brief: each name up to its first comma.
-  static String _foods(StoredMeal m) =>
-      [for (final e in m.entries) e.entry.foodName.split(',').first.trim()]
-          .join(', ');
+  static String _foods(StoredMeal m) => S.foodsInBrief([
+    for (final e in m.entries) e.entry.foodName.split(',').first.trim(),
+  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +463,6 @@ class _Meals extends StatelessWidget {
                 if (m.meal.slotId == slot.id) m,
             ];
             if (here.isEmpty) {
-              if (slot.archived) continue;
               rows.add(
                 _MealRow(
                   title: slot.name,
@@ -467,6 +481,19 @@ class _Meals extends StatelessWidget {
                 ),
               );
             }
+          }
+          // A meal in a slot that was archived since stays listed.
+          final listed = {for (final slot in slotSnap.data!) slot.id};
+          for (final m in meals) {
+            if (listed.contains(m.meal.slotId)) continue;
+            rows.add(
+              _MealRow(
+                title: m.slotName,
+                kcal: S.kcal(m.totals[Nutrients.energy]),
+                detail: _foods(m),
+                onTap: () => onOpen(meal: m),
+              ),
+            );
           }
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,

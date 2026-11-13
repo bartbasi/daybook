@@ -950,6 +950,31 @@ void main() {
     });
   });
 
+  group('meal slots', () {
+    test('watchMealSlots lists the slots that are not archived, in position '
+        'order, and follows a change', () async {
+      final seen = <List<String>>[];
+      final sub = db.watchMealSlots().listen(
+        (s) => seen.add([for (final x in s) x.name]),
+      );
+      await pumpEventQueue();
+      expect(seen.last, ['Breakfast', 'Lunch', 'Dinner', 'Snack']);
+
+      await (db.update(db.mealSlots)..where((s) => s.id.equals(lunch))).write(
+        const MealSlotsCompanion(archived: Value(true)),
+      );
+      await pumpEventQueue();
+      expect(seen.last, ['Breakfast', 'Dinner', 'Snack']);
+
+      await (db.update(db.mealSlots)..where((s) => s.id.equals(dinner))).write(
+        const MealSlotsCompanion(position: Value(-1)),
+      );
+      await pumpEventQueue();
+      expect(seen.last, ['Dinner', 'Breakfast', 'Snack']);
+      await sub.cancel();
+    });
+  });
+
   group('saved meals and aliases', () {
     Future<SavedMealDetail> create(
       String name, {

@@ -225,8 +225,8 @@ class S {
   static const foodParseFailed =
       'Could not read that just now. Keep typing and it will catch up.';
   static const foodParserStopped =
-      'The food list stopped working. Your text is kept. Close this screen '
-      'and open it again.';
+      'The food list stopped working. Your text is kept.';
+  static const tryAgain = 'Try again';
   static const fixOne = 'Fix 1 item';
   static String fixItems(int n) => n == 1 ? fixOne : 'Fix $n items';
   static String itemsNotCounted(int n) =>
@@ -338,9 +338,34 @@ class S {
   ) =>
       '${['Saved meal', name, ?multiplier, lineItems(items), if (kcal != null) '${count(kcal.round())} calories'].join('. ')}. '
       'Double tap to change.';
-  static String spokenTotals(double? kcal, double? p, double? c, double? f) =>
+  static String _spokenGrams(double? v) =>
+      v == null ? 'not listed' : '${count(v.round())} grams';
+  static String spokenTotals(
+    double? kcal,
+    double? p,
+    double? c,
+    double? f,
+    int notCounted,
+  ) =>
       'Meal total: ${count((kcal ?? 0).round())} calories, '
-      'protein ${_gram(p)} grams, carbs ${_gram(c)} grams, fat ${_gram(f)} grams.';
+      'protein ${_spokenGrams(p)}, carbs ${_spokenGrams(c)}, '
+      'fat ${_spokenGrams(f)}.${notCounted > 0 ? ' ${itemsNotCounted(notCounted)}.' : ''}';
+
+  /// The macros after the kcal in the totals bar.
+  static String totalsMacros(double? p, double? c, double? f) =>
+      '  ${macros(p, c, f)}';
+
+  /// The typed words of a line, in quotes.
+  static String quoted(String typed) => '"$typed"';
+
+  /// A saved meal header's name, with its multiplier when it is not 1.
+  static String headerTitle(String name, double? multiplier) =>
+      multiplier == null || multiplier == 1
+      ? name
+      : '$name  ${multiplierText(multiplier)}';
+
+  /// The foods of a meal in brief, for a Home row.
+  static String foodsInBrief(List<String> names) => names.join(', ');
 
   /// 'Today, Nov 12', 'Yesterday, Nov 11' or 'Wed, Nov 4'.
   static String foodDate(String localDate, String today) {
@@ -355,8 +380,8 @@ class S {
   static const savedMealTitle = 'Save as a saved meal';
   static const savedMealName = 'Name';
   static const savedMealNameEmpty = 'Give it a name.';
-  static const savedMealNameTaken =
-      'You already have a saved meal with that name. Try another.';
+  static const savedMealNeedsFix =
+      'An item was not found, so the saved meal was not made. Fix it first.';
   static const savedMealFailed = 'Could not save the saved meal. Try again.';
   static String savedMealCreated(String name) => 'Saved meal "$name" created.';
   static const cancel = 'Cancel';
@@ -364,11 +389,17 @@ class S {
   // Home: the meals.
   static const homeMeals = 'Meals';
   static const mealEmpty = 'Nothing yet. Tap to add.';
-  static String mealSaved(String slot, double? kcal) =>
-      '$slot saved, ${kcal == null ? '-' : count(kcal.round())} kcal';
-  static String mealNotSaved(String slot) => '$slot not saved';
-  static String mealDeleted(String slot, double? kcal) =>
-      '$slot deleted, ${kcal == null ? '-' : count(kcal.round())} kcal';
+  // [day] is set when the meal is for a day other than today.
+  static String mealSaved(String slot, double? kcal, [String? day]) =>
+      '$slot saved${day == null ? '' : ' for $day'}, '
+      '${kcal == null ? '-' : count(kcal.round())} kcal';
+  static String mealNotSaved(String slot) =>
+      '${slot.isEmpty ? 'Meal' : slot} not saved';
+  static String mealChangesNotSaved(String slot) =>
+      slot.isEmpty ? 'Changes not saved' : 'Changes to $slot not saved';
+  static String mealDeleted(String slot, double? kcal, [String? day]) =>
+      '$slot deleted${day == null ? '' : ' for $day'}, '
+      '${kcal == null ? '-' : count(kcal.round())} kcal';
   static const undoMealFailed = 'Could not undo. The meal is still saved.';
   static const undoDeleteMealFailed =
       'Could not undo. The meal is still deleted.';

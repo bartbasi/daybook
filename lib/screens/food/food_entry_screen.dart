@@ -21,7 +21,6 @@ import '../../util/units.dart';
 import '../weight/weight_sheet.dart';
 import 'confirm_bar.dart';
 import 'food_line_tile.dart';
-import 'meal_slots.dart';
 
 // The one-screen food entry (food-entry.html, parser-grammar.md 8 and 9).
 //
@@ -256,8 +255,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   var _dead = false;
   final _waiters = <(int, String, Completer<ParseResult>)>[];
 
-  // Writes.
+  // Writes. [_busy] is the whole of Save (the wait for the parser result and
+  // the write); [_writing] is only the database write, the one time closing
+  // is refused.
   var _busy = false;
+  var _writing = false;
+  var _closed = false;
+  final _currentKey = GlobalKey();
   String? _error;
 
   _Notice? _notice;
@@ -299,11 +303,11 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _db = scope.db;
     _clock = scope.clock;
     _parser = scope.parser;
-    _slotsSub = watchMealSlots(_db).listen((s) {
+    _slotsSub = _db.watchMealSlots().listen((s) {
       if (mounted) setState(() => _slots = s);
     }, onError: (Object _) {});
     if (_slotId == null) _chooseDefaultSlot();
-    _attach();
+    _attach(picks: widget.draft?.picks ?? const []);
   }
 
   @override
@@ -312,6 +316,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _noticeTimer?.cancel();
     _slotsSub?.cancel();
     _handle?.close();
+    _failWaiters(const _Moved());
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -328,7 +333,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 
   // The parser.
 
-  Future<void> _attach() async {
+  Future<void> _attach({List<DraftPick> picks = const []}) async {
     final ParseWorker worker;
     try {
       final host = _parser;
@@ -347,18 +352,37 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     }
     final text = _controller.text;
     final id = _sendText(_cursor());
-    final picks = widget.draft?.picks ?? const <DraftPick>[];
     if (picks.isEmpty) return;
-    // Rule 13: wait for the text's result, then send the picks again.
+    // Rule 13: wait for the text's result, then send the picks again. They go
+    // out together, in order, so nothing can land between two of them.
     try {
       await _waitFor(id, text);
-      for (final p in picks) {
-        if (!mounted || h.isClosed) return;
-        await h.pick(text, p.span, p.foodRef, marker: p.marker);
-      }
     } catch (_) {
-      // The box moved on, or the worker stopped: the text is kept either way.
+      return; // The box moved on, or the worker stopped: the text is kept.
     }
+    for (final p in picks) {
+      if (!mounted || h.isClosed) return;
+      h
+          .pick(text, p.span, p.foodRef, marker: p.marker)
+          .then((_) {}, onError: (Object _) {});
+    }
+  }
+
+  /// "Try again" after the worker died: a new worker, the same text. The
+  /// picks are sent again only if the newest result is for exactly this text.
+  void _retry() {
+    final picks = _picksNow();
+    _handle?.close();
+    _handle = null;
+    _result = null;
+    _sentText = null;
+    _sentCursor = -2;
+    _lastId = 0; // ids start again with a new worker
+    setState(() {
+      _requestFailed = false;
+      _dead = false;
+    });
+    _attach(picks: picks);
   }
 
   int _cursor() {
@@ -399,6 +423,25 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       }
     }
     if (mounted) setState(() {});
+    _revealCurrentLine();
+  }
+
+  /// Keeps the line for the item under the cursor in view (frame 2). It runs
+  /// a frame later than the text field's own scrolling, so that one does not
+  /// undo it, and only after a result, never while the user scrolls by hand.
+  void _revealCurrentLine() {
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) {
+      binding.addPostFrameCallback((_) {
+        final c = _currentKey.currentContext;
+        if (!mounted || c == null) return;
+        Scrollable.ensureVisible(
+          c,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        );
+      });
+      binding.scheduleFrame();
+    });
   }
 
   void _onFailure(WorkerFailure f) {
@@ -413,6 +456,14 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     }
     _waiters.clear();
     if (mounted) setState(() {});
+  }
+
+  void _failWaiters(Object error) {
+    final waiting = [..._waiters];
+    _waiters.clear();
+    for (final w in waiting) {
+      w.$3.completeError(error);
+    }
   }
 
   Future<ParseResult> _waitFor(int id, String text) {
@@ -528,6 +579,23 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 
   // Save.
 
+  /// Rule 5: sends the text with no cursor, so that nothing counts as still
+  /// being typed, and waits for that result. Null when the box moved on, the
+  /// worker failed, or the screen is gone: the caller does nothing.
+  Future<ParseResult?> _freshResult() async {
+    final text = _controller.text;
+    final id = _lastId = _handle!.setText(text, -1);
+    _sentText = text;
+    _sentCursor = -1;
+    try {
+      final r = await _waitFor(id, text);
+      if (!mounted || _closed || _controller.text != text) return null;
+      return r;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _save() async {
     if (!_canSave) return;
     setState(() {
@@ -536,19 +604,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     });
     var finished = false;
     try {
-      // Rule 5: send the text with no cursor, so that nothing counts as still
-      // being typed, and wait for that result.
-      final text = _controller.text;
-      final id = _lastId = _handle!.setText(text, -1);
-      _sentText = text;
-      _sentCursor = -1;
-      final ParseResult r;
-      try {
-        r = await _waitFor(id, text);
-      } catch (_) {
-        return; // The box moved on or the worker failed: nothing is saved.
-      }
-      if (!mounted || _controller.text != text) return;
+      final r = await _freshResult();
+      if (r == null) return; // nothing is saved
+      final text = r.text;
       final fix = [
         for (final l in r.lines)
           if (l.state == LineState.notFound && !l.plain) l,
@@ -561,6 +619,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       if (inputs.isEmpty) return;
       final slotId = _slotId!;
       final StoredMeal stored;
+      setState(() => _writing = true);
       try {
         final mealId = _editingMealId;
         if (mealId != null) {
@@ -586,6 +645,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       } catch (_) {
         if (mounted) setState(() => _error = S.foodSaveFailed);
         return;
+      } finally {
+        if (mounted) setState(() => _writing = false);
       }
       if (!mounted) return;
       finished = true;
@@ -596,36 +657,48 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   }
 
   /// Closes the screen. With text in the box, Home offers Undo, which opens
-  /// the screen again with the text and the picks. No popup.
+  /// the screen again with the text and the picks. No popup. Refused only
+  /// while the database write is in flight; while Save waits for the parser
+  /// the screen can be closed, and the save is dropped.
   void _close() {
-    if (_busy) return;
+    if (_writing) return;
+    _closed = true;
+    _failWaiters(const _Moved());
     FoodEntryResult? result;
     if (_controller.text.trim().isNotEmpty) result = FoodAbandoned(_draft());
     Navigator.of(context).pop(result);
   }
 
+  /// The picks to send again after a reopen or a retry: only from a result
+  /// that is for exactly the text in the box, since a span from older text
+  /// would land on the wrong words.
+  List<DraftPick> _picksNow() {
+    final r = _result;
+    if (r == null || r.text != _controller.text) return const [];
+    return [
+      for (final l in r.lines)
+        if (l.state != LineState.aliasOrSavedMeal &&
+            l.span != null &&
+            l.foodRef != null &&
+            (l.markers.contains(Marker.yourPick) ||
+                l.markers.contains(Marker.scanned)))
+          DraftPick(
+            l.span!,
+            l.foodRef!,
+            l.markers.contains(Marker.yourPick)
+                ? Marker.yourPick
+                : Marker.scanned,
+          ),
+    ];
+  }
+
   FoodDraft _draft() {
-    final lines = _result?.lines ?? const <Line>[];
     return FoodDraft(
       date: _date,
       slotId: _slotId ?? 0,
       slotName: _slotName(),
       text: _controller.text,
-      picks: [
-        for (final l in lines)
-          if (l.state != LineState.aliasOrSavedMeal &&
-              l.span != null &&
-              l.foodRef != null &&
-              (l.markers.contains(Marker.yourPick) ||
-                  l.markers.contains(Marker.scanned)))
-            DraftPick(
-              l.span!,
-              l.foodRef!,
-              l.markers.contains(Marker.yourPick)
-                  ? Marker.yourPick
-                  : Marker.scanned,
-            ),
-      ],
+      picks: _picksNow(),
       added: _added,
       editingMealId: _editingMealId,
     );
@@ -653,9 +726,22 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   }
 
   Future<void> _saveAsSavedMeal() async {
-    final r = _result;
-    if (r == null) return;
+    if (_busy || _handle == null) return;
+    setState(() => _busy = true);
+    final ParseResult? r;
+    try {
+      r = await _freshResult();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (r == null || !mounted) return;
+    // A saved meal is never made from some of the lines.
+    if (r.lines.any((l) => l.state == LineState.notFound)) {
+      _showNotice(const _Notice(S.savedMealNeedsFix));
+      return;
+    }
     final items = _inputs(r.lines);
+    if (items.isEmpty) return;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => _SavedMealDialog(db: _db, clock: _clock, items: items),
@@ -679,6 +765,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   /// opens over it, the text in the box is not touched, and the confirmation
   /// with Undo is shown here.
   Future<void> openWeightSheet() async {
+    // While Save is running, a sheet on top would take the screen's pop.
+    if (_busy) return;
     final saved = await showWeightSheet(context);
     if (saved == null || !mounted) return;
     final row = saved.row;
@@ -699,14 +787,19 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     );
   }
 
-  Future<void> _undoWeight(int id) async {
+  Future<void> _undoWeight(int id) => _db.deleteWeight(id, _clock());
+
+  /// Single flight: the message is taken and cleared before anything is
+  /// awaited, so a second tap finds nothing to undo.
+  Future<void> _undoNotice() async {
+    final undo = _notice?.undo;
+    if (undo == null) return;
+    _noticeTimer?.cancel();
+    setState(() => _notice = null);
     try {
-      await _db.deleteWeight(id, _clock());
-      if (!mounted) return;
-      _noticeTimer?.cancel();
-      setState(() => _notice = null);
+      await undo();
     } catch (_) {
-      if (mounted) setState(() => _notice = const _Notice(S.undoFailed));
+      if (mounted) _showNotice(const _Notice(S.undoFailed));
     }
   }
 
@@ -748,9 +841,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
                       if (_notice != null)
                         ConfirmBar(
                           message: _notice!.text,
-                          onUndo: _notice!.undo == null
-                              ? null
-                              : () => _notice!.undo!(),
+                          onUndo: _notice!.undo == null ? null : _undoNotice,
                         ),
                       Expanded(
                         child: _scrollArea(
@@ -780,6 +871,27 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   /// A seam for task 3.2: the "left today" line goes under the totals.
   static const _leftTodaySeam = SizedBox.shrink();
 
+  /// Tapping the date opens a calendar that ends today (frame 1).
+  Future<void> _pickDate() async {
+    final today = parseDate(_clock().localDate);
+    final day = parseDate(_date);
+    final last = DateTime(today.year, today.month, today.day);
+    var initial = DateTime(day.year, day.month, day.day);
+    if (initial.isAfter(last)) initial = last;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: last,
+    );
+    if (picked == null || !mounted) return;
+    setState(
+      () => _date = formatDate(
+        DateTime.utc(picked.year, picked.month, picked.day),
+      ),
+    );
+  }
+
   Widget _topBar(BuildContext context) {
     final today = _clock().localDate;
     return Padding(
@@ -789,7 +901,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
           IconButton(
             tooltip: S.foodClose,
             icon: const Icon(Icons.close),
-            onPressed: _busy ? null : _close,
+            onPressed: _writing ? null : _close,
           ),
           IconButton(
             tooltip: S.foodPreviousDay,
@@ -799,10 +911,19 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
           Expanded(
             child: Semantics(
               header: true,
-              child: Text(
-                S.foodDate(_date, today),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
+              button: true,
+              child: InkWell(
+                onTap: _pickDate,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Center(
+                    child: Text(
+                      S.foodDate(_date, today),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -899,7 +1020,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
                 keyboardType: TextInputType.multiline,
                 minLines: 2,
                 maxLines: 6,
-                readOnly: _busy,
                 decoration: InputDecoration(
                   border: const OutlineInputBorder(),
                   hintText: _editing ? S.foodBoxHintMore : S.foodBoxHint,
@@ -963,13 +1083,33 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     );
   }
 
+  /// The typed line that holds the cursor of the newest result, if that
+  /// result is for the text in the box.
+  Line? get _currentLine {
+    final r = _result;
+    if (r == null || _dead || r.text != _controller.text || r.cursor < 0) {
+      return null;
+    }
+    for (final l in r.lines) {
+      final s = l.span;
+      if (s != null && r.cursor >= s.start && r.cursor <= s.end) return l;
+    }
+    return null;
+  }
+
   List<Widget> _typedTiles(Line l) {
     final text = _result?.text;
+    final current = identical(l, _currentLine);
+    Widget keyed(Widget w) =>
+        current ? KeyedSubtree(key: _currentKey, child: w) : w;
     if (l.state == LineState.aliasOrSavedMeal) {
       return [
-        FoodLineTile(
-          line: l,
-          onTap: () => onLineTap(LineTap(line: l, text: text)),
+        keyed(
+          FoodLineTile(
+            line: l,
+            current: current,
+            onTap: () => onLineTap(LineTap(line: l, text: text)),
+          ),
         ),
         for (final item in l.items)
           FoodLineTile(
@@ -980,10 +1120,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       ];
     }
     return [
-      FoodLineTile(
-        line: l,
-        typed: _typedText(l),
-        onTap: () => onLineTap(LineTap(line: l, text: text)),
+      keyed(
+        FoodLineTile(
+          line: l,
+          typed: _typedText(l),
+          current: current,
+          onTap: () => onLineTap(LineTap(line: l, text: text)),
+        ),
       ),
     ];
   }
@@ -991,14 +1134,14 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
   Widget _bar(BuildContext context) {
     final theme = Theme.of(context);
     final fix = _fixLines.length;
-    final totals = sumNutrients(
-      _counted([for (final a in _added) a.line, ..._typed])
-          .map((l) => l.nutrients),
-    );
-    final kcal = totals[Nutrients.energy];
-    final p = totals[Nutrients.protein];
-    final c = totals[Nutrients.carbs];
-    final f = totals[Nutrients.fat];
+    final counted = _counted([for (final a in _added) a.line, ..._typed]);
+    final totals = sumNutrients(counted.map((l) => l.nutrients));
+    // No counted line: zeros. A "-" is only for a food that lists no value.
+    final none = counted.isEmpty;
+    final kcal = none ? 0.0 : totals[Nutrients.energy];
+    final p = none ? 0.0 : totals[Nutrients.protein];
+    final c = none ? 0.0 : totals[Nutrients.carbs];
+    final f = none ? 0.0 : totals[Nutrients.fat];
     final message = _dead
         ? S.foodParserStopped
         : _error ?? (_requestFailed ? S.foodParseFailed : null);
@@ -1013,47 +1156,67 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (message != null)
-                Semantics(
-                  liveRegion: true,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(message),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(message),
+                        ),
+                      ),
+                    ),
+                    if (_dead)
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                        ),
+                        onPressed: _retry,
+                        child: const Text(S.tryAgain),
+                      ),
+                  ],
                 ),
               Row(
                 children: [
                   Expanded(
                     child: _dead
                         ? const SizedBox.shrink()
-                        : Semantics(
-                            label: S.spokenTotals(kcal ?? 0, p, c, f),
-                            excludeSemantics: true,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text.rich(
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // The count of items not counted is in the
+                              // spoken totals. The seam below is outside the
+                              // excluded part, so what task 3.2 puts there is
+                              // read on its own.
+                              Semantics(
+                                label: S.spokenTotals(kcal, p, c, f, fix),
+                                excludeSemantics: true,
+                                child: Text.rich(
                                   TextSpan(
                                     children: [
                                       TextSpan(
-                                        text: S.kcal(kcal ?? 0),
+                                        text: S.kcal(kcal),
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                      TextSpan(text: '  ${S.macros(p, c, f)}'),
+                                      TextSpan(text: S.totalsMacros(p, c, f)),
                                     ],
                                   ),
                                 ),
-                                _leftTodaySeam,
-                                if (fix > 0)
-                                  Text(
+                              ),
+                              _leftTodaySeam,
+                              if (fix > 0)
+                                ExcludeSemantics(
+                                  child: Text(
                                     S.itemsNotCounted(fix),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
                   ),
                   const SizedBox(width: 8),
@@ -1083,9 +1246,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
 }
 
 /// Asks for a name and makes a saved meal from the lines. One plain field.
-/// The name is also stored as the meal's first other name, so typing it
-/// expands the meal, and a name another saved meal already answers to is
-/// refused. The full saved meals screens are task 2.10.
+/// Typing the name expands the meal (grammar 6.1), so no other name is
+/// stored; two saved meals may share a name and the newest wins. The full
+/// saved meals screens are task 2.10.
 class _SavedMealDialog extends StatefulWidget {
   const _SavedMealDialog({
     required this.db,
@@ -1128,7 +1291,6 @@ class _SavedMealDialogState extends State<_SavedMealDialog> {
         name: name,
         items: widget.items,
         now: widget.clock(),
-        aliases: [name],
       );
       if (!mounted) return;
       if (r.ok) {
@@ -1137,9 +1299,7 @@ class _SavedMealDialogState extends State<_SavedMealDialog> {
       }
       setState(() {
         _busy = false;
-        _problem = r.problems.containsValue(AliasProblem.empty)
-            ? S.savedMealNameEmpty
-            : S.savedMealNameTaken;
+        _problem = S.savedMealFailed;
       });
     } catch (_) {
       if (mounted) {

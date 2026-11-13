@@ -708,6 +708,18 @@ extension FoodData on AppDatabase {
         .getSingle();
   }
 
+  /// The meal slots that are not archived, in position order, updated after
+  /// every write to them. Food entry and Home list them.
+  Stream<List<MealSlot>> watchMealSlots() => liveQuery(
+    this,
+    [mealSlots],
+    () =>
+        (select(mealSlots)
+              ..where((s) => s.archived.equals(false))
+              ..orderBy([(s) => OrderingTerm.asc(s.position)]))
+            .get(),
+  );
+
   // For the parser
 
   /// Food ref to the number of logged lines that used it.

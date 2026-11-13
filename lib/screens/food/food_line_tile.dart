@@ -26,12 +26,17 @@ class FoodLineTile extends StatelessWidget {
     required this.line,
     this.typed = '',
     this.indent = false,
+    this.current = false,
     this.onTap,
   });
 
   final Line line;
   final String typed;
   final bool indent;
+
+  /// The line for the item under the cursor: drawn with a gray ring
+  /// (frame 2).
+  final bool current;
   final VoidCallback? onTap;
 
   /// The marker words a line carries, in the order they are shown and read.
@@ -122,7 +127,10 @@ class FoodLineTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 48),
-              child: _Outline(edge: edge, hatch: hatch, child: body),
+              child: _Ring(
+                on: current,
+                child: _Outline(edge: edge, hatch: hatch, child: body),
+              ),
             ),
           ),
         ),
@@ -197,7 +205,7 @@ class FoodLineTile extends StatelessWidget {
         spacing: 8,
         runSpacing: 4,
         children: [
-          Text('"$typed"'),
+          Text(S.quoted(typed)),
           const Text(
             S.lineNotCounted,
             style: TextStyle(fontWeight: FontWeight.bold),
@@ -228,7 +236,7 @@ class FoodLineTile extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                m == null || m == 1 ? name : '$name  ${S.multiplierText(m)}',
+                S.headerTitle(name, m),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -249,6 +257,28 @@ class FoodLineTile extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _Ring extends StatelessWidget {
+  const _Ring({required this.on, required this.child});
+
+  final bool on;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!on) return child;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 3,
+        ),
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Padding(padding: const EdgeInsets.all(2), child: child),
     );
   }
 }

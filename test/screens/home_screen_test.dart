@@ -598,4 +598,20 @@ void main() {
       expect(tester.getSize(empty).height, greaterThanOrEqualTo(48));
     });
   }
+
+  appTest('a double tap on Undo after a weight save marks it deleted once and '
+      'shows no false failure', (tester) async {
+    await openApp(tester);
+    await tester.tap(barButton('Weight'));
+    await settle(tester);
+    await tester.enterText(field(), '181.8');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    await tester.tap(find.text('Undo'));
+    await tester.tap(find.text('Undo'), warnIfMissed: false);
+    await settle(tester);
+    expect(find.textContaining('Could not undo'), findsNothing);
+    expect((await rows(tester)).single.deletedAtMs, isNotNull);
+  });
 }
