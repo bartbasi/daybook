@@ -82,7 +82,7 @@ The `<number> percent` row is applied after the hyphen rows, so `2-percent milk`
 
 - A word that starts with letters and contains digits is one word: `V8`, `G2`, `B12`. There are 32 bundled food names with such words ("Gatorade G2", "vitamins B6 and B12"). The exception is `x` or `×` followed by digits, which is always a multiplier: `x3` is `x 3`.
 - A number in any form (whole, decimal or fraction) touching letters after it is split into the number and a word: `100g` is `100 g`, `2c` is `2 c`, `1T` is `1 T`, `1/2c` is `1/2 c`, `2x` is `2 x`, `2eggs` is `2 eggs`.
-- The exception is a word that is itself an entry in the synonym list (5.3), the built-in protected list (2.3), or the user's own names: it stays whole. `7up` stays one word because it is a synonym entry. For the user's names this holds only when the whole name is that one word (a product named "7up"), not for a word inside a longer name (2.3).
+- The exception is a word that is itself an entry in the synonym list (5.3), the built-in protected list (2.3), or the user's own names: it stays whole. `7up` stays one word because it is a synonym entry. For the user's names this holds only when the whole name is that one word (a product named "7up"), not for a word inside a longer name (2.3), and a cached product's name counts only once it has been logged, as in 2.3. Synonym entries such as `7up` are not affected by that condition.
 
 Case is kept until the units step, because `T` and `t` mean different units. All other comparisons ignore case.
 
@@ -219,6 +219,8 @@ The dictated version `two eggs two slices of sourdough toast one tablespoon of b
 - `half usual breakfast x2` = 1 times the saved meal.
 
 A multiplier with no other quantity is the quantity.
+
+The `x2` form works only after the food (`eggs x2`); at the start of an item only the `2x` form is a multiplier (`2x eggs`), so `x2 usual breakfast` is not a multiplied saved meal and is read as ordinary text.
 
 ### 3.3 Ranges
 
