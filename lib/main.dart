@@ -8,6 +8,7 @@ import 'clock.dart';
 import 'data/database.dart';
 import 'data/food_reference.dart';
 import 'error_log.dart';
+import 'parser/parse_worker.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,7 @@ void main() {
       db: AppDatabase.open(),
       clock: systemNow,
       foodsPath: installFoodReference(),
+      workerFactory: ParseWorker.isolate,
     ),
   );
 }

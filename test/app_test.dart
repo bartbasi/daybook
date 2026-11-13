@@ -6,6 +6,9 @@ import 'dart:async';
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
+import 'package:daybook/data/food_data.dart';
+import 'package:daybook/data/food_library_data.dart';
+import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/util/units.dart';
 import 'package:daybook/screens/home/home_screen.dart';
@@ -23,6 +26,30 @@ Future<void> settle(WidgetTester tester) async {
   );
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
+}
+
+/// A worker link that records what the app does to it.
+class RecordingLink implements WorkerLink {
+  final requests = <WorkerRequest>[];
+  var started = false;
+  var closed = false;
+
+  @override
+  void start(void Function(WorkerReply reply) onReply) {
+    started = true;
+    onReply(const ReadyReply());
+  }
+
+  @override
+  void send(WorkerRequest request) => requests.add(request);
+
+  @override
+  Future<void> close() async => closed = true;
+
+  List<int> get snapshotVersions => [
+    for (final r in requests)
+      if (r is SnapshotRequest) r.data.version,
+  ];
 }
 
 void main() {
@@ -459,4 +486,90 @@ void main() {
       expect(row.width, lessThanOrEqualTo(600));
     });
   }
+
+  appTest('the parser worker starts after the first frame, gets the user '
+      'data at start and again when it changes, and goes with the app', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final path = Completer<String>();
+    final link = RecordingLink();
+    final made = <String>[];
+    var homeWasDrawn = false;
+    await tester.pumpWidget(
+      DaybookApp(
+        db: db,
+        clock: () => Now.fromLocal('2026-11-12', 7 * 60 + 2, -360),
+        foodsPath: path.future,
+        workerFactory: (p) {
+          made.add(p);
+          homeWasDrawn = find.byType(HomeScreen).evaluate().isNotEmpty;
+          return ParseWorker.linked(link);
+        },
+      ),
+    );
+    await settle(tester);
+    // The food data is not installed yet: no worker, and Home is up.
+    expect(made, isEmpty);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+
+    path.complete('/data/usda.sqlite');
+    await settle(tester);
+    expect(made, ['/data/usda.sqlite']);
+    expect(homeWasDrawn, isTrue); // made after the first frame
+    expect(link.started, isTrue);
+    expect(link.snapshotVersions, [1]);
+
+    // The user's data changes: the worker is told again.
+    await tester.runAsync(
+      () => db.createSavedMeal(
+        name: 'Usual breakfast',
+        now: Now.fromLocal('2026-11-12', 7 * 60, -360),
+        items: const [
+          MealLineInput(
+            foodRef: 'usda:1',
+            foodName: 'Egg',
+            quantity: 1,
+            unitLabel: '',
+            baseQuantity: 50,
+            baseUnit: 'g',
+          ),
+        ],
+      ),
+    );
+    await settle(tester);
+    expect(link.snapshotVersions, [1, 2]);
+    expect(link.closed, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 10));
+    expect(link.closed, isTrue);
+  });
+
+  appTest('a path that never arrives leaves the app running with no worker', (
+    tester,
+  ) async {
+    var made = 0;
+    final failing = Completer<String>();
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      DaybookApp(
+        db: db,
+        clock: () => Now.fromLocal('2026-11-12', 7 * 60 + 2, -360),
+        foodsPath: failing.future,
+        workerFactory: (_) {
+          made++;
+          return ParseWorker.linked(RecordingLink());
+        },
+      ),
+    );
+    failing.completeError(StateError('no disk'));
+    await settle(tester);
+    expect(made, 0);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+  });
 }

@@ -11,6 +11,7 @@ import 'data/database.dart';
 import 'data/settings_data.dart';
 import 'data/weight_data.dart';
 import 'platform/weight_widget.dart';
+import 'screens/food/food_entry_screen.dart' show FoodEntryScreenState;
 import 'screens/home/home_screen.dart';
 import 'screens/more/more_screen.dart';
 import 'screens/weight/weight_sheet.dart' show weightSheetOpen;
@@ -18,24 +19,56 @@ import 'screens/weight/weight_tab.dart';
 import 'strings.dart';
 import 'util/units.dart';
 
-class DaybookApp extends StatelessWidget {
+class DaybookApp extends StatefulWidget {
   const DaybookApp({
     super.key,
     required this.db,
     required this.clock,
     required this.foodsPath,
+    this.workerFactory,
   });
 
   final AppDatabase db;
   final Clock clock;
   final Future<String> foodsPath;
 
+  /// Makes the parser worker once the food data is installed. main() passes
+  /// [ParseWorker.isolate]; a test passes [ParseWorker.inline] or a function
+  /// returning [ParseWorker.inlineWith]. Left out, the app has no parser, which
+  /// is fine for a test that never opens the food screen.
+  final WorkerFactory? workerFactory;
+
+  @override
+  State<DaybookApp> createState() => _DaybookAppState();
+}
+
+class _DaybookAppState extends State<DaybookApp> {
+  late final ParserHost _parser = ParserHost(
+    db: widget.db,
+    foodsPath: widget.foodsPath,
+    factory: widget.workerFactory,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    // The worker starts after the first frame, so it never delays it.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _parser.begin());
+  }
+
+  @override
+  void dispose() {
+    unawaited(_parser.dispose());
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScope(
-      db: db,
-      clock: clock,
-      foodsPath: foodsPath,
+      db: widget.db,
+      clock: widget.clock,
+      foodsPath: widget.foodsPath,
+      parser: _parser,
       child: MaterialApp(
         title: S.title,
         theme: ThemeData(colorSchemeSeed: Colors.teal),
@@ -161,6 +194,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (!isWeightLink(link) || !mounted) return;
     // A weight sheet is already open: leave it in front, on its own tab.
     if (weightSheetOpen) return;
+    // The food screen is open: the sheet opens over it, the typed text stays,
+    // and the "Weight saved" bar is shown on that screen, where it can be
+    // seen (Home is underneath).
+    final food = FoodEntryScreenState.active;
+    if (food != null) {
+      food.openWeightSheet();
+      return;
+    }
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     setState(() => _index = _today);
     // Home's own method, so its confirmation bar applies here too.

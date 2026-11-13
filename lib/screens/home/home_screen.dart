@@ -8,16 +8,21 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../app_scope.dart';
 import '../../data/database.dart';
+import '../../data/food_data.dart';
+import '../../data/nutrients.dart';
 import '../../data/settings_data.dart';
 import '../../data/weight_data.dart';
 import '../../math/weight_trend.dart';
 import '../../strings.dart';
 import '../../util/dates.dart';
 import '../../util/units.dart';
+import '../food/confirm_bar.dart';
+import '../food/food_entry_screen.dart';
+import '../food/meal_slots.dart';
 import '../weight/weight_sheet.dart';
 
-/// The Today tab. This step has the date, the weight row and the bottom
-/// action bar. The budget card and meals come in later steps.
+/// The Today tab: the date, the meals, the weight row and the bottom action
+/// bar. The budget card and the exercise rows come in later steps.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -41,19 +46,45 @@ class HomeScreenState extends State<HomeScreen> {
   Stream<List<WeightEntry>>? _weights;
   Stream<List<TrendPoint>>? _trend;
   Stream<UnitSystem>? _units;
+  Stream<List<MealSlot>>? _slots;
+  Stream<DayLog>? _day;
+  String? _dayFor;
 
-  SavedWeight? _saved;
-  bool _undoFailed = false;
+  // The one message above the action bar, with its Undo. The Undo of a deleted
+  // meal holds that meal's rows in memory; they are dropped when the message
+  // goes (one Undo, ten seconds, or another message).
+  //
+  // Task 8.2: Import must discard a pending Undo. It would leave the held rows
+  // pointing at a database that Import has replaced. Clear [_notice] (or add a
+  // method here that does) before Import writes.
+  _Notice? _notice;
   Timer? _bannerTimer;
+  var _foodOpen = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final db = AppScope.of(context).db;
     if (_weights == null) {
-      final db = AppScope.of(context).db;
       _weights = db.watchWeights();
       _trend = db.watchTrend();
       _units = db.watchUnits();
+      _slots = watchMealSlots(db);
+    }
+    // The meals follow the day: a new stream when "today" changes.
+    if (_dayFor != widget.today) {
+      _dayFor = widget.today;
+      _day = db.watchDay(widget.today);
+    }
+  }
+
+  @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A new day (the shell moved past midnight): read that day's meals.
+    if (_dayFor != widget.today) {
+      _dayFor = widget.today;
+      _day = AppScope.of(context).db.watchDay(widget.today);
     }
   }
 
@@ -63,6 +94,12 @@ class HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  void _showNotice(_Notice n) {
+    _bannerTimer?.cancel();
+    _bannerTimer = Timer(_bannerTime, _hideBanner);
+    setState(() => _notice = n);
+  }
+
   /// Opens the weight sheet and shows the confirmation bar after a save.
   /// The + Weight button and the widget link both come here.
   Future<void> openWeightSheet() async {
@@ -70,31 +107,102 @@ class HomeScreenState extends State<HomeScreen> {
     // functions share one guard.
     final saved = await showWeightSheet(context);
     if (saved == null || !mounted) return;
-    _bannerTimer?.cancel();
-    _bannerTimer = Timer(_bannerTime, _hideBanner);
-    setState(() {
-      _saved = saved;
-      _undoFailed = false;
-    });
+    _showNotice(
+      _Notice(
+        () => _weightMessage(saved, AppScope.of(context).clock().localDate),
+        undo: () => _undoWeight(saved),
+        failed: S.undoFailed,
+      ),
+    );
   }
 
   void _hideBanner() {
-    if (mounted) setState(() => _saved = null);
+    if (mounted) setState(() => _notice = null);
   }
 
   Future<void> _undo() async {
-    final saved = _saved;
-    if (saved == null) return;
-    final scope = AppScope.of(context);
+    final notice = _notice;
+    if (notice == null || notice.undo == null) return;
     try {
-      await scope.db.deleteWeight(saved.row.id, scope.clock());
+      await notice.undo!();
       if (!mounted) return;
       _bannerTimer?.cancel();
-      setState(() => _saved = null);
+      setState(() => _notice = null);
     } catch (_) {
-      // Includes a missing row. The weight stays saved, and the banner says so.
+      // Includes a missing row. The row stays as it was, and the bar says so.
       if (!mounted) return;
-      setState(() => _undoFailed = true);
+      setState(() => _notice = _Notice(() => notice.failed));
+    }
+  }
+
+  Future<void> _undoWeight(SavedWeight saved) {
+    final scope = AppScope.of(context);
+    return scope.db.deleteWeight(saved.row.id, scope.clock());
+  }
+
+  /// Opens the food screen: a new meal (the day shown, the meal from the
+  /// clock, or [slotId]), a logged [meal] to edit, or a closed screen
+  /// reopened from its [draft]. Then shows what happened.
+  Future<void> openFood({
+    StoredMeal? meal,
+    int? slotId,
+    FoodDraft? draft,
+  }) async {
+    if (_foodOpen) return; // a fast double tap opens one screen
+    _foodOpen = true;
+    final FoodEntryResult? result;
+    try {
+      result = await Navigator.of(context, rootNavigator: true)
+          .push<FoodEntryResult>(
+            MaterialPageRoute(
+              builder: (_) => FoodEntryScreen(
+                date: widget.today,
+                slotId: slotId,
+                editing: meal,
+                draft: draft,
+              ),
+            ),
+          );
+    } finally {
+      _foodOpen = false;
+    }
+    if (!mounted || result == null) return;
+    final db = AppScope.of(context).db;
+    switch (result) {
+      case FoodSaved(:final meal, :final edited):
+        // Built from the stored meal that was read back, not from the text.
+        // An edit has no Undo: the previous version is not kept.
+        _showNotice(
+          _Notice(
+            () => S.mealSaved(meal.slotName, meal.totals[Nutrients.energy]),
+            // Undo of a save deletes the meal. The rows it returns for a later
+            // Undo are not kept: a save's Undo is offered once.
+            undo: edited ? null : () => db.deleteMeal(meal.meal.id),
+            failed: S.undoMealFailed,
+          ),
+        );
+      case FoodDeleted(:final deleted):
+        final m = deleted.meal;
+        _showNotice(
+          _Notice(
+            () => S.mealDeleted(m.slotName, m.totals[Nutrients.energy]),
+            undo: () => db.undoDeleteMeal(deleted),
+            failed: S.undoDeleteMealFailed,
+          ),
+        );
+      case FoodAbandoned(:final draft):
+        _showNotice(
+          _Notice(
+            () => S.mealNotSaved(draft.slotName),
+            undo: () async {
+              // Undo opens the screen again with the text and the picks. It
+              // does not wait for the screen: that screen's own result shows
+              // its own message when it closes.
+              unawaited(openFood(draft: draft));
+            },
+            failed: S.undoMealFailed,
+          ),
+        );
     }
   }
 
@@ -122,6 +230,8 @@ class HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                _Meals(slots: _slots!, day: _day!, onOpen: openFood),
+                const SizedBox(height: 12),
                 _WeightRow(
                   weights: _weights!,
                   trend: _trend!,
@@ -133,41 +243,10 @@ class HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        if (_saved != null)
-          Material(
-            color: theme.colorScheme.secondaryContainer,
-            child: ContentWidth(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 16, right: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            _undoFailed
-                                ? S.undoFailed
-                                : _savedMessage(
-                                    AppScope.of(context).clock().localDate,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (!_undoFailed)
-                      TextButton(
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                        ),
-                        onPressed: _undo,
-                        child: const Text(S.undo),
-                      ),
-                  ],
-                ),
-              ),
-            ),
+        if (_notice != null)
+          ConfirmBar(
+            message: _notice!.message(),
+            onUndo: _notice!.undo == null ? null : _undo,
           ),
         Material(
           color: theme.colorScheme.surfaceContainer,
@@ -176,12 +255,12 @@ class HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     flex: 2,
                     child: FilledButton(
-                      onPressed: null,
+                      onPressed: openFood,
                       style: _barButton,
-                      child: Text(S.addFood),
+                      child: const Text(S.addFood),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -211,8 +290,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   /// Built from the stored row that saveWeight returned, not from the text.
   /// [today] is read from the clock as the message is built.
-  String _savedMessage(String today) {
-    final s = _saved!;
+  static String _weightMessage(SavedWeight s, String today) {
     final minute = minuteOfDayOf(s.row.measuredAtMs, s.row.tzOffsetMinutes);
     return S.weightSaved(
       formatWeight(s.row.weightKg, s.units),
@@ -220,6 +298,17 @@ class HomeScreenState extends State<HomeScreen> {
       S.whenInSentence(s.row.localDate, minute, today),
     );
   }
+}
+
+/// The message above the action bar. [message] is read each time the bar is
+/// drawn. A null [undo] means no Undo button. [failed] replaces the message,
+/// with no Undo, when the Undo did not work.
+class _Notice {
+  const _Notice(this.message, {this.undo, this.failed = ''});
+
+  final String Function() message;
+  final Future<void> Function()? undo;
+  final String failed;
 }
 
 const _barButton = ButtonStyle(
@@ -316,6 +405,132 @@ class _WeightRow extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+typedef _OpenFood = Future<void> Function({
+  StoredMeal? meal,
+  int? slotId,
+  FoodDraft? draft,
+});
+
+/// The day's meals, in meal order, each opening Food entry. A meal with
+/// nothing logged stays listed, so it is always one tap away (home.html).
+class _Meals extends StatelessWidget {
+  const _Meals({required this.slots, required this.day, required this.onOpen});
+
+  final Stream<List<MealSlot>> slots;
+  final Stream<DayLog> day;
+  final _OpenFood onOpen;
+
+  /// The foods in brief: each name up to its first comma.
+  static String _foods(StoredMeal m) =>
+      [for (final e in m.entries) e.entry.foodName.split(',').first.trim()]
+          .join(', ');
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return StreamBuilder<List<MealSlot>>(
+      stream: slots,
+      builder: (context, slotSnap) => StreamBuilder<DayLog>(
+        stream: day,
+        builder: (context, daySnap) {
+          if (!slotSnap.hasData || !daySnap.hasData) {
+            return const SizedBox.shrink();
+          }
+          final meals = daySnap.data!.meals;
+          final rows = <Widget>[];
+          for (final slot in slotSnap.data!) {
+            final here = [
+              for (final m in meals)
+                if (m.meal.slotId == slot.id) m,
+            ];
+            if (here.isEmpty) {
+              if (slot.archived) continue;
+              rows.add(
+                _MealRow(
+                  title: slot.name,
+                  detail: S.mealEmpty,
+                  onTap: () => onOpen(slotId: slot.id),
+                ),
+              );
+            }
+            for (final m in here) {
+              rows.add(
+                _MealRow(
+                  title: slot.name,
+                  kcal: S.kcal(m.totals[Nutrients.energy]),
+                  detail: _foods(m),
+                  onTap: () => onOpen(meal: m),
+                ),
+              );
+            }
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(S.homeMeals, style: theme.textTheme.titleMedium),
+              ),
+              ...rows,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MealRow extends StatelessWidget {
+  const _MealRow({
+    required this.title,
+    required this.detail,
+    required this.onTap,
+    this.kcal,
+  });
+
+  final String title;
+  final String? kcal;
+  final String detail;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (kcal != null) Text(kcal!),
+                ],
+              ),
+              Text(
+                detail,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -202,6 +202,177 @@ class S {
     return '${w[0].toUpperCase()}${w.substring(1)}, ${timeOfDay(minute)}';
   }
 
+  // Food entry screen, and the meal rows and messages on Home.
+  static const foodBoxHint =
+      'Type what you ate, for example: 2 eggs, toast with butter, coffee';
+  static const foodBoxHintMore = 'Tap to type more';
+  static const foodBoxLabel = 'What you ate';
+  static const foodClose = 'Close';
+  static const foodPreviousDay = 'Previous day';
+  static const foodNextDay = 'Next day';
+  static const foodMenu = 'More options';
+  static const foodDeleteMeal = 'Delete meal';
+  static const foodSaveAsSaved = 'Save as a saved meal';
+  static const foodMealPicker = 'Meal';
+  static String foodEditing(String slot) => 'Editing $slot';
+  static String foodRemove(String name) => 'Remove $name';
+  static const foodGroupAdded = 'Added';
+  static const foodGroupTyped = 'From your text';
+  static const foodLoading = 'Getting the food list ready...';
+  static const foodSaveFailed =
+      'Could not save. Your meal is still here. Try again.';
+  static const foodDeleteFailed = 'Could not delete. The meal is still logged.';
+  static const foodParseFailed =
+      'Could not read that just now. Keep typing and it will catch up.';
+  static const foodParserStopped =
+      'The food list stopped working. Your text is kept. Close this screen '
+      'and open it again.';
+  static const fixOne = 'Fix 1 item';
+  static String fixItems(int n) => n == 1 ? fixOne : 'Fix $n items';
+  static String itemsNotCounted(int n) =>
+      n == 1 ? '1 item not counted' : '$n items not counted';
+
+  // The markers on a line: each is a word and a shape (grammar 8.2).
+  static const markerGuess = 'Guess';
+  static const markerAssumed = 'Assumed';
+  static const markerNotFound = 'Not found';
+  static const markerYourPick = 'Your pick';
+  static const markerScanned = 'Scanned';
+  static const lineNotCounted = 'not counted';
+  static const lineTapToPick = 'Tap to pick a food';
+  static String lineItems(int n) => n == 1 ? '1 item' : '$n items';
+
+  /// '1,255' style, for kcal.
+  static String count(int n) {
+    final s = n.abs().toString();
+    final out = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) out.write(',');
+      out.write(s[i]);
+    }
+    return '${n < 0 ? '-' : ''}$out';
+  }
+
+  /// '167 kcal'. A food with no energy value shows '-'.
+  static String kcal(double? v) =>
+      v == null ? '- kcal' : '${count(v.round())} kcal';
+  static String _gram(double? v) => v == null ? '-' : count(v.round());
+  static String macros(double? p, double? c, double? f) =>
+      'P ${_gram(p)}  C ${_gram(c)}  F ${_gram(f)}';
+
+  static String _trimmed(double v, int decimals) {
+    var s = v.toStringAsFixed(decimals);
+    if (s.contains('.')) {
+      s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    }
+    return s;
+  }
+
+  static String quantityText(double q) => _trimmed(q, 2);
+  static String _gramsText(double g) =>
+      g >= 10 ? g.round().toString() : _trimmed(g, 1);
+
+  /// '2 slice, 56 g', '1, 200 g' for a bare count, '200 g' when the amount is
+  /// already in the base unit.
+  static String amountText(
+    double q,
+    String unit,
+    double base,
+    String baseUnit,
+  ) {
+    final b = '${_gramsText(base)} $baseUnit';
+    if (unit.isEmpty) return '${quantityText(q)}, $b';
+    if (unit == baseUnit && (q - base).abs() < 0.05) return b;
+    return '${quantityText(q)} $unit, $b';
+  }
+
+  /// The multiplier of a saved meal header, shown only when it is not 1.
+  static String multiplierText(double m) {
+    if (m == 0.5) return '× ½';
+    return '× ${_trimmed(m, 2)}';
+  }
+
+  static String _spokenUnit(String unit, double q) {
+    final one = q == 1;
+    return switch (unit) {
+      'g' => one ? 'gram' : 'grams',
+      'ml' => one ? 'milliliter' : 'milliliters',
+      'oz' => one ? 'ounce' : 'ounces',
+      'fl oz' => one ? 'fluid ounce' : 'fluid ounces',
+      'tbsp' => one ? 'tablespoon' : 'tablespoons',
+      'tsp' => one ? 'teaspoon' : 'teaspoons',
+      'cup' => one ? 'cup' : 'cups',
+      _ => unit,
+    };
+  }
+
+  static String spokenAmount(
+    double q,
+    String unit,
+    double base,
+    String baseUnit,
+  ) {
+    final b = '${_gramsText(base)} ${_spokenUnit(baseUnit, base)}';
+    if (unit.isEmpty) return '${quantityText(q)}, $b';
+    if (unit == baseUnit && (q - base).abs() < 0.05) return b;
+    return '${quantityText(q)} ${_spokenUnit(unit, q)}, $b';
+  }
+
+  /// "Guess. Cream, half and half. 2 tablespoons, 30 grams. 39 calories.
+  /// Double tap to change." [markers] are the marker words, in order.
+  static String spokenLine(
+    List<String> markers,
+    String name,
+    String amount,
+    double? kcal,
+  ) =>
+      '${[...markers, name, amount, if (kcal != null) '${count(kcal.round())} calories'].join('. ')}. '
+      'Double tap to change.';
+  static String spokenNotFound(String typed) =>
+      '$markerNotFound. $typed. Not counted. Double tap to pick a food.';
+  static String spokenHeader(
+    String name,
+    String? multiplier,
+    int items,
+    double? kcal,
+  ) =>
+      '${['Saved meal', name, ?multiplier, lineItems(items), if (kcal != null) '${count(kcal.round())} calories'].join('. ')}. '
+      'Double tap to change.';
+  static String spokenTotals(double? kcal, double? p, double? c, double? f) =>
+      'Meal total: ${count((kcal ?? 0).round())} calories, '
+      'protein ${_gram(p)} grams, carbs ${_gram(c)} grams, fat ${_gram(f)} grams.';
+
+  /// 'Today, Nov 12', 'Yesterday, Nov 11' or 'Wed, Nov 4'.
+  static String foodDate(String localDate, String today) {
+    if (localDate == today) return 'Today, ${monthDay(localDate, today)}';
+    if (localDate == addDays(today, -1)) {
+      return 'Yesterday, ${monthDay(localDate, today)}';
+    }
+    return dayShort(localDate, today);
+  }
+
+  // Save as a saved meal.
+  static const savedMealTitle = 'Save as a saved meal';
+  static const savedMealName = 'Name';
+  static const savedMealNameEmpty = 'Give it a name.';
+  static const savedMealNameTaken =
+      'You already have a saved meal with that name. Try another.';
+  static const savedMealFailed = 'Could not save the saved meal. Try again.';
+  static String savedMealCreated(String name) => 'Saved meal "$name" created.';
+  static const cancel = 'Cancel';
+
+  // Home: the meals.
+  static const homeMeals = 'Meals';
+  static const mealEmpty = 'Nothing yet. Tap to add.';
+  static String mealSaved(String slot, double? kcal) =>
+      '$slot saved, ${kcal == null ? '-' : count(kcal.round())} kcal';
+  static String mealNotSaved(String slot) => '$slot not saved';
+  static String mealDeleted(String slot, double? kcal) =>
+      '$slot deleted, ${kcal == null ? '-' : count(kcal.round())} kcal';
+  static const undoMealFailed = 'Could not undo. The meal is still saved.';
+  static const undoDeleteMealFailed =
+      'Could not undo. The meal is still deleted.';
+
   // Phase 2 data check screen. Temporary: replaced by the real screens in Phase 4.
   static const dataCheck = 'Data check';
   static const loadingFoods = 'Getting the food database ready...';

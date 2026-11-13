@@ -6,6 +6,9 @@ import 'dart:async';
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
+import 'package:daybook/data/food_data.dart';
+import 'package:daybook/data/nutrients.dart';
+import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
@@ -138,7 +141,7 @@ void main() {
     expect(find.text('+ Food'), findsOneWidget);
     expect(find.text('Cardio'), findsOneWidget);
     final food = tester.widget<FilledButton>(barButton('+ Food'));
-    expect(food.onPressed, isNull);
+    expect(food.onPressed, isNotNull);
     final cardio = tester.widget<FilledButton>(barButton('Cardio'));
     expect(cardio.onPressed, isNull);
     final weight = tester.widget<FilledButton>(barButton('Weight'));
@@ -439,4 +442,160 @@ void main() {
     await openApp(tester, size: const Size(344, 700));
     expect(tester.takeException(), isNull);
   });
+
+  // The meals.
+
+  MealLineInput line(String name, double kcal, {String ref = 'usda:1'}) =>
+      MealLineInput(
+        foodRef: ref,
+        foodName: name,
+        quantity: 1,
+        unitLabel: '',
+        baseQuantity: 100,
+        baseUnit: 'g',
+        nutrients: {Nutrients.energy: kcal, Nutrients.protein: 5},
+      );
+
+  Future<StoredMeal> seedMeal(
+    WidgetTester tester,
+    String date,
+    int slotId,
+    List<MealLineInput> lines,
+  ) => tester
+      .runAsync(
+        () => db.saveMeal(
+          now: nowFixed,
+          localDate: date,
+          slotId: slotId,
+          lines: lines,
+        ),
+      )
+      .then((m) => m!);
+
+  appTest('Home lists every meal with its kcal and foods in brief, and a '
+      'meal with nothing says so', (tester) async {
+    await seedMeal(tester, '2026-11-12', 1, [
+      line('Egg, whole, cooked, NS as to cooking method', 176),
+      line('Bread, sour dough, toasted', 167),
+    ]);
+    await seedMeal(tester, '2026-11-11', 2, [line('Yesterday food', 999)]);
+    await openApp(tester);
+    expect(find.text('Meals'), findsOneWidget);
+    for (final slot in ['Breakfast', 'Lunch', 'Dinner', 'Snack']) {
+      expect(find.text(slot), findsOneWidget, reason: slot);
+    }
+    expect(find.text('343 kcal'), findsOneWidget);
+    expect(find.text('Egg, Bread'), findsOneWidget);
+    // Lunch, Dinner and Snack: nothing logged today.
+    expect(find.text('Nothing yet. Tap to add.'), findsNWidgets(3));
+    expect(find.text('Yesterday food'), findsNothing);
+  });
+
+  appTest('a day with two meals in one slot lists both', (tester) async {
+    await seedMeal(tester, '2026-11-12', 1, [line('Apple, raw', 95)]);
+    await seedMeal(tester, '2026-11-12', 1, [line('Banana, raw', 105)]);
+    await openApp(tester);
+    expect(find.text('Breakfast'), findsNWidgets(2));
+    expect(find.text('Apple'), findsOneWidget);
+    expect(find.text('Banana'), findsOneWidget);
+    expect(find.text('Nothing yet. Tap to add.'), findsNWidgets(3));
+  });
+
+  appTest('+ Food opens the food screen, and a fast double tap opens one', (
+    tester,
+  ) async {
+    await openApp(tester);
+    await tester.tap(barButton('+ Food'));
+    await tester.tap(barButton('+ Food'), warnIfMissed: false);
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(FoodEntryScreen), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing); // a full screen
+    await tester.tap(find.byTooltip('Close'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(FoodEntryScreen), findsNothing);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+  });
+
+  appTest('tapping a meal opens it for editing, with its entries as added '
+      'lines', (tester) async {
+    await seedMeal(tester, '2026-11-12', 1, [line('Apple, raw', 95)]);
+    await openApp(tester);
+    await tester.tap(find.text('Apple'));
+    await settle(tester);
+    expect(find.byType(FoodEntryScreen), findsOneWidget);
+    expect(find.text('Editing Breakfast'), findsOneWidget);
+    expect(find.text('Apple, raw'), findsOneWidget);
+  });
+
+  appTest('tapping an empty meal opens the food screen with that meal '
+      'picked', (tester) async {
+    await openApp(tester);
+    // The second "Dinner" is the empty row; the chips are not drawn yet.
+    await tester.tap(find.text('Dinner'));
+    await settle(tester);
+    expect(find.byType(FoodEntryScreen), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Dinner'))
+          .selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Breakfast'))
+          .selected,
+      isFalse,
+    );
+  });
+
+  appTest('the meals follow the day when the app resumes after midnight', (
+    tester,
+  ) async {
+    await seedMeal(tester, '2026-11-12', 1, [line('Apple, raw', 95)]);
+    await seedMeal(tester, '2026-11-13', 2, [line('Soup', 200)]);
+    await openApp(tester);
+    expect(find.text('Apple'), findsOneWidget);
+    expect(find.text('Soup'), findsNothing);
+
+    clockNow = at('2026-11-13', 0, 30, -360);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(find.text('Friday, Nov 13'), findsOneWidget);
+    expect(find.text('Soup'), findsOneWidget);
+    expect(find.text('Apple'), findsNothing);
+  });
+
+  for (final width in [344.0, 673.0]) {
+    appTest('meal rows have no overflow at ${width.toInt()} dp and at 2x '
+        'text, and are at least 48 dp tall', (tester) async {
+      await seedMeal(tester, '2026-11-12', 1, [
+        line('Egg, whole, cooked, NS as to cooking method', 176),
+        line('Bread, sour dough, toasted', 167),
+        line('Butter, NFS', 104),
+        line('Coffee, NS as to type', 4),
+        line('Cream, half and half', 39),
+      ]);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await openApp(tester, size: Size(width, 700));
+      expect(tester.takeException(), isNull);
+      final row = find.ancestor(
+        of: find.text('Egg, Bread, Butter, Coffee, Cream'),
+        matching: find.byType(InkWell),
+      );
+      expect(tester.getSize(row).height, greaterThanOrEqualTo(48));
+      final empty = find.ancestor(
+        of: find.text('Nothing yet. Tap to add.').first,
+        matching: find.byType(InkWell),
+      );
+      expect(tester.getSize(empty).height, greaterThanOrEqualTo(48));
+    });
+  }
 }
