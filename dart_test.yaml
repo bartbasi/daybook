@@ -1,0 +1,7 @@
+# Daybook. Copyright 2026 Play, Inc.
+# Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
+
+tags:
+  # Speed tests with strict timing budgets. They only pass reliably when
+  # nothing else is running, so CI runs them on their own, one file at a time.
+  benchmark:

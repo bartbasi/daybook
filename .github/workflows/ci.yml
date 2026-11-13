@@ -44,7 +44,12 @@ jobs:
 
       - run: flutter analyze
 
-      - run: flutter test
+      - run: flutter test --exclude-tags benchmark
+
+      # The speed tests have strict time budgets, so they run alone, one file
+      # at a time, after everything else has finished.
+      - name: Speed tests, run alone
+        run: flutter test --tags benchmark --concurrency=1
 
       - name: Food database build script tests
         run: python3 -I -m unittest discover -s tools

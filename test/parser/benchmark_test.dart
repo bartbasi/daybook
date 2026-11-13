@@ -1,6 +1,10 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+// Strict timing budgets: CI runs these alone (see dart_test.yaml and ci.yml).
+@Tags(['benchmark'])
+library;
+
 import 'dart:io';
 
 import 'package:daybook/parser/parser.dart';
