@@ -1,6 +1,8 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:async';
+
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
@@ -8,6 +10,7 @@ import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/util/units.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,10 +29,44 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 400));
 }
 
+/// Lets a test hold a database write, or the reads the weight sheet makes.
+class Gate extends QueryInterceptor {
+  Completer<void>? hold;
+  Completer<void>? holdReads;
+  Completer<void>? holdUnits;
+
+  @override
+  Future<List<Map<String, Object?>>> runSelect(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    await holdReads?.future;
+    if (statement.contains('settings')) await holdUnits?.future;
+    return super.runSelect(executor, statement, args);
+  }
+
+  @override
+  Future<int> runInsert(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    await hold?.future;
+    return super.runInsert(executor, statement, args);
+  }
+}
+
 void main() {
   late AppDatabase db;
+  late Gate gate;
+  late Now clockNow;
 
-  setUp(() => db = AppDatabase(NativeDatabase.memory()));
+  setUp(() {
+    gate = Gate();
+    clockNow = nowFixed;
+    db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
+  });
 
   /// Unmounts the app first, so drift's stream clean-up timer runs, then
   /// closes the database.
@@ -50,7 +87,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      DaybookApp(db: db, clock: () => nowFixed, foodsPath: Future.value('')),
+      DaybookApp(db: db, clock: () => clockNow, foodsPath: Future.value('')),
     );
     await settle(tester);
   }
@@ -105,8 +142,121 @@ void main() {
     await openApp(tester);
     expect(find.text('181.8 lb'), findsOneWidget);
     expect(find.text('Today, 7:02 am'), findsOneWidget);
-    expect(find.textContaining('Trend '), findsOneWidget);
+    // 182.4 moves 10% of the way to 181.8: 182.34, shown as 182.3.
+    await settle(tester); // the trend stream starts after the weights arrive
+    expect(find.text('Trend 182.3 lb'), findsOneWidget);
     expect(find.text('No weight yet. Tap to add.'), findsNothing);
+  });
+
+  appTest('a metric user never sees lb while Home loads', (tester) async {
+    await tester.runAsync(() => db.setUnits(UnitSystem.metric));
+    await seed(tester, 82.5, UnitSystem.metric, at('2026-11-11', 6, 55, -360));
+    // The weights arrive first and the units setting is slow.
+    gate.holdUnits = Completer<void>();
+    await openApp(tester);
+    await settle(tester);
+    expect(find.textContaining(' lb'), findsNothing);
+    expect(find.textContaining('82.5'), findsNothing);
+
+    gate.holdUnits!.complete();
+    await settle(tester);
+    expect(find.text('82.5 kg'), findsOneWidget);
+    expect(find.textContaining(' lb'), findsNothing);
+  });
+
+  appTest('Home follows the clock past midnight when the app resumes', (
+    tester,
+  ) async {
+    await seed(tester, 181.8, UnitSystem.imperial, nowFixed);
+    await openApp(tester);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+    expect(find.text('Today, 7:02 am'), findsOneWidget);
+
+    clockNow = at('2026-11-13', 0, 30, -360);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.text('Friday, Nov 13'), findsOneWidget);
+    expect(find.text('Yesterday, 7:02 am'), findsOneWidget);
+  });
+
+  appTest('a fast double tap on Weight opens one sheet', (tester) async {
+    await openApp(tester);
+    // The sheet reads the units and the last weight before it shows. Hold
+    // those reads so the second tap lands while the first is still opening.
+    gate.holdReads = Completer<void>();
+    await tester.tap(barButton('Weight'));
+    await tester.tap(barButton('Weight'));
+    await tester.tap(find.text('No weight yet. Tap to add.'));
+    gate.holdReads!.complete();
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
+
+    // One tap on the scrim leaves no second sheet underneath.
+    await tester.tapAt(const Offset(200, 20));
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsNothing);
+
+    // Closed again, it can be opened again.
+    await tester.tap(find.text('No weight yet. Tap to add.'));
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
+  });
+
+  appTest('the sheet cannot be closed while the save is in flight, and Home '
+      'then shows the confirmation', (tester) async {
+    await openApp(tester);
+    await tester.tap(barButton('Weight'));
+    await settle(tester);
+    gate.hold = Completer<void>();
+    await tester.enterText(field(), '181.8');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+
+    await tester.tapAt(const Offset(200, 20)); // the scrim
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
+    await tester.binding.handlePopRoute(); // the back button
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
+    await tester.drag(find.byType(WeightSheet), const Offset(0, 500));
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsOneWidget);
+
+    gate.hold!.complete();
+    await settle(tester);
+    expect(find.byType(WeightSheet), findsNothing);
+    expect(find.text('Weight saved: 181.8 lb, today 7:02 am'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+    expect((await rows(tester)).length, 1);
+  });
+
+  appTest('when Undo fails the bar says the weight is still saved', (
+    tester,
+  ) async {
+    await openApp(tester);
+    await tester.tap(barButton('Weight'));
+    await settle(tester);
+    await tester.enterText(field(), '181.8');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    expect(find.text('Undo'), findsOneWidget);
+
+    // The row is gone from the database, so marking it deleted finds nothing.
+    await tester.runAsync(() => db.delete(db.weightEntries).go());
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(
+      find.text('Could not undo. The weight is still saved.'),
+      findsOneWidget,
+    );
+    expect(find.text('Undo'), findsNothing);
   });
 
   appTest('metric shows kg on the row and the confirmation', (tester) async {

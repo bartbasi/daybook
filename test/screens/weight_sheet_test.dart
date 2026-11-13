@@ -261,6 +261,10 @@ void main() {
     expect(saveEnabled(tester), isFalse);
     expect(find.text('Enter a weight from 22.7 to 453.6 kg.'), findsOneWidget);
 
+    await tester.enterText(field(), '1.2.3');
+    await tester.pump();
+    expect(find.text('Enter a number, like 82.5.'), findsOneWidget);
+
     await tester.enterText(field(), '81.9');
     await tester.pump();
     await tester.tap(saveButton());
@@ -312,6 +316,72 @@ void main() {
     expect(stored.measuredAtMs, expected.utcMs);
     // It was made now, though it counts for Nov 5.
     expect(stored.createdAtMs, nowFixed.utcMs);
+  });
+
+  testWidgets('the sheet cannot be closed while the save is in flight', (
+    tester,
+  ) async {
+    await openSheet(tester);
+    gate.hold = Completer<void>();
+    await tester.enterText(field(), '181.8');
+    await tester.pump();
+    await tester.tap(saveButton());
+    await settle(tester);
+
+    await tester.tapAt(const Offset(200, 20)); // the scrim
+    await settle(tester);
+    expect(field(), findsOneWidget);
+    await tester.binding.handlePopRoute(); // the back button
+    await settle(tester);
+    expect(field(), findsOneWidget);
+    await tester.drag(find.byType(WeightSheet), const Offset(0, 500));
+    await settle(tester);
+    expect(field(), findsOneWidget);
+    expect(result, isNull);
+    expect(closedWithoutSave, isFalse);
+
+    gate.hold!.complete();
+    await settle(tester);
+    expect(field(), findsNothing);
+    expect(result!.row, (await rows(tester)).single);
+  });
+
+  testWidgets('when no save is running, back closes the sheet', (tester) async {
+    await openSheet(tester);
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+    expect(field(), findsNothing);
+    expect(closedWithoutSave, isTrue);
+  });
+
+  testWidgets('a picked time that has not happened yet is refused', (
+    tester,
+  ) async {
+    await openSheet(tester);
+    await tester.tap(find.text('Change'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); // today, the default day
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.keyboard_outlined));
+    await tester.pumpAndSettle();
+    final boxes = find.descendant(
+      of: find.byType(TimePickerDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(boxes.at(0), '9');
+    await tester.enterText(boxes.at(1), '30');
+    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // 9:30 am is after the clock's 7:02 am: the earlier value stays.
+    expect(find.text('That time has not happened yet.'), findsOneWidget);
+    expect(find.text('Today, 7:02 am'), findsOneWidget);
+    await tester.enterText(field(), '180.2');
+    await tester.pump();
+    await tester.tap(saveButton());
+    await settle(tester);
+    expect((await rows(tester)).single.measuredAtMs, nowFixed.utcMs);
   });
 
   testWidgets('cancelling the pickers leaves the time as now', (tester) async {

@@ -37,7 +37,9 @@ class S {
   static String lastWeight(String weight, String unit, String when) =>
       'Last: $weight $unit, $when';
   static const weightMissing = 'Enter your weight.';
-  static const weightNotNumber = 'Enter a number, like 181.8.';
+  static String weightNotNumber(UnitSystem units) =>
+      'Enter a number, like ${units == UnitSystem.imperial ? '181.8' : '82.5'}.';
+  static const timeInFuture = 'That time has not happened yet.';
   static String weightOutOfRange(UnitSystem units) =>
       units == UnitSystem.imperial
       ? 'Enter a weight from 50 to 1,000 lb.'

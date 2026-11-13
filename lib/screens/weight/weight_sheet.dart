@@ -42,6 +42,9 @@ Future<SavedWeight?> showWeightSheet(
   return showModalBottomSheet<SavedWeight>(
     context: context,
     isScrollControlled: true,
+    // A drag calls Navigator.pop directly, so it would close the sheet while
+    // a save is in flight. PopScope in the sheet covers back and the scrim.
+    enableDrag: false,
     useSafeArea: true,
     constraints: const BoxConstraints(maxWidth: 600),
     builder: (_) => WeightSheet(
@@ -88,6 +91,7 @@ class _WeightSheetState extends State<WeightSheet> {
   Now? _at;
   bool _saving = false;
   bool _failed = false;
+  bool _futureTime = false;
 
   @override
   void initState() {
@@ -145,6 +149,7 @@ class _WeightSheetState extends State<WeightSheet> {
   }
 
   Future<void> _change() async {
+    setState(() => _futureTime = false);
     final cur = _at ?? _opened;
     final day = parseDate(cur.localDate);
     final today = parseDate(_opened.localDate);
@@ -170,12 +175,18 @@ class _WeightSheetState extends State<WeightSheet> {
       time.hour,
       time.minute,
     );
+    final picked = Now.fromLocal(
+      formatDate(DateTime.utc(date.year, date.month, date.day)),
+      time.hour * 60 + time.minute,
+      widget.offsetAt(local),
+    );
     setState(() {
-      _at = Now.fromLocal(
-        formatDate(DateTime.utc(date.year, date.month, date.day)),
-        time.hour * 60 + time.minute,
-        widget.offsetAt(local),
-      );
+      if (picked.utcMs > widget.clock().utcMs) {
+        // Keep the earlier value and say so.
+        _futureTime = true;
+      } else {
+        _at = picked;
+      }
     });
   }
 
@@ -192,122 +203,137 @@ class _WeightSheetState extends State<WeightSheet> {
     final reason = switch (check) {
       _Check.ok => null,
       _Check.missing => S.weightMissing,
-      _Check.notNumber => S.weightNotNumber,
+      _Check.notNumber => S.weightNotNumber(widget.units),
       _Check.outOfRange => S.weightOutOfRange(widget.units),
     };
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Semantics(
-                        header: true,
-                        child: Text(
-                          S.weightTitle,
-                          style: theme.textTheme.titleLarge,
+    return PopScope(
+      canPop: !_saving,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Semantics(
+                          header: true,
+                          child: Text(
+                            S.weightTitle,
+                            style: theme.textTheme.titleLarge,
+                          ),
                         ),
-                      ),
-                      Text(
-                        S.whenAsLabel(
-                          at.localDate,
-                          at.minuteOfDay,
-                          _opened.localDate,
+                        Text(
+                          S.whenAsLabel(
+                            at.localDate,
+                            at.minuteOfDay,
+                            _opened.localDate,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                  onPressed: _saving ? null : _change,
-                  child: const Text(S.change),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Semantics(
-                    label: S.weightField,
-                    child: TextField(
-                      controller: _text,
-                      autofocus: true,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      textInputAction: TextInputAction.done,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                       ],
-                      style: theme.textTheme.headlineSmall,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                    ),
+                    onPressed: _saving ? null : _change,
+                    child: const Text(S.change),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      label: S.weightField,
+                      child: TextField(
+                        controller: _text,
+                        autofocus: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.done,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                        ],
+                        style: theme.textTheme.headlineSmall,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (_) => setState(() => _failed = false),
+                        onSubmitted: (_) => _save(),
                       ),
-                      onChanged: (_) => setState(() => _failed = false),
-                      onSubmitted: (_) => _save(),
                     ),
                   ),
-                ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(unit, style: theme.textTheme.titleMedium),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(72, 56),
+                    ),
+                    onPressed: (check == _Check.ok && !_saving) ? _save : null,
+                    child: const Text(S.save),
+                  ),
+                ],
+              ),
+              if (_futureTime)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(unit, style: theme.textTheme.titleMedium),
-                ),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(72, 56),
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: const Text(S.timeInFuture),
                   ),
-                  onPressed: (check == _Check.ok && !_saving) ? _save : null,
-                  child: const Text(S.save),
                 ),
-              ],
-            ),
-            if (reason != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Semantics(liveRegion: true, child: Text(reason)),
-              ),
-            if (_failed)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Semantics(
-                  liveRegion: true,
+              if (reason != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Semantics(liveRegion: true, child: Text(reason)),
+                ),
+              if (_failed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      S.saveFailed(_text.text.trim(), unit),
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              if (last != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    S.saveFailed(_text.text.trim(), unit),
-                    style: TextStyle(
-                      color: theme.colorScheme.error,
-                      fontWeight: FontWeight.bold,
+                    S.lastWeight(
+                      formatWeight(last.weightKg, widget.units),
+                      unit,
+                      _when(
+                        last.localDate,
+                        minuteOfDayOf(last.measuredAtMs, last.tzOffsetMinutes),
+                      ),
                     ),
+                    style: theme.textTheme.bodySmall,
                   ),
                 ),
-              ),
-            if (last != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  S.lastWeight(
-                    formatWeight(last.weightKg, widget.units),
-                    unit,
-                    _when(
-                      last.localDate,
-                      minuteOfDayOf(last.measuredAtMs, last.tzOffsetMinutes),
-                    ),
-                  ),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

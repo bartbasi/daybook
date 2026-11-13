@@ -25,7 +25,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _bannerTime = Duration(seconds: 10);
 
   Stream<List<WeightEntry>>? _weights;
@@ -35,6 +35,20 @@ class _HomeScreenState extends State<HomeScreen> {
   SavedWeight? _saved;
   bool _undoFailed = false;
   Timer? _bannerTimer;
+  bool _sheetOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// "Today" comes from the clock, so draw again when the app comes back
+  /// (it may be a new day).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+  }
 
   @override
   void didChangeDependencies() {
@@ -49,12 +63,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _bannerTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _openWeightSheet() async {
-    final saved = await showWeightSheet(context);
+    // A second tap while the sheet is opening or open does nothing.
+    if (_sheetOpen) return;
+    _sheetOpen = true;
+    SavedWeight? saved;
+    try {
+      saved = await showWeightSheet(context);
+    } finally {
+      _sheetOpen = false;
+    }
     if (saved == null || !mounted) return;
     _bannerTimer?.cancel();
     _bannerTimer = Timer(_bannerTime, _hideBanner);
@@ -228,9 +251,11 @@ class _WeightRow extends StatelessWidget {
     final theme = Theme.of(context);
     return StreamBuilder<UnitSystem>(
       stream: units,
-      initialData: UnitSystem.imperial,
       builder: (context, unitsSnap) {
-        final u = unitsSnap.data ?? UnitSystem.imperial;
+        // Draw nothing until the units are known, so a metric user never
+        // sees pounds for a frame.
+        if (!unitsSnap.hasData) return const SizedBox.shrink();
+        final u = unitsSnap.data!;
         return StreamBuilder<List<WeightEntry>>(
           stream: weights,
           builder: (context, weightsSnap) {
