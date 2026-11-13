@@ -592,12 +592,19 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
 
   /// The first saved meal expanded in this meal, for `meals.saved_meal_id`.
   int? _savedMealId(List<Line> typed) {
-    for (final l in [for (final a in _added) a.line, ...typed]) {
+    for (final l in [for (final a in _added) a.line]) {
       if (l.state == LineState.aliasOrSavedMeal && l.savedMealId != null) {
         return l.savedMealId;
       }
     }
-    return _keptSavedMealId;
+    // A saved meal turned into its items counts before one still typed.
+    if (_keptSavedMealId != null) return _keptSavedMealId;
+    for (final l in typed) {
+      if (l.state == LineState.aliasOrSavedMeal && l.savedMealId != null) {
+        return l.savedMealId;
+      }
+    }
+    return null;
   }
 
   String _slotName() {
@@ -628,6 +635,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// line that was not found. Opens the correction sheet. It is not awaited:
   /// Save, which can call this, must not stay busy while the sheet is open.
   void onLineTap(LineTap tap) {
+    // Nothing opens while a save is in progress; Save opens the Fix sheet
+    // itself, through [_requestSheet].
+    if (_busy) return;
+    _requestSheet(tap);
+  }
+
+  void _requestSheet(LineTap tap) {
     if (_sheetOpen || !mounted) return;
     // A line drawn for text the box has moved on from is not tapped: the
     // lines are about to catch up (rule 6).
@@ -693,15 +707,30 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     }
   }
 
+  // True when the last worker question threw (the worker stopped): the
+  // screen's own dead-worker message is enough then.
+  var _guardThrew = false;
+
   Future<T?> _guard<T>(Future<T> Function() f) async {
+    _guardThrew = false;
     try {
       return await f();
     } catch (_) {
+      _guardThrew = true;
       return null; // never the text or a line
     }
   }
 
-  void _stale() => sheetNote(S.foodSheetStale);
+  /// One plain line for a refusal, unless the worker died (then the screen
+  /// already says so).
+  void _refused(String text) {
+    if (_dead || _guardThrew) return;
+    sheetNote(text);
+  }
+
+  void _stale() {
+    if (!_dead) sheetNote(S.foodSheetStale);
+  }
 
   /// Rule 8: the text and the cursor in one step, so the next text sent to
   /// the parser is exactly this one.
@@ -720,6 +749,29 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     final w = await sheetWorker();
     if (w == null) return null;
     return _guard<Line?>(() => w.foodLine(ref, quantity: quantity, unit: unit));
+  }
+
+  /// Prices [ref] for a line that is not typed, keeping the amount it had:
+  /// first [quantity] of [unit] as text, then the same weight in grams, and
+  /// only then the food's default amount (reset is then true and the caller
+  /// says so). Null when the food cannot be priced at all.
+  Future<({Line line, bool reset})?> _priceFood(
+    String ref, {
+    double? quantity,
+    String unit = '',
+    double? grams,
+  }) async {
+    if (quantity != null) {
+      final l = await _foodLine(ref, quantity: quantity, unit: unit);
+      if (l != null) return (line: l, reset: false);
+    }
+    if (grams != null) {
+      final l = await _foodLine(ref, quantity: grams, unit: 'g');
+      if (l != null) return (line: l, reset: false);
+    }
+    final l = await _foodLine(ref);
+    if (l == null) return null;
+    return (line: l, reset: quantity != null || grams != null);
   }
 
   /// The handle, text and span of a typed line (or a typed saved meal
@@ -779,7 +831,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     }
     final out = await _guard(() => h.removeItem(text, _cursor(), span));
     if (out == null) {
-      sheetNote(S.foodSheetRefusedRemove);
+      _refused(S.foodSheetRefusedRemove);
       return null;
     }
     if (_controller.text != text) {
@@ -836,30 +888,37 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     LineTap tap,
     String ref, {
     Marker marker = Marker.yourPick,
+    double? quantity,
+    String? unit,
   }) async {
     if (_foodLevel(tap)) {
-      final line = await _foodLine(ref);
-      if (line == null) return sheetNote(S.foodSheetRefusedFood);
-      return _applyToAdded(tap, line);
+      // The new food keeps the line's amount, or the amount staged in the
+      // sheet; the weight is the second try, the default the last.
+      final old = tap.line;
+      final priced = await _priceFood(
+        ref,
+        quantity: quantity ?? old.quantity,
+        unit: quantity != null ? (unit ?? '') : (old.unitLabel ?? ''),
+        grams: quantity == null && old.baseUnit == 'g'
+            ? old.baseQuantity
+            : null,
+      );
+      if (priced == null) return _refused(S.foodSheetRefusedFood);
+      await _applyToAdded(tap, priced.line);
+      if (priced.reset) sheetNote(S.foodSheetAmountReset);
+      return;
     }
     final t = _typedTarget(tap);
     if (t == null) return;
     final ok = await _guard(
       () => t.h.pick(t.text, t.span, ref, marker: marker),
     );
-    if (ok != true) _stale();
+    if (ok != true) return _stale();
+    // A pick does not change the text, so the same text and span still hold.
+    if (quantity != null) await _rewriteTyped(tap, quantity, unit ?? '');
   }
 
-  @override
-  Future<void> sheetSetAmount(LineTap tap, double quantity, String unit) async {
-    if (_foodLevel(tap)) {
-      final ref = tap.line.foodRef;
-      final line = ref == null
-          ? null
-          : await _foodLine(ref, quantity: quantity, unit: unit);
-      if (line == null) return sheetNote(S.foodSheetRefusedAmount);
-      return _applyToAdded(tap, line);
-    }
+  Future<void> _rewriteTyped(LineTap tap, double quantity, String unit) async {
     final t = _typedTarget(tap);
     if (t == null) return;
     final out = await _guard(
@@ -871,9 +930,22 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         unit: unit,
       ),
     );
-    if (out == null) return sheetNote(S.foodSheetRefusedAmount);
+    if (out == null) return _refused(S.foodSheetRefusedAmount);
     if (_controller.text != t.text) return _stale();
     _setText(out.text, out.cursor);
+  }
+
+  @override
+  Future<void> sheetSetAmount(LineTap tap, double quantity, String unit) async {
+    if (_foodLevel(tap)) {
+      final ref = tap.line.foodRef;
+      final line = ref == null
+          ? null
+          : await _foodLine(ref, quantity: quantity, unit: unit);
+      if (line == null) return _refused(S.foodSheetRefusedAmount);
+      return _applyToAdded(tap, line);
+    }
+    await _rewriteTyped(tap, quantity, unit);
   }
 
   @override
@@ -882,7 +954,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     final t = _typedTarget(tap);
     if (t == null) return;
     final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
-    if (out == null) return sheetNote(S.foodSheetRefusedRemove);
+    if (out == null) return _refused(S.foodSheetRefusedRemove);
     if (_controller.text != t.text) return _stale();
     _setText(out.text, out.cursor);
   }
@@ -893,14 +965,20 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     if (key == null) return;
     final done = await _guard(() => _db.forgetLearnedMatch(key));
     // The lines come back through the snapshot, as a new result.
-    if (done == null) sheetNote(S.foodSheetForgetFailed);
+    if (done == null) _refused(S.foodSheetForgetFailed);
   }
 
   @override
-  Future<void> sheetUseFood(LineTap tap, String ref) async {
-    final line = await _foodLine(ref);
-    if (line == null) return sheetNote(S.foodSheetRefusedFood);
-    final fresh = AddedLine(line);
+  Future<void> sheetUseFood(LineTap tap, String ref, {double? quantity}) async {
+    // "2 usual breakfast" becomes 2 of the food (a bare count); the default
+    // amount if that is refused.
+    final m = quantity ?? tap.line.multiplier;
+    final priced = await _priceFood(
+      ref,
+      quantity: m != null && m != 1 ? m : null,
+    );
+    if (priced == null) return _refused(S.foodSheetRefusedFood);
+    final fresh = AddedLine(priced.line);
     if (tap.added != null) {
       final at = _added.indexWhere((a) => identical(a, tap.added));
       if (at < 0) return _stale();
@@ -908,15 +986,16 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         _added = [..._added]..[at] = fresh;
         _addedChanged = true;
       });
-      return;
+    } else {
+      final t = _typedTarget(tap);
+      if (t == null) return;
+      final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
+      if (out == null) return _refused(S.foodSheetRefusedRemove);
+      if (_controller.text != t.text) return _stale();
+      _setText(out.text, out.cursor);
+      addLines([fresh]);
     }
-    final t = _typedTarget(tap);
-    if (t == null) return;
-    final out = await _guard(() => t.h.removeItem(t.text, _cursor(), t.span));
-    if (out == null) return sheetNote(S.foodSheetRefusedRemove);
-    if (_controller.text != t.text) return _stale();
-    _setText(out.text, out.cursor);
-    addLines([fresh]);
+    if (priced.reset) sheetNote(S.foodSheetAmountReset);
   }
 
   /// Tests make picks through the handle until the correction sheet (task
@@ -962,7 +1041,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
           if (l.state == LineState.notFound && !l.plain) l,
       ];
       if (fix.isNotEmpty) {
-        onLineTap(
+        _requestSheet(
           LineTap(
             line: fix.first,
             text: r.text,
@@ -1006,9 +1085,21 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       }
       if (!mounted) return;
       finished = true;
-      Navigator.of(context).pop(FoodSaved(stored, edited: _editing));
+      _popSelf(FoodSaved(stored, edited: _editing));
     } finally {
       if (!finished && mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Closes this screen's own route and nothing else, whatever is on top of
+  /// it (a sheet or a dialog that took the top while a save was running).
+  void _popSelf(FoodEntryResult? result) {
+    final route = ModalRoute.of(context);
+    final nav = Navigator.of(context);
+    if (route == null || route.isCurrent) {
+      nav.pop(result);
+    } else {
+      nav.removeRoute(route, result);
     }
   }
 
@@ -1027,7 +1118,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         _controller.text.trim().isNotEmpty ||
         (_editing ? _addedChanged : _added.isNotEmpty);
     if (worth) result = FoodAbandoned(_draft());
-    Navigator.of(context).pop(result);
+    _popSelf(result);
   }
 
   /// The picks to send again after a reopen or a retry: only from a result
@@ -1076,7 +1167,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     try {
       final deleted = await _db.deleteMeal(id);
       if (!mounted) return;
-      Navigator.of(context).pop(FoodDeleted(deleted));
+      _popSelf(FoodDeleted(deleted));
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -1247,6 +1338,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
 
   /// Tapping the date opens a calendar that ends today (frame 1).
   Future<void> _pickDate() async {
+    if (_busy) return;
     final today = parseDate(_clock().localDate);
     final day = parseDate(_date);
     final last = DateTime(today.year, today.month, today.day);

@@ -54,6 +54,32 @@ class FakeLink implements WorkerLink {
   late final WorkerCore core = WorkerCore(parser);
   void Function(WorkerReply)? reply;
   var refuseRewrite = false;
+  var refuseRemove = false;
+  var crashOnRewrite = false;
+  var holdPicks = false;
+  final heldPicks = <WorkerReply>[];
+
+  /// While true, the answers to text requests are kept, not given.
+  var hold = false;
+  final held = <WorkerReply>[];
+
+  void release() {
+    hold = false;
+    final now = [...held];
+    held.clear();
+    for (final r in now) {
+      reply!(r);
+    }
+  }
+
+  void releasePicks() {
+    holdPicks = false;
+    final now = [...heldPicks];
+    heldPicks.clear();
+    for (final r in now) {
+      reply!(r);
+    }
+  }
 
   @override
   void start(void Function(WorkerReply reply) onReply) {
@@ -67,8 +93,23 @@ class FakeLink implements WorkerLink {
       reply!(EditResult(request.id, null, request.cursor));
       return;
     }
+    if (crashOnRewrite && request is RewriteRequest) {
+      crash();
+      return;
+    }
+    if (refuseRemove && request is RemoveRequest) {
+      reply!(EditResult(request.id, null, request.cursor));
+      return;
+    }
     final r = core.handle(request);
-    if (r != null) reply!(r);
+    if (r == null) return;
+    if (hold && request is TextRequest) {
+      held.add(r);
+    } else if (holdPicks && request is PickRequest) {
+      heldPicks.add(r);
+    } else {
+      reply!(r);
+    }
   }
 
   void crash() => reply!(const WorkerFailure(0, FailureKind.crashed, 'exited'));
@@ -962,6 +1003,402 @@ void main() {
       if (r.height <= a.height) {
         expect(r.bottom, lessThanOrEqualTo(a.bottom + 0.5));
       }
+    });
+  });
+
+  group('review fixes', () {
+    Future<SavedMeal> mkSaved(
+      WidgetTester tester,
+      String name,
+      List<MealLineInput> items,
+    ) async => (await real(
+      tester,
+      () => db.createSavedMeal(
+        name: name,
+        now: nowFixed,
+        aliases: [name.toLowerCase()],
+        items: items,
+      ),
+    )).saved!.meal;
+
+    Future<SavedMeal> usual(WidgetTester tester) =>
+        mkSaved(tester, 'Usual breakfast', [
+          item('usda:2707153', 'Egg', 2, 'egg', 100, 176),
+          item('usda:2707153', 'Egg again', 1, 'egg', 50, 84),
+        ]);
+
+    /// The bold names of the rows the search found, in order.
+    List<String> foundNames(WidgetTester tester) => [
+      for (final t in tester.widgetList<Text>(
+        inSheet(
+          find.byWidgetPredicate(
+            (w) => w is Text && w.style?.fontWeight == FontWeight.bold,
+          ),
+        ),
+      ))
+        t.data ?? '',
+    ];
+
+    Future<void> openLogged(WidgetTester tester) async {
+      await tester.tap(find.text('Breakfast').last);
+      await settle(tester);
+    }
+
+    Future<void> saveIt(WidgetTester tester) async {
+      await tester.tap(saveButton());
+      await settle(tester);
+    }
+
+    appTest('a worker that dies during an amount change shows only the '
+        'dead-worker message', (tester) async {
+      useLink = true;
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 apple');
+      links.single.crashOnRewrite = true;
+      await tap(tester, tileOf('Egg, whole, cooked, NS as to cooking method'));
+      await tester.enterText(amountField(), '3');
+      await tap(tester, inSheet(find.text('Done')));
+      expect(sheet(), findsNothing);
+      expect(
+        find.text('The food list stopped working. Your text is kept.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('cannot show that amount'), findsNothing);
+      expect(boxText(tester), '2 eggs, 1 apple');
+    });
+
+    // M1
+
+    appTest('M1 A: another food for an added line keeps its amount', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 slices sourdough toast');
+      await saveIt(tester);
+      final before = (await theMeal(tester)).entries.single.entry;
+      expect(before.quantity, 2);
+      await openLogged(tester);
+      await tap(tester, tiles().first);
+      await tester.enterText(searchField(), 'white bread');
+      await settle(tester);
+      await tap(tester, inSheet(find.text('Bread, white')).first);
+      await saveIt(tester);
+      final after = (await theMeal(tester)).entries.single.entry;
+      expect(after.foodName, 'Bread, white');
+      expect(after.quantity, 2);
+      expect(after.baseQuantity, greaterThan(40));
+    });
+
+    appTest('M1 B: another food for an item of a typed saved meal keeps the '
+        'item\'s amount', (tester) async {
+      await usual(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 usual breakfast, 1 apple');
+      await tap(tester, tileOf('Egg'));
+      await tester.enterText(searchField(), 'egg whole fried');
+      await settle(tester);
+      final fried = foundNames(tester).firstWhere((n) => n.contains('fried'));
+      await tap(tester, inSheet(find.text(fried)).first);
+      await saveIt(tester);
+      final meal = await theMeal(tester);
+      final e = meal.entries.firstWhere((x) => x.entry.foodName == fried);
+      expect(e.entry.baseQuantity, greaterThan(150)); // 4 eggs, not 1
+    });
+
+    // S1
+
+    appTest('S1: changing only the number works when the unit is a default '
+        'portion label', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, 'oatmeal');
+      await tap(tester, tiles().first);
+      expect(tester.widget<TextField>(amountField()).controller!.text, '1');
+      await tester.enterText(amountField(), '2');
+      await tap(tester, inSheet(find.text('Done')));
+      expect(sheet(), findsNothing);
+      expect(
+        find.text('The text cannot show that amount, so nothing was changed.'),
+        findsNothing,
+      );
+      expect(boxText(tester), isNot('oatmeal'));
+      final line = screen(tester).debugResult!.lines.single;
+      expect(line.quantity, 2);
+    });
+
+    // S2
+
+    appTest('S2: a food tap applies a staged amount on a typed line', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '$cream, 1 apple');
+      final s = screen(tester);
+      final text = boxText(tester);
+      final alts = await real(
+        tester,
+        () =>
+            s.debugHandle!.alternatives(text, s.debugResult!.lines.first.span!),
+      );
+      await tap(tester, find.widgetWithText(FoodLineTile, alts.current!.name));
+      await tester.enterText(amountField(), '3');
+      await tap(tester, inSheet(find.text(alts.others.first.name)));
+      expect(boxText(tester), '3 tbsp half and half, 1 apple');
+      expect(find.text('Your pick'), findsOneWidget);
+      expect(
+        find.widgetWithText(FoodLineTile, alts.others.first.name),
+        findsOneWidget,
+      );
+    });
+
+    appTest('S2: a food tap applies a staged amount on an added line', (
+      tester,
+    ) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 banana');
+      await saveIt(tester);
+      await openLogged(tester);
+      await tap(tester, tiles().last);
+      await tester.enterText(amountField(), '3');
+      await tester.enterText(searchField(), 'apple');
+      await settle(tester);
+      final apple = foundNames(tester).firstWhere((n) => n.startsWith('Apple'));
+      await tap(tester, inSheet(find.text(apple)).first);
+      await saveIt(tester);
+      final e = (await theMeal(tester)).entries.last.entry;
+      expect(e.foodName, apple);
+      expect(e.quantity, 3);
+    });
+
+    // S3
+
+    appTest('S3: the not found sheet at 2x text keeps its search field in '
+        'view, with the sentence under it', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await type(tester, '2 eggs, 1 zorbo, 1 apple');
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Fix 1 item'),
+      );
+      await tap(tester, find.widgetWithText(FilledButton, 'Fix 1 item'));
+      expect(sheet(), findsOneWidget);
+      await tester.enterText(searchField(), 'zorbo');
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final field = tester.getRect(searchField());
+      final view = tester.getRect(
+        inSheet(find.byType(SingleChildScrollView)).first,
+      );
+      expect(field.top, greaterThanOrEqualTo(view.top - 0.5));
+      expect(field.bottom, lessThanOrEqualTo(view.bottom + 0.5));
+      expect(field.bottom, lessThanOrEqualTo(500));
+      final sentence = inSheet(find.textContaining('Nothing in the food list'));
+      expect(sentence, findsOneWidget);
+      expect(tester.getTopLeft(sentence).dy, greaterThan(field.bottom - 0.5));
+    });
+
+    // S4
+
+    appTest('S4: while a save is in progress a line tap and the date open '
+        'nothing, and the save closes the screen', (tester) async {
+      useLink = true;
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 apple');
+      links.single.hold = true;
+      await tester.tap(saveButton());
+      await tester.pump();
+      await tester.tap(tiles().first, warnIfMissed: false);
+      await tester.tap(find.text('Today, Nov 12'), warnIfMissed: false);
+      await settle(tester);
+      expect(sheet(), findsNothing);
+      expect(find.byType(DatePickerDialog), findsNothing);
+      links.single.release();
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsNothing);
+      expect(find.text('Breakfast saved, 176 kcal'), findsNothing);
+      expect(await real(tester, () => db.select(db.meals).get()), hasLength(1));
+      expect(find.text('Breakfast not saved'), findsNothing);
+    });
+
+    // S5
+
+    appTest('S5: Use a food instead keeps the multiplier as the amount', (
+      tester,
+    ) async {
+      await usual(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, '2 usual breakfast');
+      await tap(tester, tileOf('Usual breakfast  × 2'));
+      await tap(tester, inSheet(find.text('Use a food instead')));
+      await tester.enterText(searchField(), 'banana');
+      await settle(tester);
+      final banana = foundNames(tester).firstWhere((n) => n.contains('Banana'));
+      await tap(tester, inSheet(find.text(banana)).first);
+      await saveIt(tester);
+      expect((await theMeal(tester)).entries.single.entry.quantity, 2);
+    });
+
+    // S6
+
+    appTest('S6: a pick through the sheet, even confirming the guess, is '
+        'learned on Save', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, cream);
+      final s = screen(tester);
+      final text = boxText(tester);
+      final alts = await real(
+        tester,
+        () => s.debugHandle!.alternatives(
+          text,
+          s.debugResult!.lines.single.span!,
+        ),
+      );
+      await tap(tester, tiles().first);
+      await tap(tester, inSheet(find.text(alts.current!.name)));
+      expect(find.text('Your pick'), findsOneWidget);
+      await saveIt(tester);
+      final rows = await real(tester, () => db.select(db.learnedMatches).get());
+      expect(rows.single.foodRef, alts.current!.ref);
+    });
+
+    appTest('S6: an amount set through the sheet on an assumed line is '
+        'stored on Save', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, 'coffee');
+      expect(find.text('Assumed'), findsOneWidget);
+      await tap(tester, tiles().first);
+      await tester.enterText(amountField(), '2');
+      await tap(tester, inSheet(find.text('Done')));
+      await saveIt(tester);
+      final row = (await real(
+        tester,
+        () => db.select(db.learnedMatches).get(),
+      )).single;
+      expect(row.quantity, 2);
+    });
+
+    appTest('S6: a refused removal while a saved meal is converted changes '
+        'nothing', (tester) async {
+      useLink = true;
+      await usual(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, 'usual breakfast');
+      links.single.refuseRemove = true;
+      await tap(tester, tileOf('Egg again'));
+      await tester.enterText(amountField(), '3');
+      await tap(tester, inSheet(find.text('Done')));
+      expect(sheet(), findsNothing);
+      expect(boxText(tester), 'usual breakfast');
+      expect(find.text('Added'), findsNothing);
+      expect(tiles(), findsNWidgets(3));
+      expect(
+        find.text(
+          'That item could not be taken out cleanly, so nothing was '
+          'changed.',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    appTest('S6: Undo after a conversion brings back the items and the saved '
+        'meal id', (tester) async {
+      final saved = await usual(tester);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, 'usual breakfast');
+      await tap(tester, tileOf('Egg again'));
+      await tester.enterText(amountField(), '3');
+      await tap(tester, inSheet(find.text('Done')));
+      expect(boxText(tester), '');
+      await tester.tap(find.byTooltip('Close'));
+      await settle(tester);
+      expect(find.text('Breakfast not saved'), findsOneWidget);
+      await tester.tap(find.text('Undo'));
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      expect(tiles(), findsNWidgets(2));
+      await saveIt(tester);
+      final meal = await theMeal(tester);
+      expect(meal.entries, hasLength(2));
+      expect(meal.meal.savedMealId, saved.id);
+    });
+
+    appTest('S6: two saved meals typed, one converted: the other stays a '
+        'header and the converted one keeps its id', (tester) async {
+      final first = await usual(tester);
+      await mkSaved(tester, 'My oatmeal', [
+        item('usda:2707153', 'Oats', 1, 'cup', 234, 243),
+      ]);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, 'usual breakfast, my oatmeal');
+      expect(tiles(), findsNWidgets(5));
+      await tap(tester, tileOf('Egg again'));
+      await tester.enterText(amountField(), '3');
+      await tap(tester, inSheet(find.text('Done')));
+      expect(boxText(tester), contains('my oatmeal'));
+      expect(boxText(tester), isNot(contains('usual')));
+      expect(find.text('My oatmeal'), findsOneWidget);
+      expect(find.text('Added'), findsOneWidget);
+      await saveIt(tester);
+      final meal = await theMeal(tester);
+      expect(meal.entries, hasLength(3));
+      expect(meal.meal.savedMealId, first.id);
+    });
+
+    appTest('S6: a result that arrives while a sheet action is in flight '
+        'does not close the sheet or spoil the action', (tester) async {
+      useLink = true;
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, cream);
+      final s = screen(tester);
+      final text = boxText(tester);
+      final alts = await real(
+        tester,
+        () => s.debugHandle!.alternatives(
+          text,
+          s.debugResult!.lines.single.span!,
+        ),
+      );
+      await tap(tester, tiles().first);
+      links.single.holdPicks = true;
+      await tester.tap(
+        find.ancestor(
+          of: inSheet(find.text(alts.others.first.name)),
+          matching: find.byType(InkWell),
+        ),
+      );
+      await tester.pump();
+      // A newer result for the same text arrives (the user's data changed).
+      await real(
+        tester,
+        () => db.createSavedMeal(
+          name: 'Other meal',
+          now: nowFixed,
+          items: [item('usda:2707153', 'Egg', 1, 'egg', 50, 84)],
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(sheet(), findsOneWidget);
+      links.single.releasePicks();
+      await settle(tester);
+      expect(sheet(), findsNothing);
+      expect(find.text('That line changed. Tap it again.'), findsNothing);
+      expect(find.text('Your pick'), findsOneWidget);
     });
   });
 

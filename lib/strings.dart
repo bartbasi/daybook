@@ -222,6 +222,8 @@ class S {
       'That item could not be taken out cleanly, so nothing was changed.';
   static const foodSheetRefusedFood =
       'That food could not be used here, so nothing was changed.';
+  static const foodSheetAmountReset =
+      'That food could not keep the amount, so it is set to its usual amount.';
   static const foodSheetForgetFailed =
       'Could not forget that match. Try again.';
   static const foodGroupAdded = 'Added';
@@ -263,6 +265,7 @@ class S {
   static const sheetSavedMeal = 'Saved meal';
   static const sheetQuantityBad = 'Enter a number above 0.';
   static const sheetRowHint = 'Double tap to choose this food';
+  static String sheetRowLabel(String name, String sub) => '$name. $sub';
 
   /// The dataset of a food, for a row of the sheet. Null for a food whose
   /// dataset is not known (an added line).

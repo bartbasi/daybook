@@ -34,15 +34,19 @@ abstract class CorrectionHost implements Listenable {
   /// A plain line under the meal chips.
   void sheetNote(String text);
 
+  /// Picks [ref] for the line. [quantity] and [unit] are an amount staged in
+  /// the sheet, applied with the pick.
   Future<void> sheetPick(
     LineTap tap,
     String ref, {
     Marker marker = Marker.yourPick,
+    double? quantity,
+    String? unit,
   });
   Future<void> sheetSetAmount(LineTap tap, double quantity, String unit);
   Future<void> sheetRemove(LineTap tap);
   Future<void> sheetForget(LineTap tap);
-  Future<void> sheetUseFood(LineTap tap, String ref);
+  Future<void> sheetUseFood(LineTap tap, String ref, {double? quantity});
 }
 
 enum _Kind { typed, food, header }
@@ -90,10 +94,18 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   var _useFood = false;
   var _closed = false;
   var _busy = false;
+  final _searchKey = GlobalKey();
 
   LineTap get _tap => widget.tap;
   Line get _line => _tap.line;
   bool get _notFound => _line.state == LineState.notFound;
+
+  /// The line's grams per unit, when it has both.
+  double? get _gramsPerUnit {
+    final q = _line.quantity, b = _line.baseQuantity;
+    return q != null && q > 0 && b != null ? b / q : null;
+  }
+
   bool get _typedHeader => _kind == _Kind.header && _tap.added == null;
 
   /// A line whose sheet is about a span of the box's text.
@@ -211,6 +223,19 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
         break;
       }
     }
+    // A default portion such as "cup, cooked" is not typable: take the
+    // choice that weighs the same per unit.
+    final per = _gramsPerUnit;
+    if (found == null && per != null) {
+      var best = double.infinity;
+      for (final c in units) {
+        final d = (c.grams - per).abs();
+        if (d <= per * 0.01 + 0.05 && d < best) {
+          best = d;
+          found = c;
+        }
+      }
+    }
     _unit0 = _unit = found;
   }
 
@@ -239,9 +264,20 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
         _results = found;
         _searched = true;
       });
+      _showSearch();
     } catch (_) {
       if (mounted && seq == _seq) _pop();
     }
+  }
+
+  /// The focused search field stays inside the sheet's visible area when
+  /// results (or the sentence) arrive below it.
+  void _showSearch() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final c = _searchKey.currentContext;
+      if (!mounted || _closed || c == null) return;
+      Scrollable.ensureVisible(c);
+    });
   }
 
   Future<void> _act(Future<void> Function() action) async {
@@ -255,11 +291,56 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
     _pop();
   }
 
-  Future<void> _choose(FoodChoice f) => _act(
-    () => _kind == _Kind.header
-        ? widget.host.sheetUseFood(_tap, f.ref)
-        : widget.host.sheetPick(_tap, f.ref),
-  );
+  /// What the amount fields say when they differ from the line: null when
+  /// unchanged, [bad] when the number is not usable. The unit sent is always
+  /// typable text, never a label: with no matching choice the amount is sent
+  /// in grams.
+  ({bool bad, double q, String unit})? _amountChange() {
+    final q = _parseQty(_qty.text);
+    final orig = _kind == _Kind.header
+        ? (_line.multiplier ?? 1)
+        : _line.quantity;
+    final unitChanged = _unit != _unit0;
+    if (q == null) {
+      // An empty or unusable field is only a problem if it was touched.
+      final same =
+          _qty.text.trim() == (orig == null ? '' : S.quantityText(orig));
+      if (same && !unitChanged) return null;
+      return (bad: true, q: 0, unit: '');
+    }
+    if (orig != null && (q - orig).abs() < 1e-9 && !unitChanged) return null;
+    if (_kind == _Kind.header) return (bad: false, q: q, unit: '');
+    final u = _unit;
+    if (u != null) return (bad: false, q: q, unit: u.unitText);
+    final per = _gramsPerUnit;
+    if (per != null &&
+        _line.baseUnit == 'g' &&
+        _units.any((c) => c.unitText == 'g')) {
+      return (bad: false, q: q * per, unit: 'g');
+    }
+    return (bad: false, q: q, unit: '');
+  }
+
+  Future<void> _choose(FoodChoice f) async {
+    if (_busy || _closed) return;
+    final ch = _kind == _Kind.header ? null : _amountChange();
+    if (ch != null && ch.bad) {
+      setState(() => _qtyError = S.sheetQuantityBad);
+      return;
+    }
+    if (_kind == _Kind.header) {
+      // A changed multiplier goes with the replacement food.
+      final m = _amountChange();
+      if (m != null && m.bad) {
+        setState(() => _qtyError = S.sheetQuantityBad);
+        return;
+      }
+      return _act(() => widget.host.sheetUseFood(_tap, f.ref, quantity: m?.q));
+    }
+    return _act(
+      () => widget.host.sheetPick(_tap, f.ref, quantity: ch?.q, unit: ch?.unit),
+    );
+  }
 
   double? _parseQty(String s) {
     final v = double.tryParse(s.trim().replaceAll(',', '.'));
@@ -270,20 +351,13 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
     if (_busy || _closed) return;
     // An added saved meal has no text to put a multiplier in.
     if (_kind == _Kind.header && !_typedHeader) return _pop();
-    final q = _parseQty(_qty.text);
-    if (q == null) {
+    final ch = _amountChange();
+    if (ch == null) return _pop();
+    if (ch.bad) {
       setState(() => _qtyError = S.sheetQuantityBad);
       return;
     }
-    final orig = _kind == _Kind.header
-        ? (_line.multiplier ?? 1)
-        : _line.quantity;
-    final unitChanged = _unit != _unit0;
-    if (orig != null && (q - orig).abs() < 1e-9 && !unitChanged) return _pop();
-    final unit = _kind == _Kind.header
-        ? ''
-        : (_unit?.unitText ?? _line.unitLabel ?? '');
-    await _act(() => widget.host.sheetSetAmount(_tap, q, unit));
+    await _act(() => widget.host.sheetSetAmount(_tap, ch.q, ch.unit));
   }
 
   // Seams for the later tasks. Both are shown on a not found typed line only,
@@ -425,14 +499,8 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   }
 
   List<Widget> _notFoundBody(ThemeData theme) {
-    final words = _line.foodText ?? _tap.typedText ?? '';
     return [
       const SizedBox(height: 8),
-      if (_searched && _results.isEmpty)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Text(S.sheetNothingMatches(words)),
-        ),
       ..._searchPart(autofocus: true),
       _scanSeam,
       _createSeam,
@@ -539,6 +607,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   List<Widget> _searchPart({required bool autofocus}) {
     return [
       TextField(
+        key: _searchKey,
         controller: _search,
         autofocus: autofocus,
         textInputAction: TextInputAction.search,
@@ -549,10 +618,14 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
           border: OutlineInputBorder(),
         ),
       ),
-      if (_searched && _results.isEmpty && !_notFound)
+      if (_searched && _results.isEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text(S.sheetNoResults),
+          child: Text(
+            _notFound
+                ? S.sheetNothingMatches(_line.foodText ?? _tap.typedText ?? '')
+                : S.sheetNoResults,
+          ),
         ),
       if (_results.isNotEmpty)
         Padding(
@@ -589,7 +662,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
       container: true,
       button: true,
       selected: current,
-      label: '${f.name}. $sub',
+      label: S.sheetRowLabel(f.name, sub),
       hint: S.sheetRowHint,
       excludeSemantics: true,
       onTap: () => _choose(f),
