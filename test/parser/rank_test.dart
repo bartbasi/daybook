@@ -501,6 +501,50 @@ void main() {
       expect(m.state, LineState.matched);
     });
 
+    test('R37: trailing words with a digit are skipped for "fits"', () {
+      final usda = [_f('usda:1', 'Yogurt, Greek, NFS', energy: 60)];
+      final off = _f(
+        'local:7',
+        'Fage Greek yogurt 0%',
+        dataset: 'local',
+        kind: 'off',
+        energy: 59,
+      );
+      final notLogged = _ranker(usda, user: [off]).match('greek yogurt');
+      final c = notLogged.ranked.firstWhere((c) => c.ref == 'local:7');
+      expect(c.fits, isFalse, reason: 'R37: never logged does not fit');
+      expect(notLogged.top!.ref, 'usda:1');
+
+      final logged = _ranker(
+        usda,
+        user: [off],
+        history: {'local:7': 1},
+      ).match('greek yogurt');
+      expect(
+        logged.top!.ref,
+        'local:7',
+        reason: 'R37: logged, last word skips 0%',
+      );
+      expect(logged.top!.fits, isTrue);
+      expect(logged.state, LineState.matched);
+    });
+
+    test('R37: custom foods and recipes read the name the same way', () {
+      final r = _ranker(
+        [_f('usda:1', 'Soup, NFS')],
+        user: [
+          _f('local:8', 'Tomato soup 12', dataset: 'local', kind: 'custom'),
+        ],
+      );
+      expect(r.match('soup').top!.ref, 'local:8');
+      // A name that is only digits keeps its last word.
+      final r2 = _ranker(
+        [_f('usda:1', 'Soup, NFS')],
+        user: [_f('local:9', '7 up', dataset: 'local', kind: 'custom')],
+      );
+      expect(r2.match('up').top!.fits, isTrue);
+    });
+
     test('a custom food or recipe fits without being logged', () {
       final r = _ranker(
         [_f('usda:1', 'Soup, NFS')],
@@ -725,6 +769,54 @@ void main() {
       expect(top('soda').toLowerCase(), contains('soft drink'));
       expect(top('yoghurt').toLowerCase(), contains('yogurt'));
       expect(top('donut').toLowerCase(), contains('doughnut'));
+    });
+
+    test(
+      'R36: an item that is all negation is flagged, not just not found',
+      () {
+        final r = _real();
+        for (final t in ['no sugar', 'without milk']) {
+          final m = r.match(t);
+          expect(m.allNegated, isTrue, reason: 'R36: "$t"');
+          expect(m.state, LineState.notFound);
+          expect(m.ranked, isEmpty);
+        }
+        // Ordinary not found items are not flagged.
+        for (final t in ['asdfgh', '', 'I had', 'coffee without sugar']) {
+          expect(r.match(t).allNegated, isFalse, reason: '"$t"');
+        }
+        expect(r.match('coffee without sugar').ref, 'usda:2710373');
+      },
+    );
+
+    test('5.3: the rows added later find a sensible food', () {
+      final r = _real();
+      // skim milk and nonfat milk: the fat free (skim) milk.
+      for (final t in ['skim milk', 'nonfat milk']) {
+        final m = r.match(t);
+        expect(m.top!.description, 'Milk, fat free (skim)', reason: t);
+        expect(m.state, LineState.matched, reason: '$t: ${m.reason}');
+      }
+      expect(
+        r.match('chocolate skim milk').top!.description,
+        'Chocolate milk, fat free (skim)',
+      );
+      // bbq: barbecue. Alone it is a generic "Barbecue meat" guess.
+      expect(r.match('bbq').top!.description, 'Barbecue meat, NFS');
+      expect(r.match('bbq').state, LineState.guess);
+      expect(r.match('bbq chicken').top!.description, 'Barbecue chicken');
+      expect(r.match('bbq chicken').state, LineState.matched);
+      expect(r.match('bbq sauce').top!.description, 'Barbecue sauce');
+      // cereal alone: the ready-to-eat generic entry, not the hot cereal.
+      final c = r.match('cereal');
+      expect(c.top!.description, 'Cereal, ready-to-eat, NFS');
+      expect(c.state, LineState.matched, reason: c.reason);
+      // The protected phrases keep their meaning.
+      expect(r.match('cooked cereal').top!.description, 'Cereal, cooked, NFS');
+      expect(
+        r.match('cereal bar').top!.description,
+        'Cereal or Granola bar, NFS',
+      );
     });
 
     test('5.3: "coke" is not turned into "cake", "v8" not into a blend', () {
@@ -1000,8 +1092,7 @@ void main() {
       }
       steps.sort();
 
-      // ignore: avoid_print
-      print(
+      printOnFailure(
         'BENCH read $_readMs ms, index build $_buildMs ms (second build '
         '$buildMs ms); 5 items cold ${(coldUs / 1000).toStringAsFixed(2)} ms, '
         'warm median ${(median / 1000).toStringAsFixed(2)} ms, '
@@ -1014,6 +1105,45 @@ void main() {
       expect(coldUs, lessThan(2000000), reason: '12.3: 5 items cold');
       expect(p95, lessThan(500000), reason: '12.3: 5 items warm p95');
       expect(steps.last, lessThan(500000), reason: '12.3: one keystroke');
+    });
+
+    test('misspelled words are corrected once, then remembered', () {
+      final r = Ranker(_usdaIndex);
+      const text = 'chocolatte strawbery brocoli bananna chiken';
+      final sw = Stopwatch()..start();
+      final first = r.match(text);
+      final firstUs = sw.elapsedMicroseconds;
+      final runs = <int>[];
+      for (var k = 0; k < 50; k++) {
+        sw
+          ..reset()
+          ..start();
+        final m = r.match(text);
+        runs.add(sw.elapsedMicroseconds);
+        expect(m.words, first.words, reason: 'same answer every time');
+      }
+      runs.sort();
+      // A new Ranker on the same USDA index reuses the index's near words.
+      sw
+        ..reset()
+        ..start();
+      Ranker(_usdaIndex).match(text);
+      final newRankerUs = sw.elapsedMicroseconds;
+      printOnFailure(
+        'TYPO 5 misspelled words: first ${firstUs / 1000} ms, repeat median '
+        '${runs[25] / 1000} ms, new Ranker ${newRankerUs / 1000} ms',
+      );
+      expect(first.corrected, isTrue);
+      expect(first.words, [
+        'chocolate',
+        'strawberry',
+        'broccoli',
+        'banana',
+        'chicken',
+      ]);
+      expect(firstUs, lessThan(1000000));
+      expect(runs[25], lessThan(100000), reason: 'repeat is cheap');
+      expect(runs[25], lessThanOrEqualTo(firstUs));
     });
 
     test(

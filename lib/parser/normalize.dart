@@ -5,6 +5,8 @@
 // synonym table (5.3). The same steps run on typed food words and on food
 // descriptions, so both sides compare as sets of plain words.
 
+import 'dart:typed_data';
+
 import 'tokens.dart';
 
 const _accents = <String, String>{
@@ -161,12 +163,19 @@ List<String> applySynonyms(List<String> words) {
   return out;
 }
 
-final _percent = RegExp(r'(\d+(?:\.\d+)?)\s+percent\b');
+// The lookbehind makes a try start only at the start of a digit run, so a long
+// run of digits is not scanned again from every position.
+final _percent = RegExp(r'(?<![\d.])(\d+(?:\.\d+)?)\s+percent\b');
 
 /// The query words of an item's food text (5.2 steps 1 to 6, 5.3): folded,
 /// negated words cut off, synonyms applied once, filler dropped, plurals
 /// removed, repeated words dropped. Order follows the text.
-List<String> queryWords(String foodText) {
+List<String> queryWords(String foodText) => readQuery(foodText).words;
+
+/// [queryWords], and whether the negation cut (5.2 step 6) removed words and
+/// left nothing: "no sugar", "without milk". Such an item gives no line
+/// (ruling R36), which is not the same as an item with no candidate.
+({List<String> words, bool allNegated}) readQuery(String foodText) {
   final folded = foldText(foodText)
       .replaceAllMapped(_percent, (m) => '${m[1]}%');
   var words = rawWords(folded);
@@ -180,5 +189,68 @@ List<String> queryWords(String foodText) {
     final s = stem(w);
     if (seen.add(s)) out.add(s);
   }
-  return out;
+  return (words: out, allNegated: neg >= 0 && out.isEmpty);
 }
+
+/// How a typo is corrected: Damerau-Levenshtein (optimal string alignment),
+/// where swapping two neighboring letters counts as 1. Returns more than [max]
+/// when the words are further apart than that.
+int editDistance(String a, String b, int max) {
+  if ((a.length - b.length).abs() > max) return max + 1;
+  if (a.length > 250 || b.length > 250) return max + 1; // scratch row size
+  // Letters that agree at the start and the end cannot be part of an edit.
+  var lo = 0;
+  while (lo < a.length &&
+      lo < b.length &&
+      a.codeUnitAt(lo) == b.codeUnitAt(lo)) {
+    lo++;
+  }
+  var ea = a.length;
+  var eb = b.length;
+  while (ea > lo && eb > lo && a.codeUnitAt(ea - 1) == b.codeUnitAt(eb - 1)) {
+    ea--;
+    eb--;
+  }
+  final n = ea - lo;
+  final m = eb - lo;
+  if (n == 0) return m <= max ? m : max + 1;
+  if (m == 0) return n <= max ? n : max + 1;
+  var prev2 = _row2;
+  var prev = _row1;
+  var cur = _row0;
+  for (var j = 0; j <= m; j++) {
+    prev[j] = j;
+  }
+  for (var i = 1; i <= n; i++) {
+    cur[0] = i;
+    var rowMin = i;
+    final ai = a.codeUnitAt(lo + i - 1);
+    for (var j = 1; j <= m; j++) {
+      final bj = b.codeUnitAt(lo + j - 1);
+      var v = prev[j - 1] + (ai == bj ? 0 : 1);
+      if (prev[j] + 1 < v) v = prev[j] + 1;
+      if (cur[j - 1] + 1 < v) v = cur[j - 1] + 1;
+      if (i > 1 &&
+          j > 1 &&
+          ai == b.codeUnitAt(lo + j - 2) &&
+          a.codeUnitAt(lo + i - 2) == bj &&
+          prev2[j - 2] + 1 < v) {
+        v = prev2[j - 2] + 1;
+      }
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    final t = prev2;
+    prev2 = prev;
+    prev = cur;
+    cur = t;
+  }
+  return prev[m];
+}
+
+// Scratch rows for [editDistance]. Dart isolates do not share memory, so one
+// set per isolate is safe. Words are far shorter than this.
+final _row0 = Int32List(256);
+final _row1 = Int32List(256);
+final _row2 = Int32List(256);

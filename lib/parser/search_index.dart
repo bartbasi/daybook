@@ -59,6 +59,29 @@ List<IndexFood> readUsdaFoods(Database db) {
 bool _isNsSegment(List<String> seg) =>
     seg.length >= 3 && seg[0] == 'ns' && seg[1] == 'as' && seg[2] == 'to';
 
+bool _hasDigit(String w) {
+  for (var i = 0; i < w.length; i++) {
+    final c = w.codeUnitAt(i);
+    if (c >= 0x30 && c <= 0x39) return true;
+  }
+  return false;
+}
+
+/// The last word of a name for 5.4 key 2, skipping trailing words that contain
+/// a digit ("Fage Greek yogurt 0%" ends in "yogurt"; ruling R37). A name
+/// made only of such words keeps its last word.
+String _lastNameWord(List<List<String>> segs) {
+  String? any;
+  for (var s = segs.length - 1; s >= 0; s--) {
+    for (var k = segs[s].length - 1; k >= 0; k--) {
+      final w = segs[s][k];
+      any ??= w;
+      if (!_hasDigit(w)) return w;
+    }
+  }
+  return any ?? '';
+}
+
 /// Source order of 5.4 key 6: local foods, FNDDS, SR Legacy, Foundation.
 int _sourceRank(IndexFood f) {
   if (f.kind != null) return 0;
@@ -132,7 +155,7 @@ class SearchIndex {
       }
       countable[i] = count.toList(growable: false);
       pairs[i] = pr;
-      last[i] = segs.isEmpty || segs.last.isEmpty ? '' : segs.last.last;
+      last[i] = _lastNameWord(segs);
       generic[i] = isGeneric;
       source[i] = _sourceRank(f);
     }
@@ -189,6 +212,25 @@ class SearchIndex {
     for (var l = length - slack; l <= length + slack; l++) {
       yield* _byLength[l] ?? const <String>[];
     }
+  }
+
+  // Near words per typed word: depends only on this index, so it is kept.
+  // Not part of the index's value: it only saves repeated work.
+  final Map<String, List<(String, int)>> _nearCache = {};
+
+  /// The indexed words within [limit] edits of [word] (5.2 typos), each with
+  /// its distance, in a fixed order.
+  List<(String, int)> nearWords(String word, int limit) {
+    final key = '$limit:$word';
+    final hit = _nearCache[key];
+    if (hit != null) return hit;
+    if (_nearCache.length > 500) _nearCache.clear();
+    final out = <(String, int)>[];
+    for (final c in wordsNearLength(word.length, limit)) {
+      final d = editDistance(word, c, limit);
+      if (d <= limit) out.add((c, d));
+    }
+    return _nearCache[key] = out;
   }
 
   /// Per-food data for ranking.

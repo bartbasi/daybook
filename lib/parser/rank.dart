@@ -12,6 +12,9 @@ import 'line.dart';
 import 'normalize.dart';
 import 'search_index.dart';
 
+// Kept here for callers that already import it from this file.
+export 'normalize.dart' show editDistance;
+
 /// A candidate food for a query, with the numbers the ranking keys use.
 class Candidate {
   const Candidate({
@@ -64,9 +67,15 @@ class FoodMatch {
     required this.corrected,
     required this.ranked,
     required this.reason,
+    this.allNegated = false,
   });
 
   final LineState state;
+
+  /// True when the item had words but the negation cut (5.2 step 6) removed
+  /// every one of them, as in "no sugar". The state is then notFound, but the
+  /// parser drops the item instead of showing a not found line (ruling R36).
+  final bool allNegated;
 
   /// The query words after normalizing and typo correction.
   final List<String> words;
@@ -83,41 +92,6 @@ class FoodMatch {
 
   Candidate? get top => ranked.isEmpty ? null : ranked.first;
   String? get ref => top?.ref;
-}
-
-/// How a typo is corrected: Damerau-Levenshtein (optimal string alignment),
-/// where swapping two neighboring letters counts as 1. Returns more than [max]
-/// when the words are further apart than that.
-int editDistance(String a, String b, int max) {
-  if ((a.length - b.length).abs() > max) return max + 1;
-  var prev2 = List<int>.filled(b.length + 1, 0);
-  var prev = List<int>.generate(b.length + 1, (j) => j);
-  var cur = List<int>.filled(b.length + 1, 0);
-  for (var i = 1; i <= a.length; i++) {
-    cur[0] = i;
-    var rowMin = cur[0];
-    for (var j = 1; j <= b.length; j++) {
-      final cost = a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1) ? 0 : 1;
-      var v = prev[j - 1] + cost;
-      if (prev[j] + 1 < v) v = prev[j] + 1;
-      if (cur[j - 1] + 1 < v) v = cur[j - 1] + 1;
-      if (i > 1 &&
-          j > 1 &&
-          a.codeUnitAt(i - 1) == b.codeUnitAt(j - 2) &&
-          a.codeUnitAt(i - 2) == b.codeUnitAt(j - 1) &&
-          prev2[j - 2] + 1 < v) {
-        v = prev2[j - 2] + 1;
-      }
-      cur[j] = v;
-      if (v < rowMin) rowMin = v;
-    }
-    if (rowMin > max) return max + 1;
-    final t = prev2;
-    prev2 = prev;
-    prev = cur;
-    cur = t;
-  }
-  return prev[b.length];
 }
 
 bool _isLetters(String w) {
@@ -176,12 +150,15 @@ class Ranker {
     final p = _prepare(foodText);
     final q = p.words;
     if (q.isEmpty) {
-      return const FoodMatch(
+      return FoodMatch(
         state: LineState.notFound,
-        words: [],
+        words: const [],
         corrected: false,
-        ranked: [],
-        reason: '5.5: no food words',
+        ranked: const [],
+        reason: p.allNegated
+            ? '5.2 step 6: every word is negated'
+            : '5.5: no food words',
+        allNegated: p.allNegated,
       );
     }
     final tier = <Candidate>[];
@@ -251,23 +228,37 @@ class Ranker {
   }
 
   // Typo correction (5.2) and the query words.
-  ({List<String> words, bool corrected}) _prepare(String text) {
-    final base = queryWords(text);
+  ({List<String> words, bool corrected, bool allNegated}) _prepare(
+    String text,
+  ) {
+    final q = readQuery(text);
     var corrected = false;
     final out = <String>[];
-    for (final w in base) {
+    for (final w in q.words) {
       final fix = _correct(w);
       if (fix != null) corrected = true;
       final use = fix ?? w;
       if (!out.contains(use)) out.add(use);
     }
-    return (words: out, corrected: corrected);
+    return (words: out, corrected: corrected, allNegated: q.allNegated);
   }
+
+  // A correction depends only on the word and the two indexes, so it is kept
+  // for the life of this Ranker. The indexes keep their own cache of the near
+  // words, so a new Ranker for the same USDA index does not start cold.
+  final Map<String, String?> _fixes = {};
 
   /// The closest indexed word for a typed word that is not in the index and is
   /// not the start of an indexed word, or null.
   String? _correct(String w) {
-    if (w.length < 4 || !_isLetters(w)) return null;
+    if (w.length < 4) return null;
+    if (_fixes.containsKey(w)) return _fixes[w];
+    if (_fixes.length > 1000) _fixes.clear();
+    return _fixes[w] = _findFix(w);
+  }
+
+  String? _findFix(String w) {
+    if (!_isLetters(w)) return null;
     final parts = _parts;
     for (final ix in parts) {
       if (ix.contains(w) || ix.hasWordStartingWith(w)) return null;
@@ -276,9 +267,7 @@ class Ranker {
     final dist = <String, int>{};
     final uses = <String, int>{};
     for (final ix in parts) {
-      for (final c in ix.wordsNearLength(w.length, limit)) {
-        final d = editDistance(w, c, limit);
-        if (d > limit) continue;
+      for (final (c, d) in ix.nearWords(w, limit)) {
         dist[c] = d;
         uses[c] = (uses[c] ?? 0) + ix.postings(c).length;
       }

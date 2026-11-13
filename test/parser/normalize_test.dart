@@ -171,6 +171,42 @@ void main() {
     });
   });
 
+  group('R36: everything negated', () {
+    test('words removed by the negation cut, nothing left', () {
+      for (final t in ['no sugar', 'without milk', 'no', 'I had no sugar']) {
+        final q = readQuery(t);
+        expect(q.words, isEmpty, reason: t);
+        expect(q.allNegated, isTrue, reason: 'R36: "$t"');
+      }
+    });
+
+    test('other items are not all negated', () {
+      for (final t in ['coffee without sugar', 'coffee', '', 'I had', 'the']) {
+        expect(readQuery(t).allNegated, isFalse, reason: '"$t"');
+      }
+    });
+  });
+
+  group('speed of the percent rule', () {
+    test('a 5,000 digit input is read quickly', () {
+      final text = '1' * 5000;
+      final sw = Stopwatch()..start();
+      final w = queryWords('$text percent milk');
+      sw.stop();
+      expect(w, isNotEmpty);
+      expect(sw.elapsedMilliseconds, lessThan(2000));
+      final sw2 = Stopwatch()..start();
+      queryWords('${'1.' * 2500}x');
+      queryWords(text);
+      expect(sw2.elapsedMilliseconds, lessThan(2000));
+    });
+
+    test('a decimal before percent still works', () {
+      // A point splits words (5.2 step 2), so "2.5" gives "2" and "5%".
+      expect(queryWords('2.5 percent milk'), ['2', '5%', 'milk']);
+    });
+  });
+
   group('percent', () {
     test('"2 percent" is the word "2%"', () {
       expect(queryWords('2 percent milk'), ['2%', 'milk']);
@@ -208,6 +244,12 @@ void main() {
       'burger': ['hamburger'],
       'yoghurt': ['yogurt'],
       'donut': ['doughnut'],
+      'skim milk': ['milk', 'fat', 'free', 'skim'],
+      'nonfat milk': ['milk', 'fat', 'free', 'skim'],
+      'bbq': ['barbecue'],
+      'cooked cereal': ['cooked', 'cereal'], // protects from "cereal"
+      'cereal bar': ['cereal', 'bar'], // protects from "cereal"
+      'cereal': ['cereal', 'ready', 'eat'], // "to" is a filler word
     };
 
     test('the test covers every row of the table', () {

@@ -323,4 +323,10 @@ const synonyms = <String, String>{
   'burger': 'hamburger',
   'yoghurt': 'yogurt',
   'donut': 'doughnut',
+  'skim milk': 'milk fat free skim',
+  'nonfat milk': 'milk fat free skim',
+  'bbq': 'barbecue',
+  'cooked cereal': 'cooked cereal',
+  'cereal bar': 'cereal bar',
+  'cereal': 'cereal ready to eat',
 };
