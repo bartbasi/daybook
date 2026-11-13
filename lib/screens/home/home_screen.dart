@@ -154,7 +154,11 @@ class HomeScreenState extends State<HomeScreen> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Text(
-                            _undoFailed ? S.undoFailed : _savedMessage(today),
+                            _undoFailed
+                                ? S.undoFailed
+                                : _savedMessage(
+                                    AppScope.of(context).clock().localDate,
+                                  ),
                           ),
                         ),
                       ),
@@ -213,6 +217,7 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   /// Built from the stored row that saveWeight returned, not from the text.
+  /// [today] is read from the clock as the message is built.
   String _savedMessage(String today) {
     final s = _saved!;
     final minute = minuteOfDayOf(s.row.measuredAtMs, s.row.tzOffsetMinutes);

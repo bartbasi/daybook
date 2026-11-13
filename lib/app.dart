@@ -94,6 +94,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   StreamSubscription<List<WeightEntry>>? _weightsSub;
   StreamSubscription<UnitSystem>? _unitsSub;
   StreamSubscription<Uri?>? _linksSub;
+  Timer? _midnightTimer;
 
   @override
   void initState() {
@@ -119,10 +120,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _units = units;
       _syncWidget();
     }, onError: (Object _) {});
+    _scheduleMidnight();
+  }
+
+  /// One timer for the next local midnight, by the injected clock, so a phone
+  /// left open across midnight moves to the new day.
+  void _scheduleMidnight() {
+    _midnightTimer?.cancel();
+    const day = Duration.millisecondsPerDay;
+    final now = _clock!();
+    final localMs = now.utcMs + now.offsetMinutes * 60000;
+    final wait = day - (localMs % day);
+    _midnightTimer = Timer(Duration(milliseconds: wait), () {
+      if (!mounted) return;
+      setState(() {});
+      _syncWidget();
+      _scheduleMidnight();
+    });
   }
 
   @override
   void dispose() {
+    _midnightTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _weightsSub?.cancel();
     _unitsSub?.cancel();
@@ -156,6 +175,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {});
       _syncWidget();
+      _scheduleMidnight();
     }
   }
 

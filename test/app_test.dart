@@ -6,6 +6,8 @@ import 'dart:async';
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
+import 'package:daybook/data/weight_data.dart';
+import 'package:daybook/util/units.dart';
 import 'package:daybook/screens/home/home_screen.dart';
 import 'package:daybook/screens/more/more_screen.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
@@ -150,6 +152,33 @@ void main() {
     await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
     await tester.pumpAndSettle();
     expect(find.text('Thursday, Nov 12'), findsOneWidget);
+  });
+
+  appTest('an app left open across midnight moves to the new day with no '
+      'lifecycle event', (tester) async {
+    var now = Now.fromLocal('2026-11-12', 23 * 60 + 59, -360);
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() => db.saveWeight(181.8, UnitSystem.imperial, now));
+    await tester.pumpWidget(
+      DaybookApp(
+        db: db,
+        clock: () => now,
+        foodsPath: Completer<String>().future,
+      ),
+    );
+    await settle(tester);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+    expect(find.text('Today, 11:59 pm'), findsOneWidget);
+
+    // Midnight passes. No pause, no resume.
+    now = Now.fromLocal('2026-11-13', 1, -360);
+    await tester.pump(const Duration(minutes: 2));
+    await tester.pump();
+    expect(find.text('Friday, Nov 13'), findsOneWidget);
+    expect(find.text('Thursday, Nov 12'), findsNothing);
+    expect(find.text('Yesterday, 11:59 pm'), findsOneWidget);
   });
 
   appTest('More opens, keeps Home alive, and leads to Data check', (

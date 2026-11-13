@@ -193,7 +193,8 @@ class _WeightSheetState extends State<WeightSheet> {
           value,
           widget.units,
           widget.clock(),
-          at: _at,
+          // The time the sheet showed is the time saved.
+          at: _at ?? _opened,
         );
         if (!mounted) return;
         Navigator.of(context)

@@ -32,6 +32,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 6. **Four Android permissions that the widget library brings in are removed.** The home-screen widget package links Android's WorkManager, which adds wake lock, network state, run at boot and foreground service permissions. Daybook uses none of those features, so the app's manifest removes them. The app still declares only internet access (for barcode lookups) and one standard AndroidX permission.
 7. **The widget shows the date of the last weigh-in, not "Today".** For example "Thu, Nov 12, 7:02 am". The widget is only redrawn when the app runs, so "Today" would still be showing the next morning.
 8. **The widget's bottom line is always "Tap to log".** The wireframe had "Logged today. Tap to log again" after a weigh-in, which has the same stale-text problem.
+9. **The time shown on the weight sheet is the time saved.** A sheet opened at 11:59 pm and saved at 12:01 am stores the weigh-in at 11:59 pm on the day it showed, not on the next day.
 
 ## Open questions from the plan, still to confirm
 
@@ -49,6 +50,7 @@ Nothing has been changed yet. The brief says "All user data stays on the device"
 ## Review findings worth knowing
 
 - **Weight edit after a unit switch (fixed before release).** Editing only the time of a weigh-in after switching between pounds and kilograms rewrote the stored weight from the rounded number on screen. 50.6 lb could come back as 50.7 lb. An edit now keeps the stored weight unless the number was changed.
+- **Two midnight bugs found by the independent test pass (fixed).** With the app left open across midnight, Home kept showing yesterday as today and a new weigh-in was not called "today". And a weigh-in typed before midnight but saved after it was stored under the next day although the sheet showed the earlier time.
 
 ## Not finished
 
