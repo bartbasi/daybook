@@ -1,0 +1,97 @@
+# Daybook. Copyright 2026 Play, Inc.
+# Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
+
+# Adds the iPhone widget target to the Xcode project on a Mac, builds the app
+# without code signing to prove it still builds with the widget inside, and
+# uploads the changed project files to commit. Started by hand. See
+# docs/ios-widget.md.
+
+name: iOS widget target
+
+on:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  add-target:
+    name: Add the widget target and build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # The gem comes with CocoaPods on GitHub's macOS images. Install it only
+      # if this image does not have it.
+      - name: Check the xcodeproj gem
+        run: |
+          xcodebuild -version
+          ruby -v
+          if ! ruby -e "require 'xcodeproj'" 2>/dev/null; then
+            gem install xcodeproj --user-install
+          fi
+          ruby -e "require 'xcodeproj'; puts 'xcodeproj ' + Xcodeproj::VERSION"
+
+      - name: Add the widget target
+        run: ruby tools/ios/add_widget_target.rb
+
+      - name: Build without code signing
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign 2>&1 | tee build-ios.log
+
+      - name: The widget is inside the app with the app's version
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          EXT="$APP/PlugIns/WeightWidget.appex"
+          ls -l "$APP/PlugIns"
+          if [ ! -d "$EXT" ]; then
+            echo "::error::$EXT is missing."
+            exit 1
+          fi
+          plutil -p "$EXT/Info.plist"
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            a="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP/Info.plist")"
+            e="$(/usr/libexec/PlistBuddy -c "Print :$key" "$EXT/Info.plist")"
+            echo "$key: app $a, widget $e"
+            if [ "$a" != "$e" ]; then
+              echo "::error::The widget's $key differs from the app's."
+              exit 1
+            fi
+          done
+          id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$EXT/Info.plist")"
+          if [ "$id" != "io.github.bartbasi.daybook.WeightWidget" ]; then
+            echo "::error::The widget's bundle id is $id."
+            exit 1
+          fi
+
+      # Every file under ios/ that the script or the build changed or added,
+      # kept at its path, plus the build log. Uploaded even when a step
+      # failed, to see what went wrong.
+      - name: Collect the changed files
+        if: always()
+        run: |
+          git status --short
+          mkdir -p widget-target-output
+          git ls-files -m -o --exclude-standard -- ios | tee changed-files.txt
+          if [ -s changed-files.txt ]; then
+            rsync -R $(cat changed-files.txt) widget-target-output/
+          fi
+          cp changed-files.txt widget-target-output/
+          if [ -f build-ios.log ]; then cp build-ios.log widget-target-output/; fi
+          git diff --stat
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-widget-target
+          path: widget-target-output/
+          retention-days: 14

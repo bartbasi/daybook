@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:flutter/foundation.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../data/database.dart';
@@ -9,11 +10,20 @@ import '../strings.dart';
 import '../util/dates.dart';
 import '../util/units.dart';
 
-/// The link a tap on the widget opens the app with.
+/// The link a tap on the widget opens the app with. The iOS widget adds a
+/// "homeWidget" query item, which the plugin needs there; [isWeightLink]
+/// ignores it.
 const weightLaunchLink = 'daybook://weight';
 
 /// The Android widget provider class, with its package.
 const androidWidgetProvider = 'io.github.bartbasi.daybook.WeightWidgetProvider';
+
+/// The iOS widget's kind, as in ios/WeightWidget/WeightWidget.swift.
+const iosWidgetKind = 'WeightWidget';
+
+/// The App Group the app and the iOS widget share. The widget reads its texts
+/// from there. Must match both .entitlements files and WeightWidget.swift.
+const iosAppGroup = 'group.io.github.bartbasi.daybook';
 
 /// The data keys the native widget reads. Every value is a ready-made text;
 /// an empty text means "show nothing here".
@@ -36,6 +46,10 @@ Future<void> writeWeightWidget(
   String today,
 ) async {
   try {
+    // On iOS the plugin needs the App Group before it can store anything.
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await HomeWidget.setAppGroupId(iosAppGroup);
+    }
     final latest = rows.isEmpty ? null : rows.first;
     final texts = <String, String>{
       widgetKeyTitle: S.widgetTitle,
@@ -56,7 +70,10 @@ Future<void> writeWeightWidget(
     for (final e in texts.entries) {
       await HomeWidget.saveWidgetData<String>(e.key, e.value);
     }
-    await HomeWidget.updateWidget(qualifiedAndroidName: androidWidgetProvider);
+    await HomeWidget.updateWidget(
+      qualifiedAndroidName: androidWidgetProvider,
+      iOSName: iosWidgetKind,
+    );
   } catch (_) {
     // See above.
   }
