@@ -258,13 +258,14 @@ class _MyFoodsScreenState extends State<MyFoodsScreen> {
               ),
             ),
           ),
-          Semantics(
-            label: S.scannedDeleteLabel(f.food.name),
-            excludeSemantics: true,
-            button: true,
-            child: TextButton(
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-              onPressed: () => _deleteScanned(f),
+          // The button keeps its own tap action; only its words are replaced
+          // by the longer label that names the product.
+          TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: () => _deleteScanned(f),
+            child: Semantics(
+              label: S.scannedDeleteLabel(f.food.name),
+              excludeSemantics: true,
               child: const Text(S.scannedDelete),
             ),
           ),

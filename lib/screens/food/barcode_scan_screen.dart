@@ -266,7 +266,13 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
     return Semantics(
       label: S.scanHelp,
-      child: widget.camera.view(onCode: _submit, onProblem: _onProblem),
+      child: widget.camera.view(
+        // One rule for every path: for 8 digits, isUpcE decides, whatever
+        // symbology the scanner reported.
+        onCode: (code, upcE) =>
+            _submit(code, code.length == 8 ? isUpcE(code) : upcE),
+        onProblem: _onProblem,
+      ),
     );
   }
 

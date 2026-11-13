@@ -18,6 +18,7 @@ import 'package:daybook/parser/parser.dart';
 import 'package:daybook/parser/search_index.dart';
 import 'package:daybook/platform/barcode.dart';
 import 'package:daybook/screens/food/barcode_scan_screen.dart';
+import 'package:daybook/screens/food/confirm_bar.dart';
 import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
@@ -741,12 +742,9 @@ void main() {
       expect(tester.widget<TextField>(field('Name')).controller!.text, '');
     });
 
-    appTest('the message with the button stays until the button is tapped; '
-        'tapping it clears the message, so a return from the editor does not '
-        'offer the same barcode again', (tester) async {
+    appTest('tapping the button clears the message, so a return from the '
+        'editor does not offer the same barcode again', (tester) async {
       await notFound(tester);
-      await tester.pump(const Duration(seconds: 30));
-      expect(addOwn(), findsOneWidget);
       expect(find.text('No product found for $code.'), findsOneWidget);
       await tap(tester, addOwn());
       expect(editor(), findsOneWidget);
@@ -755,6 +753,58 @@ void main() {
       expect(editor(), findsNothing);
       expect(addOwn(), findsNothing);
       expect(find.text('No product found for $code.'), findsNothing);
+    });
+
+    appTest('the message with the button goes after ten seconds, like any '
+        'other', (tester) async {
+      await notFound(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(addOwn(), findsOneWidget);
+      await tester.pump(const Duration(seconds: 4));
+      expect(addOwn(), findsNothing);
+    });
+
+    appTest('with accessible navigation on, the message with the button '
+        'stays until the button is tapped', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await notFound(tester);
+      await tester.pump(const Duration(seconds: 30));
+      expect(addOwn(), findsOneWidget);
+      await tap(tester, addOwn());
+      expect(editor(), findsOneWidget);
+    });
+
+    appTest('at 344 dp, text scale 2 and the keyboard up, the message with '
+        'its button fits: no overflow, the box keeps its height, Save and '
+        'the message do not overlap', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 slice toast');
+      await scan(tester, code);
+      expect(addOwn(), findsOneWidget);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(box()).height, greaterThanOrEqualTo(48));
+      final notice = tester.getRect(
+        find.ancestor(
+          of: find.byType(ConfirmBar),
+          matching: find.byType(SingleChildScrollView),
+        ),
+      );
+      final save = tester.getRect(saveButton());
+      expect(notice.bottom, lessThanOrEqualTo(save.top + 0.5));
+      expect(save.bottom, lessThanOrEqualTo(500.5));
+      // The button can still be reached.
+      await tester.ensureVisible(addOwn());
+      expect(tester.takeException(), isNull);
     });
 
     appTest('a message with no button still goes after ten seconds', (
@@ -1217,6 +1267,11 @@ void main() {
       expect(requests, hasLength(1));
       expect(tiles(), findsNWidgets(2));
       expect(lineOf(tester, 1).foodName, 'Zorbo bar');
+      // The same digits reported as an EAN-8 are the same food.
+      await scan(tester, '00010054');
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(3));
+      expect(lineOf(tester, 2).foodName, 'Zorbo bar');
     });
 
     appTest('an 8 digit number that is neither EAN-8 nor UPC-E is refused '

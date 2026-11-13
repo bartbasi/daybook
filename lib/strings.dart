@@ -760,6 +760,11 @@ class S {
   static const recipeNeedsIngredients = 'Add at least one ingredient.';
   static String recipeIngredientUnpriced(String name) =>
       'Could not work out "$name". Tap it to remove it or pick another food.';
+  static String recipeAmountReset(List<String> names) =>
+      '${names.length == 1 ? 'The amount of' : 'The amounts of'} '
+      '${names.map((n) => '"$n"').join(', ')} could not be kept, because '
+      '${names.length == 1 ? 'that food changed' : 'those foods changed'}. '
+      'The usual amount is used.';
   static const recipePricing =
       'Working out the amounts again. You can change ingredients when that is '
       'done.';

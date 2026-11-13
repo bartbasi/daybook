@@ -675,7 +675,11 @@ void main() {
       h.crashStarts = 100;
       await openRecipe(tester, 'Turkey chili');
       expect(find.text('Try again'), findsOneWidget);
-      expect(find.text('Not found'), findsNWidgets(2));
+      // The worker is only down: the lines show no numbers, and none says it
+      // was not found.
+      expect(find.text('Not found'), findsNothing);
+      expect(find.text(S.foodParserStopped), findsOneWidget);
+      expect(tiles(), findsNWidgets(2));
       expect(pricingWords(), findsNothing);
       expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNull);
       h.crashStarts = 0;
@@ -694,6 +698,67 @@ void main() {
       );
       expect(tester.widget<FilledButton>(h.saveButton()).onPressed, isNotNull);
     });
+
+    for (final (name, before, after) in [
+      ('gets a serving weight', null, 30.0),
+      ('loses its serving weight', 30.0, null),
+    ]) {
+      h.appTest('a per serving food that $name keeps its 2 servings on '
+          'reopen', (tester) async {
+        final food = await h.real(
+          tester,
+          () => h.db.createCustomFood(
+            CustomFoodInput(
+              name: 'Zorbo bar',
+              basis: FoodBasis.perServing,
+              servingSize: before,
+              nutrients: const {Nutrients.energy: 50},
+            ),
+            nowFixed,
+          ),
+        );
+        await makeRecipe(
+          tester,
+          ingredients: [
+            MealLineInput(
+              foodRef: 'local:${food.food.id}',
+              foodName: 'Zorbo bar',
+              quantity: 2,
+              unitLabel: 'serving',
+              baseQuantity: before == null ? 2 : 60,
+              baseUnit: before == null ? 'serving' : 'g',
+              nutrients: const {Nutrients.energy: 100},
+            ),
+          ],
+        );
+        await h.real(
+          tester,
+          () => h.db.editCustomFood(
+            food.food.id,
+            CustomFoodInput(
+              name: 'Zorbo bar',
+              basis: FoodBasis.perServing,
+              servingSize: after,
+              nutrients: const {Nutrients.energy: 50},
+            ),
+            nowFixed,
+          ),
+        );
+        await h.openApp(tester);
+        await openRecipe(tester, 'Turkey chili');
+        final line = tester.widget<FoodLineTile>(tiles()).line;
+        expect(line.quantity, 2);
+        expect(line.nutrients[Nutrients.energy], 100);
+        expect(
+          find.text(S.recipeAmountReset(const ['Zorbo bar'])),
+          findsNothing,
+        );
+        expect(
+          find.textContaining('Whole: 100 kcal', findRichText: true),
+          findsOneWidget,
+        );
+      });
+    }
 
     h.appTest('a food that changed meaning between two openings is not '
         'priced silently at a new amount', (tester) async {
@@ -728,7 +793,7 @@ void main() {
         find.textContaining('Whole: 100 kcal', findRichText: true),
         findsOneWidget,
       );
-      expect(find.text(S.foodSheetAmountReset), findsNothing);
+      expect(find.text(S.recipeAmountReset(const ['Zorbo bar'])), findsNothing);
       await tester.pageBack();
       await settle(tester);
       // Now 80 kcal per 100 g: a stored "2 serving" means nothing any more.
@@ -750,7 +815,10 @@ void main() {
       final line = tester.widget<FoodLineTile>(tiles()).line;
       expect(line.nutrients[Nutrients.energy], 80);
       expect(line.baseQuantity, 100);
-      expect(find.text(S.foodSheetAmountReset), findsOneWidget);
+      expect(
+        find.text(S.recipeAmountReset(const ['Zorbo bar'])),
+        findsOneWidget,
+      );
       expect(
         find.textContaining('Whole: 80 kcal', findRichText: true),
         findsOneWidget,

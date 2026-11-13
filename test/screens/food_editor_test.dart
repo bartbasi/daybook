@@ -613,6 +613,22 @@ void main() {
       expect(await foodRows(tester), isEmpty);
     });
 
+    h.appTest('a portion weight typed as 1,000 gets the comma message', (
+      tester,
+    ) async {
+      await h.openApp(tester);
+      await newFood(tester);
+      await pickUnit(tester, 'grams');
+      await fill(tester);
+      await h.tap(tester, find.text('+ Add'));
+      await h.enter(tester, 'Portion name', 'slice');
+      await h.enter(tester, 'Weight', '1,000');
+      await h.tap(tester, h.saveButton());
+      expect(find.text(S.foodEditNumberComma), findsOneWidget);
+      expect(find.text(S.foodEditPortionBad), findsNothing);
+      expect(await foodRows(tester), isEmpty);
+    });
+
     h.appTest('a portion name that starts with a digit is refused beside '
         'its field', (tester) async {
       await portion(tester, '2 slices');

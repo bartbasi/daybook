@@ -1,6 +1,8 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:ui' show SemanticsAction;
+
 import 'package:daybook/app_info.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
@@ -373,6 +375,23 @@ void main() {
       final del = tester.getSize(deleteButton());
       expect(del.height, greaterThanOrEqualTo(48));
       expect(del.width, greaterThanOrEqualTo(48));
+    });
+
+    h.appTest('the Delete button has a tap action for a screen reader, and '
+        'performing it deletes the row', (tester) async {
+      final handle = tester.ensureSemantics();
+      final id = await scannedProduct(tester);
+      await h.openApp(tester);
+      await h.goToList(tester);
+      final node = find.semantics.byLabel('Delete Scanned yogurt');
+      expect(node, findsOneWidget);
+      final data = node.evaluate().single.getSemanticsData();
+      expect(data.hasAction(SemanticsAction.tap), isTrue);
+      tester.semantics.tap(node);
+      await settle(tester);
+      expect((await reload(tester, id)).food.archived, isTrue);
+      expect(find.text('"Scanned yogurt" deleted.'), findsOneWidget);
+      handle.dispose();
     });
 
     h.appTest('Delete takes it off the list with Undo; Undo brings it back '

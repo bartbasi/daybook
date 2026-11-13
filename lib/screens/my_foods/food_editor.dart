@@ -311,6 +311,8 @@ class _FoodEditorState extends State<FoodEditor> {
         errors['portionName$i'] = S.foodEditPortionServing;
       } else if (RegExp(r'^\d').hasMatch(label)) {
         errors['portionName$i'] = S.foodEditPortionDigit;
+      } else if (hasThousandsComma(p.weight.text)) {
+        errors['portionWeight$i'] = S.foodEditNumberComma;
       } else if (label.isEmpty || w == null || w <= 0) {
         portionBad = true;
       } else {
@@ -679,6 +681,7 @@ class _FoodEditorState extends State<FoodEditor> {
                   keyboardType: _numberKeys,
                   decoration: _decoration(
                     S.foodEditPortionWeight,
+                    errorKey: 'portionWeight$i',
                     suffix: _weightSuffix,
                   ),
                 ),

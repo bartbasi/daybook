@@ -1668,13 +1668,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   // Messages on this screen. They sit under the meal chips, so they never
   // cover the totals bar or Save.
 
-  /// A message with a button does not time out: someone using a screen reader
-  /// needs longer than ten seconds to reach it. It stays until its button is
-  /// tapped, another message replaces it, or the screen closes.
+  /// Every message goes after ten seconds, except one with a button while
+  /// accessible navigation (a screen reader) is on: that one stays until its
+  /// button is tapped, another message replaces it, or the screen closes.
   void _showNotice(_Notice n) {
     _noticeTimer?.cancel();
     _noticeTimer = null;
-    if (n.onAction == null) {
+    if (n.onAction == null || !MediaQuery.accessibleNavigationOf(context)) {
       _noticeTimer = Timer(_noticeTime, () {
         if (mounted) setState(() => _notice = null);
       });
@@ -1770,13 +1770,24 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                       _topBar(context),
                       if (!largeText) header,
                       if (_notice != null)
-                        ConfirmBar(
-                          message: _notice!.text,
-                          onUndo: _notice!.undo == null ? null : _undoNotice,
-                          actionLabel: _notice!.actionLabel,
-                          onAction: _notice!.onAction == null
-                              ? null
-                              : _noticeAction,
+                        // At most under a fifth of what is left above the
+                        // keyboard; a longer message scrolls inside.
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: _noticeMaxHeight(context),
+                          ),
+                          child: SingleChildScrollView(
+                            child: ConfirmBar(
+                              message: _notice!.text,
+                              onUndo: _notice!.undo == null
+                                  ? null
+                                  : _undoNotice,
+                              actionLabel: _notice!.actionLabel,
+                              onAction: _notice!.onAction == null
+                                  ? null
+                                  : _noticeAction,
+                            ),
+                          ),
                         ),
                       // What is left is shared by the box and the lines. The
                       // box stays in a fixed area, outside the scrolling
@@ -1806,6 +1817,11 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         ),
       ),
     );
+  }
+
+  double _noticeMaxHeight(BuildContext context) {
+    final m = MediaQuery.of(context);
+    return ((m.size.height - m.viewInsets.bottom) * 0.18).clamp(72.0, 1e9);
   }
 
   /// The Scan button, after the date (frame 1).

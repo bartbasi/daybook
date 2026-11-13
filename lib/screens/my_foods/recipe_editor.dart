@@ -69,6 +69,10 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
 
   var _items = <AddedLine>[];
 
+  /// Ingredients that pricing ran for and refused. Only these are drawn as
+  /// not found; with the worker down they only show no numbers.
+  var _notPriced = <AddedLine>{};
+
   // The parser side, as on the food screen (plan rules 2 to 4).
   SessionHandle? _handle;
   ParseResult? _result;
@@ -157,7 +161,7 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
   Future<void> _priceAgain() async {
     final start = _items;
     final out = <AddedLine>[];
-    var reset = false;
+    final reset = <String>[];
     for (final a in start) {
       final old = a.line;
       final ref = old.foodRef;
@@ -170,22 +174,44 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
         ref,
         tries: [if (q != null) AmountTry(q, old.unitLabel ?? '')],
         grams: old.baseUnit == 'g' ? old.baseQuantity : null,
-        keepBaseUnit: old.baseUnit,
+        keepBaseUnit: await _keepBaseUnit(old),
       );
       if (priced == null) {
         out.add(a);
         continue;
       }
-      reset = reset || priced.reset;
+      if (priced.reset) reset.add(old.foodName ?? '');
       out.add(AddedLine(priced.line));
     }
     if (!mounted) return;
     setState(() {
       if (identical(_items, start)) _items = out;
+      _notPriced = {
+        if (!_dead)
+          for (final a in out)
+            if (a.line.nutrients.isEmpty && a.line.foodRef != null) a,
+      };
       _pricing = false;
     });
-    if (reset) sheetNote(S.foodSheetAmountReset);
+    if (reset.isNotEmpty) sheetNote(S.recipeAmountReset(reset));
     _changes.fire();
+  }
+
+  /// The base unit a re-priced ingredient must still come out in, or null when
+  /// any will do. An amount in servings is kept whenever the food still has a
+  /// serving, whatever happened to its base unit; an amount in weight, volume
+  /// or a bare count must come out in the unit it was stored in.
+  Future<String?> _keepBaseUnit(Line stored) async {
+    final unit = (stored.unitLabel ?? '').trim().toLowerCase();
+    if (unit != 'serving' && unit != 'servings') return stored.baseUnit;
+    final ref = stored.foodRef ?? '';
+    if (!ref.startsWith('local:')) return null;
+    final id = int.tryParse(ref.substring(6));
+    final food = id == null ? null : await _guard(() => _db.loadFood(id));
+    if (food == null) return stored.baseUnit;
+    final hasServing =
+        food.food.baseUnit == 'serving' || food.portions.isNotEmpty;
+    return hasServing ? null : stored.baseUnit;
   }
 
   // The parser.
@@ -926,7 +952,7 @@ class RecipeEditorState extends State<RecipeEditor> implements CorrectionHost {
     final a = _items[i];
     // An ingredient with no numbers (after pricing) is drawn as a line that
     // was not found: its outline, its words, and "Not counted".
-    final unpriced = !_pricing && a.line.nutrients.isEmpty;
+    final unpriced = !_pricing && _notPriced.contains(a);
     return FoodLineTile(
       line: unpriced ? a.line.copyWith(state: LineState.notFound) : a.line,
       typed: a.line.foodName ?? '',
