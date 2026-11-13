@@ -12,6 +12,7 @@
         android:id="@+id/widget_weight"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/weight_widget_text"
         android:textSize="22sp"
@@ -21,6 +22,7 @@
         android:id="@+id/widget_tap"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/weight_widget_secondary"
         android:textSize="12sp" />

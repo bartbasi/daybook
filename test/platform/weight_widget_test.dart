@@ -53,8 +53,10 @@ void main() {
   late Map<String, Object?> saved;
   late List<MethodCall> calls;
   late bool pluginFails;
+  late Now clockNow;
 
   setUp(() {
+    clockNow = nowFixed;
     counter = WriteCounter();
     db = AppDatabase(NativeDatabase.memory().interceptWith(counter));
     saved = {};
@@ -96,7 +98,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        DaybookApp(db: db, clock: () => nowFixed, foodsPath: Future.value('')),
+        DaybookApp(db: db, clock: () => clockNow, foodsPath: Future.value('')),
       );
       await settle(tester);
       await body(tester);
@@ -184,7 +186,7 @@ void main() {
     expectWidget(
       texts(
         weight: '181.8 lb',
-        when: 'Today, 7:02 am',
+        when: 'Thu, Nov 12, 7:02 am',
         // 182.4 moves a tenth of the way to 181.8: 182.34.
         trend: 'Trend 182.3 lb',
       ),
@@ -210,7 +212,7 @@ void main() {
     var count = updates();
     final yesterdayOnly = texts(
       weight: '182.4 lb',
-      when: 'Yesterday, 6:55 am',
+      when: 'Wed, Nov 11, 6:55 am',
       trend: 'Trend 182.4 lb',
     );
 
@@ -222,7 +224,7 @@ void main() {
     expectWidget(
       texts(
         weight: '181.2 lb',
-        when: 'Today, 7:02 am',
+        when: 'Thu, Nov 12, 7:02 am',
         // 182.4 moves a tenth of the way to 181.2: 182.28.
         trend: 'Trend 182.3 lb',
       ),
@@ -246,10 +248,47 @@ void main() {
     // Units: 181.2 lb is 82.2 kg, and the trend 182.28 lb is 82.7 kg.
     await run(tester, () => db.setUnits(UnitSystem.metric));
     expectWidget(
-      texts(weight: '82.2 kg', when: 'Today, 7:02 am', trend: 'Trend 82.7 kg'),
+      texts(
+        weight: '82.2 kg',
+        when: 'Thu, Nov 12, 7:02 am',
+        trend: 'Trend 82.7 kg',
+      ),
       reason: 'units',
     );
     expect(updates(), greaterThan(count));
+  });
+
+  widgetTest('resuming the app rewrites the widget data', (tester) async {
+    await run(
+      tester,
+      () => db.saveWeight(
+        181.8,
+        UnitSystem.imperial,
+        nowFixed,
+        at: at('2026-11-11', 6, 55),
+      ),
+    );
+    expect(saved['weight_when'], 'Wed, Nov 11, 6:55 am');
+    calls.clear();
+    saved.clear();
+
+    clockNow = at('2026-11-13', 7, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+
+    expect(
+      calls.where((c) => c.method == 'saveWidgetData'),
+      isNotEmpty,
+      reason: 'texts written again',
+    );
+    expectWidget(
+      texts(
+        weight: '181.8 lb',
+        when: 'Wed, Nov 11, 6:55 am',
+        trend: 'Trend 181.8 lb',
+      ),
+    );
+    expect(updates(), greaterThanOrEqualTo(1), reason: 'update requested');
   });
 
   widgetTest('deleting the only weigh-in goes back to the empty state', (

@@ -44,11 +44,10 @@ Future<void> writeWeightWidget(
           : '${formatWeight(latest.weightKg, units)} ${S.unitWord(units)}',
       widgetKeyWhen: latest == null
           ? ''
-          : S.whenAsLabel(
-              latest.localDate,
-              minuteOfDayOf(latest.measuredAtMs, latest.tzOffsetMinutes),
-              today,
-            ),
+          // An absolute day, never "Today": the widget is not redrawn
+          // overnight, so relative wording would go stale.
+          : '${S.dayShort(latest.localDate, today)}, '
+                '${S.timeOfDay(minuteOfDayOf(latest.measuredAtMs, latest.tzOffsetMinutes))}',
       widgetKeyTrend: latest == null
           ? ''
           : S.homeTrend(formatWeight(_trendKg(rows), units), S.unitWord(units)),
