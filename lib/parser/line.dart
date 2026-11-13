@@ -112,7 +112,7 @@ class ItemDraft {
     unit?.label,
     size,
     negationProtected,
-  ].join('');
+  ].join('\u0001');
 
   @override
   String toString() =>
@@ -153,6 +153,7 @@ class Line {
     this.foodText,
     this.plain = false,
     this.fromLearnedMatch = false,
+    this.assumedAmountSetInSheet = false,
   });
 
   final LineState state;
@@ -161,6 +162,14 @@ class Line {
   /// ranking or a pick. The screen offers "Forget this match" for it, and
   /// learning on Save (7.2) needs it.
   final bool fromLearnedMatch;
+
+  /// True only for a typed line whose amount was assumed and that the user
+  /// then set in the correction sheet, with the item's text unchanged since
+  /// (grammar 7.2, second row: on Save, store this line's quantity and unit on
+  /// the learned row for its key). False for a line whose typed amount was
+  /// changed in the sheet (7.2, third row: nothing is learned), and false for
+  /// every line once its item is edited again.
+  final bool assumedAmountSetInSheet;
 
   /// For a typed line: the item's food words as typed, for the not found
   /// sheet's search box (8.3).
@@ -182,6 +191,7 @@ class Line {
     Span? span,
     List<Span>? amountSpans,
     bool? plain,
+    bool? assumedAmountSetInSheet,
   }) => Line(
     state: state ?? this.state,
     foodRef: foodRef,
@@ -201,6 +211,8 @@ class Line {
     foodText: foodText,
     plain: plain ?? this.plain,
     fromLearnedMatch: fromLearnedMatch,
+    assumedAmountSetInSheet:
+        assumedAmountSetInSheet ?? this.assumedAmountSetInSheet,
   );
 
   /// For a saved meal header: the id of the saved meal it expands.

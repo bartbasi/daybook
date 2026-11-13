@@ -25,18 +25,20 @@ const _halfAndHalf = 'usda:2705594';
 UserSnapshotData _data({
   int version = 1,
   bool learned = false,
+  bool foods = true,
 }) => UserSnapshotData(
   version: version,
   foods: [
-    const UserFoodData(
-      ref: 'local:1',
-      name: 'Protein bar',
-      kind: 'custom',
-      baseUnit: 'g',
-      baseAmount: 50,
-      portions: [PortionData('1 bar', 50)],
-      nutrients: {1008: 200, 203: 20},
-    ),
+    if (foods)
+      const UserFoodData(
+        ref: 'local:1',
+        name: 'Protein bar',
+        kind: 'custom',
+        baseUnit: 'g',
+        baseAmount: 50,
+        portions: [PortionData('1 bar', 50)],
+        nutrients: {1008: 200, 203: 20},
+      ),
     const UserFoodData(
       ref: 'local:2',
       name: 'No sugar cola',
@@ -117,103 +119,244 @@ Line _expectedPlain(Line l, String text, int cursor) {
 }
 
 // An independent model of the picks (grammar 9.1 and ruling R43), used to
-// check the session over generated edits. It works on a plain parse of the new
-// text, not on the session's own items.
-class _ModelPick {
-  _ModelPick(this.ref, this.key, this.span, this.suspended);
-  final String ref;
+// check the session over generated edits. It is written from the rule, not
+// from the session's code, and works on a plain parse of each text.
+//
+// The rule: a pick remembers the key it was picked with, the span it follows,
+// and the item it is on. After an edit, the span is carried through the
+// changed region (before it: kept; after it: shifted; over it: stretched or
+// shrunk with it). The pick's item is the new item that overlaps the carried
+// span most (the first one on a tie). If that item is not a saved meal and
+// its key is the pick's key, the pick applies to it; otherwise it is
+// suspended on it. The pick's old item is unchanged when a new item has its
+// draft at its carried span. A suspended pick is dropped when the text changed,
+// its item is unchanged, and the edit was not only blanks with nothing but
+// blanks between it and the item; and it is never restored onto an unchanged
+// item. Any pick is dropped when no new item overlaps its span, when a new
+// pick is made on its item, when it is cleared, or when its food is gone. An
+// item takes at most one pick: the one that overlaps it most, then the one
+// whose span starts first; the others are suspended on it. A pick that
+// applies follows its whole item; a suspended one follows only the part of its
+// span inside its item.
+class _MItem {
+  _MItem(this.span, this.key, this.draft, this.header);
+  final Span span;
   final String? key;
-  Span span;
-  bool suspended;
+  final String draft;
+  final bool header;
 }
 
-List<_ModelPick> _advance(
-  List<_ModelPick> picks,
-  String oldText,
-  String newText,
-  List<Line> items,
-) {
-  if (picks.isEmpty) return [];
-  final same = oldText == newText;
-  var p = 0;
-  final shortest = min(oldText.length, newText.length);
-  while (p < shortest && oldText.codeUnitAt(p) == newText.codeUnitAt(p)) {
-    p++;
-  }
-  var s = 0;
-  while (s < shortest - p &&
-      oldText.codeUnitAt(oldText.length - 1 - s) ==
-          newText.codeUnitAt(newText.length - 1 - s)) {
-    s++;
-  }
-  final oldEnd = oldText.length - s;
-  final newEnd = newText.length - s;
-  final delta = newText.length - oldText.length;
-  int a0(int x) => x <= p ? x : (x >= oldEnd ? x + delta : p);
-  int b0(int x) => x <= p ? x : (x >= oldEnd ? x + delta : newEnd);
+class _MPick {
+  _MPick(this.ref, this.key, this.follows, this.on, this.onDraft, this.live);
+  final String ref;
+  final String? key;
+  Span follows;
+  Span on;
+  String onDraft;
+  bool live;
+}
 
-  final blankEdit =
-      RegExp(r'^[ 	 ]*$').hasMatch(oldText.substring(p, oldEnd)) &&
-      RegExp(r'^[ 	 ]*$').hasMatch(newText.substring(p, newEnd));
-  final taken = <int>{};
-  bool free(int i) =>
-      !taken.contains(i) && items[i].state != LineState.aliasOrSavedMeal;
-  final out = <_ModelPick>[];
-  for (final m in [
-    ...picks.where((m) => !m.suspended),
-    ...picks.where((m) => m.suspended),
-  ]) {
-    if (same && m.suspended) {
-      out.add(m);
-      continue;
+class _Model {
+  var picks = <_MPick>[];
+  final dropped = <String, int>{};
+  var restored = 0;
+
+  static const movedOn = 'an edit elsewhere left its item as it was';
+  static const deleted = 'its item was deleted';
+  static const repicked = 'a new pick was made on its item';
+  static const cleared = 'it was cleared';
+  static const foodGone = 'its food left the user data';
+
+  void _drop(String why) => dropped[why] = (dropped[why] ?? 0) + 1;
+
+  static bool _onlyBlanks(String s) =>
+      s.split('').every((c) => c == ' ' || c == '\t' || c == ' ');
+
+  void edit(String before, String after, List<_MItem> items) {
+    var head = 0;
+    while (head < before.length &&
+        head < after.length &&
+        before[head] == after[head]) {
+      head++;
     }
-    Span? exact;
-    if (m.span.end <= p) {
-      exact = m.span;
-    } else if (m.span.start >= oldEnd) {
-      exact = Span(m.span.start + delta, m.span.end + delta);
+    var tail = 0;
+    while (tail < before.length - head &&
+        tail < after.length - head &&
+        before[before.length - 1 - tail] == after[after.length - 1 - tail]) {
+      tail++;
     }
-    if (exact != null) {
-      final at = [
-        for (var i = 0; i < items.length; i++)
-          if (free(i) && items[i].span == exact) i,
-      ];
-      if (at.isNotEmpty) {
-        if (!m.suspended) {
-          taken.add(at.first);
-          out.add(_ModelPick(m.ref, items[at.first].learnedKey, exact, false));
-        } else if (blankEdit && m.span.start <= oldEnd && m.span.end >= p) {
-          out.add(_ModelPick(m.ref, m.key, exact, true));
+    final cutEnd = before.length - tail;
+    final pasteEnd = after.length - tail;
+    final grow = pasteEnd - cutEnd;
+    final changed = before != after;
+    final blanksOnly =
+        _onlyBlanks(before.substring(head, cutEnd)) &&
+        _onlyBlanks(after.substring(head, pasteEnd));
+
+    Span carry(Span s) {
+      if (s.end <= head) return s;
+      if (s.start >= cutEnd) return Span(s.start + grow, s.end + grow);
+      return Span(min(s.start, head), s.end > cutEnd ? s.end + grow : pasteEnd);
+    }
+
+    bool besideOrIn(Span s) {
+      if (head > s.end) return _onlyBlanks(before.substring(s.end, head));
+      if (cutEnd < s.start) {
+        return _onlyBlanks(before.substring(cutEnd, s.start));
+      }
+      return true;
+    }
+
+    int overlap(Span a, Span b) =>
+        max(0, min(a.end, b.end) - max(a.start, b.start));
+
+    final next = <_MPick>[];
+    final claims = <_MItem, List<(_MPick, Span, int)>>{};
+    for (final p in picks) {
+      final s = carry(p.follows);
+      _MItem? best;
+      var most = 0;
+      for (final it in items) {
+        if (overlap(it.span, s) > most) {
+          best = it;
+          most = overlap(it.span, s);
         }
+      }
+      if (best == null) {
+        _drop(deleted);
         continue;
       }
+      final was = carry(p.on);
+      final same = items.any((it) => it.span == was && it.draft == p.onDraft);
+      if (!p.live && changed && same && !(blanksOnly && besideOrIn(p.on))) {
+        _drop(movedOn);
+        continue;
+      }
+      if (!best.header && best.key == p.key && (p.live || !same)) {
+        claims.putIfAbsent(best, () => []).add((p, s, most));
+      } else {
+        next.add(_suspend(p, s, best));
+      }
     }
-    if (!(m.span.start <= oldEnd && m.span.end >= p)) continue;
-    final a = a0(m.span.start);
-    final b = b0(m.span.end);
-    final near = [
-      for (var i = 0; i < items.length; i++)
-        if (free(i) && items[i].span!.start <= b && items[i].span!.end >= a) i,
-    ];
-    final keyed = [
-      for (final i in near)
-        if (items[i].learnedKey == m.key) i,
-    ];
-    if (keyed.isNotEmpty) {
-      taken.add(keyed.first);
-      out.add(_ModelPick(m.ref, m.key, items[keyed.first].span!, false));
-    } else {
-      out.add(
-        _ModelPick(
-          m.ref,
-          m.key,
-          near.isEmpty ? Span(a, a) : items[near.first].span!,
-          true,
-        ),
+    for (final MapEntry(key: it, value: list) in claims.entries) {
+      list.sort(
+        (a, b) => a.$3 != b.$3
+            ? b.$3.compareTo(a.$3)
+            : a.$2.start.compareTo(b.$2.start),
       );
+      final w = list.first.$1;
+      if (!w.live) restored++;
+      w
+        ..live = true
+        ..follows = it.span
+        ..on = it.span
+        ..onDraft = it.draft;
+      next.add(w);
+      for (final (p, s, _) in list.skip(1)) {
+        next.add(_suspend(p, s, it));
+      }
+    }
+    picks = next;
+  }
+
+  static _MPick _suspend(_MPick p, Span s, _MItem it) => p
+    ..live = false
+    ..follows = Span(max(s.start, it.span.start), min(s.end, it.span.end))
+    ..on = it.span
+    ..onDraft = it.draft;
+
+  /// Whether a pick at [at] is accepted.
+  bool pick(Span at, String ref, List<_MItem> items, bool known) {
+    final it = items.where((i) => i.span == at).firstOrNull;
+    if (it == null || it.header || !known) return false;
+    for (final _ in picks.where((p) => p.on == at)) {
+      _drop(repicked);
+    }
+    picks = [
+      ...picks.where((p) => p.on != at),
+      _MPick(ref, it.key, at, at, it.draft, true),
+    ];
+    return true;
+  }
+
+  bool clear(Span at) {
+    final had = picks.where((p) => p.on == at).length;
+    for (var i = 0; i < had; i++) {
+      _drop(cleared);
+    }
+    picks = picks.where((p) => p.on != at).toList();
+    return had > 0;
+  }
+
+  void foodsLeft(bool Function(String ref) known) {
+    for (final _ in picks.where((p) => !known(p.ref))) {
+      _drop(foodGone);
+    }
+    picks = picks.where((p) => known(p.ref)).toList();
+  }
+
+  List<String> shown() => [
+    for (final p in picks)
+      if (p.live) '${p.on.start}-${p.on.end} ${p.ref} ${p.key}',
+  ]..sort();
+}
+
+/// Types into a session the way a keyboard does: every change inserts or
+/// deletes one character at the cursor, and the session sees each one.
+class _Keys {
+  _Keys(this.s, String start) : text = start, cursor = start.length {
+    s.setText(text, cursor);
+  }
+
+  final ParseSession s;
+  String text;
+  int cursor;
+
+  void moveTo(int c) {
+    cursor = c;
+    s.setText(text, cursor);
+  }
+
+  /// Types [chars] one at a time; [each] runs after every keystroke.
+  void type(String chars, [void Function(String text)? each]) {
+    for (final c in chars.split('')) {
+      text = text.substring(0, cursor) + c + text.substring(cursor);
+      cursor++;
+      s.setText(text, cursor);
+      each?.call(text);
     }
   }
-  return out;
+
+  /// Deletes [n] characters before the cursor, one at a time.
+  void backspace(int n, [void Function(String text)? each]) {
+    for (var i = 0; i < n; i++) {
+      text = text.substring(0, cursor - 1) + text.substring(cursor);
+      cursor--;
+      s.setText(text, cursor);
+      each?.call(text);
+    }
+  }
+
+  /// Select all and type (or delete with an empty [t]).
+  void replaceAll(String t) {
+    text = t;
+    cursor = t.length;
+    s.setText(text, cursor);
+  }
+
+  /// Takes the session's text and cursor, after the screen set them.
+  void reload() {
+    text = s.text;
+    cursor = s.cursor;
+  }
+
+  /// The line whose span starts at [start].
+  Line lineAt(int start) => s.lines.firstWhere((l) => l.span!.start == start);
+
+  List<Span> pickedSpans() => [
+    for (final l in s.lines)
+      if (l.markers.contains(Marker.yourPick)) l.span!,
+  ];
 }
 
 void main() {
@@ -625,105 +768,264 @@ void main() {
     );
   });
 
-  group('a pick and backspacing (R43)', () {
-    test('2 slices toast to 3 slices toast, character by character', () {
-      final s = newSession()..setText('2 slices toast', 14);
-      final ref = pickOther(s, 0);
-      s.setText(' slices toast', 0); // backspace over the 2
-      expect(picked(s.lines[0]), isFalse);
-      s.setText('slices toast', 0); // and the space
-      expect(picked(s.lines[0]), isFalse);
-      // The line is what a fresh parse shows while the pick is suspended.
+  group('picks while editing, one keystroke at a time (9.1)', () {
+    // Each test types into a session the way a keyboard does: one character
+    // inserted or deleted at the cursor per change, spaces included.
+
+    test('typing an amount after a picked item keeps the pick the whole way '
+        '(the key stays "toast")', () {
+      final k = _Keys(newSession(), '2 eggs, toast');
+      final ref = pickOther(k.s, 1);
+      k.type(' 2 slices', (t) {
+        final toast = k.lineAt(8);
+        expect(toast.learnedKey, 'toast', reason: t);
+        expect(picked(toast), isTrue, reason: t);
+        expect(toast.foodRef, ref, reason: t);
+      });
+      expect(k.text, '2 eggs, toast 2 slices');
+      expect(k.s.lines.last.unitLabel, 'slice');
+    });
+
+    test('eggs x3: suspended at "eggs x", back at "eggs x3"', () {
+      final k = _Keys(newSession(), 'eggs');
+      final ref = pickOther(k.s, 0);
+      final seen = <String, bool>{};
+      k.type(' x3', (t) => seen[t] = picked(k.s.lines.single));
+      expect(seen, {'eggs ': true, 'eggs x': false, 'eggs x3': true});
+      expect(k.s.lines.single.foodRef, ref);
+      expect(k.s.lines.single.quantity, 3);
+    });
+
+    test('the last word backspaced and typed again', () {
+      final k = _Keys(newSession(), '2 slices toast');
+      final ref = pickOther(k.s, 0);
+      k.backspace(5, (t) => expect(k.s.lines.any(picked), isFalse, reason: t));
+      expect(k.text, '2 slices ');
+      final seen = <bool>[];
+      k.type('toast', (t) => seen.add(picked(k.s.lines.single)));
+      expect(seen, [false, false, false, false, true]);
+      expect(k.s.lines.single.foodRef, ref);
+    });
+
+    test('two like items: a merge suspends the pick and the split puts it '
+        'back on its own item', () {
+      final k = _Keys(newSession(), 'toast, toast');
+      final ref = pickOther(k.s, 1);
+      k.moveTo(7);
+      k.backspace(1);
+      expect(k.text, 'toast,toast');
+      expect(k.pickedSpans(), [const Span(6, 11)]);
+      k.backspace(1);
+      expect(k.text, 'toasttoast');
+      expect(k.pickedSpans(), isEmpty);
+      k.type(',');
+      expect(k.text, 'toast,toast');
+      expect(k.pickedSpans(), [const Span(6, 11)]);
+      expect(k.s.lines[1].foodRef, ref);
+      expect(picked(k.s.lines[0]), isFalse);
+    });
+
+    test('an amount backspaced across the separator and typed again stays on '
+        'its own item', () {
+      final k = _Keys(newSession(), 'toast, 2 slices toast');
+      final ref = pickOther(k.s, 1);
+      k.moveTo(8);
+      k.backspace(3, (t) => expect(k.s.lines.any(picked), isFalse, reason: t));
+      expect(k.text, 'toast slices toast');
+      k.type(', 3', (t) {
+        if (t != 'toast, 3 slices toast') {
+          expect(k.s.lines.any(picked), isFalse, reason: t);
+        }
+      });
+      expect(k.text, 'toast, 3 slices toast');
+      expect(k.pickedSpans(), [const Span(7, 21)]);
+      expect(k.s.lines[1].foodRef, ref);
+      expect(k.s.lines[1].quantity, 3);
+    });
+
+    test('9.1 case 1: typing , 1 banana at the end keeps every pick', () {
+      final k = _Keys(newSession(), '2 eggs, 2 slices toast');
+      final eggs = pickOther(k.s, 0);
+      final toast = pickOther(k.s, 1);
+      k.type(', 1 banana', (t) {
+        expect(k.lineAt(0).foodRef, eggs, reason: t);
+        expect(picked(k.lineAt(0)), isTrue, reason: t);
+        expect(k.lineAt(8).foodRef, toast, reason: t);
+        expect(picked(k.lineAt(8)), isTrue, reason: t);
+      });
+      expect(k.s.lines, hasLength(3));
+      expect(picked(k.s.lines[2]), isFalse);
+    });
+
+    test('9.1 case 2: 2 slices toast to 3 slices toast by backspacing', () {
+      final k = _Keys(newSession(), '2 slices toast');
+      final ref = pickOther(k.s, 0);
+      final grams = k.s.lines.single.baseQuantity!;
+      k.moveTo(1);
+      k.backspace(1);
+      expect(k.text, ' slices toast');
+      expect(picked(k.s.lines.single), isFalse);
+      // While suspended the line is what a fresh parse shows.
       expect(
-        _sum(s.lines[0]),
-        _sum(parser.parseMeal('slices toast', 0, s.snapshot).single),
+        _sum(k.s.lines.single),
+        _sum(parser.parseMeal(k.text, 0, k.s.snapshot).single),
       );
-      s.setText('3slices toast', 1);
-      s.setText('3 slices toast', 2);
-      expect(picked(s.lines[0]), isTrue);
-      expect(s.lines[0].foodRef, ref);
-      expect(s.lines[0].quantity, 3);
+      k.type('3');
+      expect(picked(k.s.lines.single), isTrue);
+      expect(k.s.lines.single.foodRef, ref);
+      expect(k.s.lines.single.quantity, 3);
+      expect(k.s.lines.single.baseQuantity, closeTo(grams * 3 / 2, 1e-9));
+    });
+
+    test('9.1 case 3: 3 slices white toast suspends it, and an edit in '
+        'another item drops it', () {
+      final k = _Keys(newSession(), '3 slices toast, coffee');
+      pickOther(k.s, 0);
+      k.moveTo(9);
+      k.type('white ', (t) {
+        if (t != '3 slices white toast, coffee') return;
+        expect(picked(k.s.lines[0]), isFalse);
+        expect(
+          _sum(k.s.lines[0]),
+          _sum(parser.parseMeal(t, 15, k.s.snapshot)[0]),
+        );
+      });
+      k.moveTo(k.text.length);
+      k.type(' x2'); // the coffee item changes: the user has moved on
+      k.moveTo(15);
+      k.backspace(6);
+      expect(k.text, '3 slices toast, coffee x2');
+      expect(k.s.lines.any(picked), isFalse);
     });
 
     test('1 cup milk to 1 cu milk and back', () {
-      final s = newSession()..setText('1 cup milk', 10);
-      final ref = pickOther(s, 0);
-      s.setText('1 cu milk', 4);
-      expect(picked(s.lines[0]), isFalse);
-      s.setText('1 cu milk', 4);
-      s.setText('1 cup milk', 5);
-      expect(picked(s.lines[0]), isTrue);
-      expect(s.lines[0].foodRef, ref);
+      final k = _Keys(newSession(), '1 cup milk');
+      final ref = pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1);
+      expect(picked(k.s.lines.single), isFalse);
+      k.type('p');
+      expect(picked(k.s.lines.single), isTrue);
+      expect(k.s.lines.single.foodRef, ref);
     });
 
-    test('a suspended pick is dropped when an edit lands in another item', () {
-      final s = newSession()..setText('1 cup milk, 2 eggs', 18);
-      pickOther(s, 0);
-      s.setText('1 cu milk, 2 eggs', 4);
-      expect(picked(s.lines[0]), isFalse);
-      s.setText('1 cu milk, 2 eggs, toast', 24); // an edit elsewhere
-      s.setText('1 cup milk, 2 eggs, toast', 5);
-      expect(picked(s.lines[0]), isFalse, reason: 'it came back');
+    test('an item backspaced to nothing and typed again has no pick', () {
+      final k = _Keys(newSession(), '2 eggs, toast');
+      pickOther(k.s, 1);
+      k.backspace(5);
+      expect(k.text, '2 eggs, ');
+      k.type('toast', (t) => expect(k.s.lines.any(picked), isFalse, reason: t));
+
+      // Select all, delete, and a new meal that starts with the same food.
+      final j = _Keys(newSession(), 'toast, 2 eggs');
+      pickOther(j.s, 0);
+      j.replaceAll('');
+      expect(j.s.lines, isEmpty);
+      j.type('toast, 1 egg', (t) {
+        expect(j.s.lines.any(picked), isFalse, reason: t);
+      });
     });
 
-    test('a suspended pick never attaches to a different item', () {
-      final s = newSession()..setText('1 cup milk, 2 eggs', 18);
-      pickOther(s, 0);
-      // The milk item is deleted; the eggs item takes its place.
-      s.setText('2 eggs', 6);
-      expect(picked(s.lines[0]), isFalse);
-      // Milk typed again as a new item after it is not the picked item.
-      s.setText('2 eggs, 1 cup milk', 18);
-      expect(s.lines.any(picked), isFalse);
+    test('typing in another item while suspended drops it', () {
+      final k = _Keys(newSession(), '1 cup milk, 2 eggs');
+      pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1); // 1 cu milk: suspended
+      k.moveTo(12);
+      k.backspace(1);
+      k.type('3'); // 3 eggs
+      k.moveTo(4);
+      k.type('p');
+      expect(k.text, '1 cup milk, 3 eggs');
+      expect(k.s.lines.any(picked), isFalse);
     });
 
-    test('a suspended pick on the first of two like items stays with it', () {
-      final s = newSession()..setText('1 cup milk, 1 cup milk', 22);
-      final ref = pickOther(s, 0);
-      s.setText('1 cu milk, 1 cup milk', 4);
-      expect(s.lines.any(picked), isFalse);
-      s.setText('1 cup milk, 1 cup milk', 5);
-      expect(picked(s.lines[0]), isTrue);
-      expect(s.lines[0].foodRef, ref);
-      expect(picked(s.lines[1]), isFalse);
+    test('blanks typed or removed next to a suspended item keep it', () {
+      final k = _Keys(newSession(), '1 cup milk, 2 eggs');
+      final ref = pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1); // 1 cu milk
+      k.moveTo(9);
+      k.type('  ');
+      k.backspace(2);
+      k.moveTo(0);
+      k.type(' ');
+      k.backspace(1);
+      k.moveTo(4);
+      k.type('p');
+      expect(k.text, '1 cup milk, 2 eggs');
+      expect(k.s.lines[0].foodRef, ref);
+      expect(picked(k.s.lines[0]), isTrue);
     });
 
-    test('reset drops a suspended pick', () {
-      final s = newSession()..setText('1 cup milk', 10);
-      pickOther(s, 0);
-      s.setText('1 cu milk', 4);
-      s.reset();
-      s.setText('1 cup milk', 10);
-      expect(picked(s.lines[0]), isFalse);
+    test('a pick that applies survives any typing elsewhere, before and after '
+        'it', () {
+      final k = _Keys(newSession(), 'toast');
+      final ref = pickOther(k.s, 0);
+      void stillThere(String t) {
+        final l = k.s.lines.firstWhere((l) => l.learnedKey == 'toast');
+        expect(l.foodRef, ref, reason: t);
+        expect(picked(l), isTrue, reason: t);
+        expect(k.s.lines.where(picked), hasLength(1), reason: t);
+      }
+
+      k.moveTo(0);
+      k.type(', ', stillThere);
+      k.moveTo(0);
+      k.type('2 eggs', stillThere);
+      k.moveTo(k.text.length);
+      k.type(', 1 banana and coffee', stillThere);
+      k.moveTo(1);
+      k.backspace(1, stillThere);
+      k.type('3', stillThere);
+      k.moveTo(k.text.length);
+      k.backspace(10, stillThere);
+      k.type('tea', stillThere);
+      expect(k.text, '3 eggs, toast, 1 banana tea');
     });
 
     test('a pick made on an item replaces its suspended pick', () {
-      final s = newSession()..setText('1 cup milk', 10);
-      pickOther(s, 0);
-      s.setText('1 cu milk', 4);
-      s.pickFood(s.lines[0].span!, _coffee);
-      s.setText('1 cup milk', 5);
-      expect(s.lines[0].foodRef, isNot(_coffee));
-      expect(picked(s.lines[0]), isFalse);
+      final k = _Keys(newSession(), '1 cup milk');
+      pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1);
+      expect(k.s.pickFood(k.s.lines[0].span!, _coffee), isTrue);
+      k.type('p');
+      expect(k.s.lines[0].foodRef, isNot(_coffee));
+      expect(picked(k.s.lines[0]), isFalse);
     });
-  });
 
-  group('reset', () {
-    test(
-      'clears the text, the picks and the cache, and keeps the snapshot',
-      () {
-        final s = newSession(data: _data(version: 5))
-          ..setText('2 eggs, toast', 13);
-        s.pickFood(s.lines[0].span!, _coffee);
-        s.reset();
-        expect(s.text, '');
-        expect(s.lines, isEmpty);
-        expect(s.cacheSize, 0);
-        expect(s.snapshot.version, 5);
-        s.setText('2 eggs, toast', 13);
-        expect(s.lines.any(picked), isFalse);
-      },
-    );
+    test('clearing a suspended pick drops it', () {
+      final k = _Keys(newSession(), '1 cup milk');
+      pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1);
+      expect(k.s.clearPick(k.s.lines[0].span!), isTrue);
+      k.type('p');
+      expect(picked(k.s.lines[0]), isFalse);
+    });
+
+    test('a suspended pick on the first of two like items stays with it', () {
+      final k = _Keys(newSession(), '1 cup milk, 1 cup milk');
+      final ref = pickOther(k.s, 0);
+      k.moveTo(5);
+      k.backspace(1);
+      expect(k.s.lines.any(picked), isFalse);
+      k.type('p');
+      expect(picked(k.s.lines[0]), isTrue);
+      expect(k.s.lines[0].foodRef, ref);
+      expect(picked(k.s.lines[1]), isFalse);
+    });
+
+    test('a suspended pick is not put on a saved meal header', () {
+      final k = _Keys(newSession(), 'my oatmea');
+      expect(k.s.pickFood(k.s.lines.single.span!, _egg), isTrue);
+      k.type('l');
+      expect(k.s.lines.single.state, LineState.aliasOrSavedMeal);
+      expect(k.s.lines.single.markers, isNot(contains(Marker.yourPick)));
+      k.backspace(1);
+      expect(picked(k.s.lines.single), isTrue);
+    });
   });
 
   group('a failed snapshot change', () {
@@ -1195,17 +1497,50 @@ void main() {
         s.rewriteAmount('2 eggs, toast', 13, const Span(40, 44), quantity: 3),
         isNull,
       );
-      // A saved meal and a not found line have no amount to rewrite.
+      // A not found line has no amount to rewrite.
       final m = newSession()
         ..setText('my oatmeal, purple monkey dishwasher', 36);
-      expect(
-        m.rewriteAmount(m.text, 36, m.lines[0].span!, quantity: 2),
-        isNull,
-      );
       expect(
         m.rewriteAmount(m.text, 36, m.lines[1].span!, quantity: 2),
         isNull,
       );
+    });
+
+    test('a saved meal header takes a new multiplier (6.4)', () {
+      final s = newSession()
+        ..setText('my oatmeal, purple monkey dishwasher', 36);
+      final header = s.lines[0];
+      expect(header.state, LineState.aliasOrSavedMeal);
+      var r = s.rewriteAmount(s.text, 36, header.span!, quantity: 2)!;
+      expect(r.text, '2 my oatmeal, purple monkey dishwasher');
+      expect(r.cursor, 38);
+      var after = parser.parseMeal(r.text, -1, s.snapshot);
+      expect(after[0].state, LineState.aliasOrSavedMeal);
+      expect(after[0].savedMealId, header.savedMealId);
+      expect(after[0].multiplier, 2);
+      expect(after[1].foodText, 'purple monkey dishwasher');
+
+      // A quantity already there is replaced; a range or a multiplier goes.
+      for (final (t, want) in [
+        ('half usual oatmeal', '1.5 usual oatmeal'),
+        ('2-3 my oatmeal', '1.5 my oatmeal'),
+        ('my oatmeal x2', 'my oatmeal 1.5'),
+        ('2 servings of my oatmeal', '1.5 my oatmeal'),
+      ]) {
+        final h = newSession()..setText(t, -1);
+        r = h.rewriteAmount(t, 0, h.lines[0].span!, quantity: 1.5)!;
+        expect(r.text, want, reason: t);
+        after = parser.parseMeal(r.text, -1, h.snapshot);
+        expect(after.single.multiplier, 1.5, reason: t);
+        expect(after.single.markers, isEmpty, reason: t);
+      }
+
+      // Quantity only: a unit is refused, and so is zero.
+      expect(
+        s.rewriteAmount(s.text, 0, header.span!, quantity: 2, unit: 'cup'),
+        isNull,
+      );
+      expect(s.rewriteAmount(s.text, 0, header.span!, quantity: 0), isNull);
     });
 
     test('decimals are kept to three places', () {
@@ -1228,6 +1563,208 @@ void main() {
       r = rewrite('toast', 0, 2, unit: 'slice', cursor: 5)!;
       expect(r.text, '2 slice toast');
       expect(r.cursor, 13);
+    });
+  });
+
+  group('removing an item (8.3)', () {
+    ({String text, int cursor})? remove(String text, int i, {int? cursor}) {
+      final s = newSession()..setText(text, -1);
+      return s.removeItem(text, cursor ?? text.length, s.lines[i].span!);
+    }
+
+    test(
+      'the item goes with the separator after it, or before it at the end',
+      () {
+        expect(remove('2 eggs and toast', 0)!.text, 'toast');
+        expect(remove('2 eggs and toast', 1)!.text, '2 eggs');
+        expect(remove('2 eggs, toast, coffee', 1)!.text, '2 eggs, coffee');
+        expect(remove('2 eggs, toast, coffee', 2)!.text, '2 eggs, toast');
+        expect(remove('toast', 0)!.text, '');
+        expect(remove('coffee with 2 tbsp half and half', 1)!.text, 'coffee');
+        expect(
+          remove('two eggs two slices of toast', 0)!.text,
+          'two slices of toast',
+        );
+        expect(remove('2 eggs\n1 banana; coffee', 1)!.text, '2 eggs\ncoffee');
+        expect(remove('my oatmeal, toast', 0)!.text, 'toast');
+      },
+    );
+
+    test('every other item reads exactly as before', () {
+      for (final t in [
+        '2 eggs and toast',
+        '2 eggs, 2 slices sourdough toast, 1 tbsp butter, coffee with 2 tbsp '
+            'half and half',
+        'black coffee two eggs and toast',
+        'chicken 200g rice 1 cup cooked',
+        'coffee with no sugar, toast',
+        'I had two eggs and a banana',
+        'toast, toast, toast',
+      ]) {
+        final before = parser.parseMeal(t, -1, UserSnapshot.from(_data()));
+        for (var i = 0; i < before.length; i++) {
+          final r = remove(t, i);
+          expect(r, isNotNull, reason: '$t $i');
+          final after = parser.parseMeal(
+            r!.text,
+            -1,
+            UserSnapshot.from(_data()),
+          );
+          final want = [...before]..removeAt(i);
+          expect(
+            after.map((l) => '${l.foodText}|${l.quantity}|${l.foodRef}'),
+            want.map((l) => '${l.foodText}|${l.quantity}|${l.foodRef}'),
+            reason: '$t $i',
+          );
+        }
+      }
+    });
+
+    test('the cursor keeps its place around the cut', () {
+      expect(remove('2 eggs, toast', 0, cursor: 13)!.cursor, 5);
+      expect(remove('2 eggs, toast', 0, cursor: 3)!.cursor, 0);
+      expect(remove('2 eggs, toast', 1, cursor: 2)!.cursor, 2);
+    });
+
+    test('a text or span that is not the session\'s is refused', () {
+      final s = newSession()..setText('2 eggs, toast', 13);
+      expect(s.removeItem('toast', 5, s.lines[0].span!), isNull);
+      expect(s.removeItem(s.text, 13, const Span(2, 6)), isNull);
+      // Nothing changed.
+      expect(s.text, '2 eggs, toast');
+      expect(s.lines, hasLength(2));
+    });
+
+    test('picks on the other items stay on them, even among like items', () {
+      final s = newSession()..setText('toast, toast, toast', 19);
+      for (final (i, ref) in [(0, _egg), (1, _coffee), (2, _halfAndHalf)]) {
+        expect(s.pickFood(s.lines[i].span!, ref), isTrue);
+      }
+      final r = s.removeItem(s.text, 19, s.lines[1].span!)!;
+      expect(r.text, 'toast, toast');
+      s.setText(r.text, r.cursor);
+      expect(s.lines.map((l) => l.foodRef), [_egg, _halfAndHalf]);
+      expect(s.lines.every(picked), isTrue);
+    });
+  });
+
+  group('the amount set in the sheet (7.2)', () {
+    // Sets the amount of line [i] in the sheet and puts the new text in the
+    // box, as the screen does.
+    void setAmount(ParseSession s, int i, double q, [String unit = '']) {
+      final r = s.rewriteAmount(
+        s.text,
+        s.text.length,
+        s.lines[i].span!,
+        quantity: q,
+        unit: unit,
+      )!;
+      s.setText(r.text, r.cursor);
+    }
+
+    bool set(Line l) => l.assumedAmountSetInSheet;
+
+    test('marks a line whose amount was assumed', () {
+      final s = newSession()..setText('2 eggs, toast', 13);
+      expect(s.lines[1].markers, contains(Marker.assumed));
+      expect(s.lines.any(set), isFalse);
+      setAmount(s, 1, 2, 'slice');
+      expect(s.text, '2 eggs, 2 slice toast');
+      expect(set(s.lines[1]), isTrue);
+      expect(set(s.lines[0]), isFalse);
+      expect(s.lines[1].markers, isNot(contains(Marker.assumed)));
+    });
+
+    test('does not mark a line whose amount was typed', () {
+      final s = newSession()..setText('2 eggs', 6);
+      setAmount(s, 0, 3);
+      expect(s.text, '3 eggs');
+      expect(set(s.lines.single), isFalse);
+    });
+
+    test('follows its item through edits elsewhere, and a second change in '
+        'the sheet', () {
+      final k = _Keys(newSession(), 'toast');
+      setAmount(k.s, 0, 2, 'slice');
+      k.reload();
+      k.type(', coffee', (t) => expect(set(k.lineAt(0)), isTrue, reason: t));
+      void toastSet(String t) => expect(
+        set(k.s.lines.firstWhere((l) => l.learnedKey == 'toast')),
+        isTrue,
+        reason: t,
+      );
+      k.moveTo(0);
+      k.type(', ', toastSet);
+      k.moveTo(0);
+      k.type('1 egg', toastSet);
+      expect(k.text, '1 egg, 2 slice toast, coffee');
+      expect(k.s.lines.where(set), hasLength(1));
+      // A second change in the sheet keeps it.
+      setAmount(k.s, 1, 3, 'slice');
+      expect(k.s.text, '1 egg, 3 slice toast, coffee');
+      expect(set(k.s.lines[1]), isTrue);
+    });
+
+    test('is cleared by any edit to its item, for good', () {
+      final k = _Keys(newSession(), 'toast');
+      setAmount(k.s, 0, 2, 'slice');
+      k.reload();
+      k.moveTo(1);
+      k.backspace(1); // " slice toast"
+      expect(set(k.s.lines.single), isFalse);
+      k.type('2');
+      expect(k.text, '2 slice toast');
+      expect(set(k.s.lines.single), isFalse);
+    });
+
+    test('is not made when the new text never arrives', () {
+      final s = newSession()..setText('toast', 5);
+      final r = s.rewriteAmount('toast', 5, s.lines[0].span!, quantity: 2)!;
+      s.setText('toast, coffee', 13); // the user typed instead
+      s.setText(r.text, r.cursor);
+      expect(s.lines.any(set), isFalse);
+    });
+
+    test('a pick and the mark stay together on the line', () {
+      final s = newSession()..setText('toast', 5);
+      s.pickFood(s.lines[0].span!, _egg);
+      expect(s.lines[0].markers, contains(Marker.assumed));
+      setAmount(s, 0, 3);
+      expect(s.text, '3 toast');
+      expect(s.lines[0].foodRef, _egg);
+      expect(picked(s.lines[0]), isTrue);
+      expect(set(s.lines[0]), isTrue);
+      expect(s.lines[0].baseQuantity, 150);
+    });
+  });
+
+  group('the unit picker for a food that is not typed (9.3)', () {
+    test('offers what the added line can hold, each checked', () {
+      final snapshot = UserSnapshot.from(_data());
+      for (final ref in [_egg, 'usda:2705384', 'local:1', _coffee]) {
+        final choices = unitChoicesForFood(parser, snapshot, ref);
+        expect(choices, isNotEmpty, reason: ref);
+        for (final c in choices) {
+          final l = foodLineFor(
+            parser,
+            snapshot,
+            ref,
+            quantity: 2,
+            unit: c.unitText,
+          )!;
+          expect(l.baseQuantity, closeTo(2 * c.grams, 1e-9), reason: ref);
+          expect(l.markers, isNot(contains(Marker.assumed)), reason: ref);
+        }
+      }
+      // Milk: fl oz, never oz.
+      final milk = unitChoicesForFood(
+        parser,
+        snapshot,
+        'usda:2705384',
+      ).map((c) => c.unitText);
+      expect(milk, containsAll(['g', 'fl oz', 'cup', 'tbsp']));
+      expect(milk, isNot(contains('oz')));
+      expect(unitChoicesForFood(parser, snapshot, 'usda:1'), isEmpty);
     });
   });
 
@@ -1281,7 +1818,72 @@ void main() {
     test('a food measured in cups offers the volume units', () {
       final s = newSession()..setText('1 cup milk', 10);
       final texts = s.unitChoices(s.lines[0].span!).map((c) => c.unitText);
-      expect(texts, containsAll(['g', 'oz', 'cup', 'tbsp']));
+      expect(texts, containsAll(['g', 'fl oz', 'cup', 'tbsp']));
+    });
+
+    test('oz is not offered where it is read as a fluid ounce (4.2)', () {
+      for (final t in ['1 cup milk', 'coffee', '1 cup orange juice']) {
+        final s = newSession()..setText(t, -1);
+        final choices = s.unitChoices(s.lines[0].span!);
+        final texts = choices.map((c) => c.unitText);
+        expect(texts, isNot(contains('oz')), reason: t);
+        expect(texts, contains('fl oz'), reason: t);
+      }
+      // A food with no fl oz portion keeps oz as a weight ounce.
+      final s = newSession()..setText('2 eggs', 6);
+      final oz = s
+          .unitChoices(s.lines[0].span!)
+          .singleWhere((c) => c.unitText == 'oz');
+      expect(oz.grams, closeTo(28.349523125, 1e-9));
+    });
+
+    test('a food of the user\'s measured in servings with no portions can '
+        'have its amount changed', () {
+      final data = UserSnapshotData(
+        version: 1,
+        foods: const [
+          UserFoodData(
+            ref: 'local:7',
+            name: 'Grandmas stew',
+            kind: 'recipe',
+            baseUnit: 'serving',
+            baseAmount: 1,
+            nutrients: {1008: 300},
+          ),
+        ],
+      );
+      final s = newSession(data: data)..setText('grandmas stew', 13);
+      expect(s.lines.single.foodRef, 'local:7');
+      final choices = s.unitChoices(s.lines.single.span!);
+      // No weight: grams and ounces cannot be converted (4.5).
+      expect(choices.map((c) => c.unitText), unorderedEquals(['serving', '']));
+      expect(choices.map((c) => c.grams), everyElement(1));
+      for (final c in choices) {
+        final r = s.rewriteAmount(
+          s.text,
+          13,
+          s.lines.single.span!,
+          quantity: 2,
+          unit: c.unitText,
+        )!;
+        final l = parser.parseMeal(r.text, -1, s.snapshot).single;
+        expect(l.foodRef, 'local:7');
+        expect(l.baseQuantity, 2);
+        expect(l.markers, isNot(contains(Marker.assumed)));
+      }
+    });
+
+    test('a bare count and serving are offered when they read back', () {
+      final s = newSession()..setText('2 eggs', 6);
+      final choices = s.unitChoices(s.lines[0].span!);
+      // The egg's own "1 egg" portion is the bare count; serving is the
+      // default amount.
+      expect(choices.where((c) => c.unitText == ''), hasLength(1));
+      expect(choices.singleWhere((c) => c.unitText == '').label, 'egg');
+      expect(
+        choices.singleWhere((c) => c.unitText == 'serving').grams,
+        closeTo(50, 1e-9),
+      );
     });
 
     test('a line with no food has none', () {
@@ -1349,17 +1951,38 @@ void main() {
       final rnd = Random(20261113);
       var checked = 0;
       var picksMade = 0;
-      var restored = 0;
+      final model = _Model();
+      List<_MItem> itemsOf(String text, UserSnapshot snapshot) => [
+        for (final d in splitItems(text, names: snapshot.names))
+          if (parser.parseItem(d, snapshot) case final l?)
+            _MItem(
+              d.span,
+              l.learnedKey,
+              d.cacheKey,
+              l.state == LineState.aliasOrSavedMeal,
+            ),
+      ];
       for (var seq = 0; seq < 300; seq++) {
         var data = _data(version: 1);
         final s = newSession(data: data);
+        bool known(String ref) => parser.foodFor(ref, s.snapshot) != null;
         final history = <String>[''];
         var text = '';
-        var model = <_ModelPick>[];
+        model.picks = [];
+        // A character backspaced in the step before, typed again in this one.
+        (int, String)? retype;
         for (var step = 0; step < 14; step++) {
           final oldText = text;
           final roll = rnd.nextInt(14);
-          if (roll < 5) {
+          if (retype != null) {
+            final (at, c) = retype;
+            text = text.substring(0, at) + c + text.substring(at);
+            retype = null;
+          } else if (roll == 12 && text.isNotEmpty) {
+            final at = rnd.nextInt(text.length);
+            retype = (at, text[at]);
+            text = text.substring(0, at) + text.substring(at + 1);
+          } else if (roll < 5) {
             final at = rnd.nextInt(text.length + 1);
             text =
                 text.substring(0, at) +
@@ -1387,32 +2010,25 @@ void main() {
             text = history[rnd.nextInt(history.length)];
           } else if (roll == 10 && s.lines.isNotEmpty) {
             final l = s.lines[rnd.nextInt(s.lines.length)];
+            final items = itemsOf(text, s.snapshot);
             if (rnd.nextBool()) {
               final ref = picks[rnd.nextInt(picks.length)];
-              if (s.pickFood(l.span!, ref)) {
-                picksMade++;
-                model =
-                    model
-                        .where(
-                          (m) =>
-                              !(m.span.start <= l.span!.end &&
-                                  m.span.end >= l.span!.start),
-                        )
-                        .toList()
-                      ..add(_ModelPick(ref, l.learnedKey, l.span!, false));
-              }
-            } else if (s.clearPick(l.span!)) {
-              model = model
-                  .where(
-                    (m) =>
-                        !(m.span.start <= l.span!.end &&
-                            m.span.end >= l.span!.start),
-                  )
-                  .toList();
+              final ok = s.pickFood(l.span!, ref);
+              expect(ok, model.pick(l.span!, ref, items, known(ref)));
+              if (ok) picksMade++;
+            } else {
+              expect(s.clearPick(l.span!), model.clear(l.span!));
             }
-          } else if (roll == 11 && rnd.nextInt(3) == 0) {
-            data = _data(version: data.version + 1, learned: rnd.nextBool());
+          } else if (roll == 11 && rnd.nextInt(2) == 0) {
+            data = _data(
+              version: data.version + 1,
+              learned: rnd.nextBool(),
+              foods: rnd.nextInt(3) != 0,
+            );
             s.setSnapshot(UserSnapshot.from(data));
+            model
+              ..edit(text, text, itemsOf(text, s.snapshot))
+              ..foodsLeft(known);
           }
           final cursor = rnd.nextInt(text.length + 2) - 1;
           s.setText(text, cursor);
@@ -1421,21 +2037,16 @@ void main() {
 
           // The independent model of 9.1 and R43, on a plain parse.
           final plain = parser.parseMeal(text, -1, s.snapshot);
-          final before = model.where((m) => !m.suspended).length;
-          model = _advance(model, oldText, text, plain);
-          if (model.where((m) => !m.suspended).length > before) restored++;
+          model
+            ..edit(oldText, text, itemsOf(text, s.snapshot))
+            ..foodsLeft(known);
           final shown = [
             for (final l in s.lines)
               if (l.markers.contains(Marker.yourPick))
                 '${l.span!.start}-${l.span!.end} ${l.foodRef} ${l.learnedKey}',
           ]..sort();
-          final expected = [
-            for (final m in model)
-              if (!m.suspended)
-                '${m.span.start}-${m.span.end} ${m.ref} ${m.key}',
-          ]..sort();
           final why = '$seq $step "$oldText" to "$text"';
-          expect(shown, expected, reason: why);
+          expect(shown, model.shown(), reason: why);
 
           // Lines without a pick are the plain parse (with the session's
           // typing rule); with one, a session that has never seen the text
@@ -1465,7 +2076,24 @@ void main() {
       }
       expect(checked, 4200);
       expect(picksMade, greaterThan(50));
-      expect(restored, greaterThan(0), reason: 'no suspended pick came back');
+      expect(
+        model.restored,
+        greaterThan(0),
+        reason: 'no suspended pick came back',
+      );
+      for (final why in [
+        _Model.movedOn,
+        _Model.deleted,
+        _Model.repicked,
+        _Model.cleared,
+        _Model.foodGone,
+      ]) {
+        expect(
+          model.dropped[why] ?? 0,
+          greaterThan(0),
+          reason: 'no pick was dropped because $why: ${model.dropped}',
+        );
+      }
     });
   });
 
