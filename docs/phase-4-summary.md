@@ -6,8 +6,8 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 
 | Step | State |
 |---|---|
-| 0 Changes to Phase 2 work | In progress |
-| 1 Weight entry and widget | In progress |
+| 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
+| 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | Not started |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
@@ -62,4 +62,20 @@ CLAUDE.md says agents use Sonnet 5.5 or Opus 5.5 only, never Fable. In this phas
 
 ## To check on your phones
 
-To be filled in from phase-4-plan.md section 7.3 at the end.
+More is added as each step lands. The full list comes from phase-4-plan.md section 7.3.
+
+Weight (step 1), on the Z Fold 5:
+- Log a weight from Home with a stopwatch: tap Weight, type, tap Save. The target is under 5 seconds.
+- Add the "Daybook weight" widget from the widget picker. It is blank until the app has run once.
+- The widget shows the right text at its normal size and when shrunk to 2 by 1, in light and dark, and with the largest font size.
+- Tap the widget with the app closed and with it in the background. It should open on the weight sheet. Time the closed case: the target is under about 1.5 seconds to the sheet.
+- After a save, the widget shows the new weight.
+- Reopen the app from Recents after swiping it away: the weight sheet should not open by itself.
+- Fold and unfold with a number typed in the sheet: the number stays.
+- TalkBack reads the widget once, as one button.
+
+Weight (step 1), on the iPhone, once there is a signed build (see docs/ios-widget.md for the Apple Developer steps):
+- The widget appears in the widget gallery, in the small and medium sizes.
+- After a weigh-in the widget shows it. If it only ever shows "Daybook weight", the App Group is missing from one of the two provisioning profiles.
+- A tap on the widget opens the weight sheet, with the app closed and with it in the background. If nothing happens, or an error appears, docs/ios-widget.md lists the two one-line fixes to try.
+- The number pad on iPhone has no Save key, so Save is the button on the sheet.
