@@ -8,7 +8,7 @@ import '../math/weight_trend.dart';
 import '../util/units.dart';
 import 'database.dart';
 
-/// A weight outside 50 to 1,000 lb (23 to 450 kg), refused before any write.
+/// A weight outside 50 to 1,000 lb (22.7 to 453.6 kg), refused before any write.
 class WeightOutOfRange implements Exception {
   const WeightOutOfRange(this.value, this.units);
 

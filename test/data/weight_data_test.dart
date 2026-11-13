@@ -316,7 +316,7 @@ void main() {
           measuredAtMs: now.utcMs,
           tzOffsetMinutes: 0,
           weightKg: 81.83,
-          source: const Value('health'),
+          source: const Value('health_connect'),
           sourceId: const Value('abc'),
           createdAtMs: now.utcMs,
           updatedAtMs: now.utcMs,
