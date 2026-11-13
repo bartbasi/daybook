@@ -70,6 +70,15 @@ Each is the recommended option from the plan's open questions, or a small call m
 38. **A product with no serving size on Open Food Facts is added as 100 g and marked Assumed.** One with a serving size is added as 1 serving, as the wireframe shows.
 39. **The sheet opened from the saved meal editor has no "Scan its barcode".** Scanning is on the food entry screen only.
 40. **The app grew by about 8 MB with the barcode scanner** (36.0 MB for the build on your phone, from 27.9 MB). The plan set 15 MB of growth as the point to stop and ask you. The scanner reads barcodes on the phone with no Google services; that code is the size.
+41. **The food editor asks for an amount, a unit (serving, grams or milliliters) and, for a serving, an optional weight.** The wireframe drew "1 [piece] = [ ] g" with a unit you name yourself. The stored food has one built-in serving, so a named unit such as "slice" is added under Portions with its weight. Numbers typed for any amount are stored per serving or per 100: 90 kcal per 50 g is kept as 180 per 100 g, and reads that way when the food is opened again.
+42. **The barcode field in the food editor is typed, not scanned.** The wireframe draws a Scan button there. The scan screen as built looks the number up on Open Food Facts, which is not wanted when you are entering your own food. The number is checked the same way as on the scan screen.
+43. **Scanned products are listed under "My foods and recipes"**, as the wireframe says, marked as scanned. They cannot be edited. Deleting one (with Undo) is the way to fix a wrong product: the next scan of that barcode asks Open Food Facts again.
+44. **Opening a recipe works its numbers out again from its ingredients as they are now.** If an ingredient food was edited since, the recipe shows the new totals and saving stores them. Until you open and save the recipe, typing its name in a meal uses the totals from the last save. Meals already logged never change.
+45. **A recipe cannot contain itself**, directly or through another recipe. Its totals would grow on every save.
+46. **"Create a food" and "Scan its barcode" are offered only from the food entry screen**, not from the sheet inside the recipe editor or the saved meal editor. To use a new food in a recipe, make the food first.
+47. **Deleting a food frees its barcode.** Undo puts it back unless another food took that barcode in between, and says so if it did.
+48. **A number typed like "1,000" is refused in the food editor**, with a request to type it without the comma, because it could mean one thousand or one. "1,5" and "0,125" are read as decimals.
+49. **Saved meals keep their own copy of each item's numbers.** Editing or deleting a food does not change a saved meal that contains it.
 
 ## Open questions from the plan: answered
 
