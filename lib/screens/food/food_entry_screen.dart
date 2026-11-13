@@ -426,22 +426,20 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     _revealCurrentLine();
   }
 
-  /// Keeps the line for the item under the cursor in view (frame 2). It runs
-  /// a frame later than the text field's own scrolling, so that one does not
-  /// undo it, and only after a result, never while the user scrolls by hand.
+  /// Keeps the line for the item under the cursor in view (frame 2). It only
+  /// scrolls the lines area: the text box is outside it, so the two never
+  /// fight. It runs after a result, never while the user scrolls by hand.
   void _revealCurrentLine() {
     final binding = WidgetsBinding.instance;
     binding.addPostFrameCallback((_) {
-      binding.addPostFrameCallback((_) {
-        final c = _currentKey.currentContext;
-        if (!mounted || c == null) return;
-        Scrollable.ensureVisible(
-          c,
-          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-        );
-      });
-      binding.scheduleFrame();
+      final c = _currentKey.currentContext;
+      if (!mounted || c == null) return;
+      Scrollable.ensureVisible(
+        c,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
     });
+    binding.scheduleFrame();
   }
 
   void _onFailure(WorkerFailure f) {
@@ -835,21 +833,25 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
             children: [
               Expanded(
                 child: ContentWidth(
-                  child: Column(
-                    children: [
-                      if (!largeText) header,
-                      if (_notice != null)
-                        ConfirmBar(
-                          message: _notice!.text,
-                          onUndo: _notice!.undo == null ? null : _undoNotice,
+                  child: LayoutBuilder(
+                    builder: (context, box) => Column(
+                      children: [
+                        if (!largeText) header,
+                        if (_notice != null)
+                          ConfirmBar(
+                            message: _notice!.text,
+                            onUndo: _notice!.undo == null ? null : _undoNotice,
+                          ),
+                        // The box stays here, outside the scrolling lines.
+                        _boxArea(context, box.maxHeight),
+                        Expanded(
+                          child: _scrollArea(
+                            context,
+                            header: largeText ? header : null,
+                          ),
                         ),
-                      Expanded(
-                        child: _scrollArea(
-                          context,
-                          header: largeText ? header : null,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -995,6 +997,42 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
     );
   }
 
+  /// The text box, in a fixed area above the lines. It grows with its text up
+  /// to a few lines and then scrolls inside itself, keeping its own caret in
+  /// view. [available] is the height of the whole content column: the box
+  /// takes at most 40 percent of it, so the lines and Save keep room.
+  Widget _boxArea(BuildContext context, double available) {
+    final lineHeight = MediaQuery.textScalerOf(context).scale(16) * 1.4;
+    final fit = ((available * 0.4 - 56) / lineHeight).floor();
+    final maxLines = fit.clamp(1, 4);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: ConstrainedBox(
+        // Never taller than the room there is (very large text with the
+        // keyboard up): the box then scrolls inside itself and the lines get
+        // no room, but the box stays on screen.
+        constraints: BoxConstraints(maxHeight: (available - 16).clamp(0, 1e9)),
+        child: Semantics(
+          label: S.foodBoxLabel,
+          child: TextField(
+            controller: _controller,
+            focusNode: _focus,
+            // Opens with the keyboard up, except when editing a meal: its
+            // lines are there to be read first (frame 13).
+            autofocus: !_editing,
+            keyboardType: TextInputType.multiline,
+            minLines: maxLines < 2 ? maxLines : 2,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              hintText: _editing ? S.foodBoxHintMore : S.foodBoxHint,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _scrollArea(BuildContext context, {Widget? header}) {
     final typed = _typed;
     final added = _added;
@@ -1007,26 +1045,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
             _groupLabel(context, S.foodGroupAdded),
             for (var i = 0; i < added.length; i++) _addedTile(i),
           ],
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Semantics(
-              label: S.foodBoxLabel,
-              child: TextField(
-                controller: _controller,
-                focusNode: _focus,
-                // Opens with the keyboard up, except when editing a meal: its
-                // lines are there to be read first (frame 13).
-                autofocus: !_editing,
-                keyboardType: TextInputType.multiline,
-                minLines: 2,
-                maxLines: 6,
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  hintText: _editing ? S.foodBoxHintMore : S.foodBoxHint,
-                ),
-              ),
-            ),
-          ),
           if (_handle == null && !_dead) const Text(S.foodLoading),
           _chipsSeam,
           if (typed.isNotEmpty) ...[
@@ -1037,10 +1055,15 @@ class FoodEntryScreenState extends State<FoodEntryScreen> {
       ),
     );
     return SingleChildScrollView(
+      key: linesKey,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       child: Column(children: [?header, lines]),
     );
   }
+
+  /// The scroll area of the lines, so tests can read its offset.
+  @visibleForTesting
+  static const linesKey = ValueKey('food-lines');
 
   Widget _groupLabel(BuildContext context, String text) => Padding(
     padding: const EdgeInsets.only(top: 4),

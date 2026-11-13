@@ -1863,6 +1863,121 @@ void main() {
       expect(remove.width, greaterThanOrEqualTo(48));
     });
 
+    Finder linesArea() => find.byKey(FoodEntryScreenState.linesKey);
+    double linesOffset(WidgetTester tester) => tester
+        .state<ScrollableState>(
+          find
+              .descendant(of: linesArea(), matching: find.byType(Scrollable))
+              .first,
+        )
+        .position
+        .pixels;
+
+    /// The box is wholly above the keyboard and on screen, the caret is
+    /// inside the box, the lines area sits between the box and the totals
+    /// bar, and the current line is wholly in view whenever it can fit.
+    void expectBoxAndCaretVisible(WidgetTester tester, String at) {
+      final boxRect = tester.getRect(box());
+      expect(boxRect.top, greaterThanOrEqualTo(0), reason: at);
+      expect(boxRect.bottom, lessThanOrEqualTo(500), reason: at);
+      final editable = tester
+          .state<EditableTextState>(find.byType(EditableText))
+          .renderEditable;
+      final caret = editable.getLocalRectForCaret(
+        TextPosition(offset: boxText(tester).length),
+      );
+      final caretGlobal = MatrixUtils.transformRect(
+        editable.getTransformTo(null),
+        caret,
+      );
+      expect(
+        boxRect.inflate(0.5).contains(caretGlobal.center),
+        isTrue,
+        reason: '$at caret $caretGlobal box $boxRect',
+      );
+      final area = tester.getRect(linesArea());
+      expect(area.top, greaterThanOrEqualTo(boxRect.bottom - 0.5), reason: at);
+      final bar = tester.getRect(find.byType(FilledButton)).top;
+      expect(area.bottom, lessThanOrEqualTo(bar + 0.5), reason: at);
+      final current = find.byWidgetPredicate(
+        (w) => w is FoodLineTile && w.current,
+      );
+      if (current.evaluate().length == 1) {
+        final r = tester.getRect(current);
+        if (r.height <= area.height) {
+          expect(r.top, greaterThanOrEqualTo(area.top - 0.5), reason: at);
+          expect(r.bottom, lessThanOrEqualTo(area.bottom + 0.5), reason: at);
+        }
+      }
+    }
+
+    // Types the text one character at a time and checks after every key.
+    Future<void> typeSlowly(WidgetTester tester, String text) async {
+      for (var i = 1; i <= text.length; i++) {
+        await tester.enterText(box(), text.substring(0, i));
+        await settle(tester);
+        final at = 'after "${text.substring(0, i)}"';
+        expectBoxAndCaretVisible(tester, at);
+        final offset = linesOffset(tester);
+        for (var f = 0; f < 4; f++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(linesOffset(tester), offset, reason: '$at frame $f');
+          expectBoxAndCaretVisible(tester, at);
+        }
+        expect(tester.takeException(), isNull, reason: at);
+      }
+    }
+
+    for (final (width, scale) in [(344.0, 1.0), (673.0, 1.0), (344.0, 2.0)]) {
+      appTest('typing the meal one key at a time at ${width.toInt()} dp and '
+          'text scale $scale keeps the box and caret in view and the lines '
+          'still', (tester) async {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await openApp(tester, size: Size(width, 800));
+        await openFood(tester);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pump();
+        await typeSlowly(tester, '$brief, 1 apple');
+        expect(find.byType(FilledButton), findsOneWidget);
+      });
+    }
+
+    appTest('a scroll of the lines by hand is left alone until the next '
+        'text change', (tester) async {
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await type(tester, '$brief, 1 apple, 1 banana, 1 orange, 1 pear');
+      await settle(tester);
+      final area = linesArea();
+      expect(
+        tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: area, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position
+            .maxScrollExtent,
+        greaterThan(0),
+      );
+      await tester.drag(area, const Offset(0, 1000));
+      await settle(tester);
+      expect(linesOffset(tester), 0);
+      for (var f = 0; f < 5; f++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(linesOffset(tester), 0);
+      expect(tester.getRect(box()).top, greaterThanOrEqualTo(0));
+
+      // The next change brings the current line back.
+      await type(tester, '$brief, 1 apple, 1 banana, 1 orange, 1 pea');
+      await settle(tester);
+      expect(linesOffset(tester), greaterThan(0));
+      expectBoxAndCaretVisible(tester, 'after the next change');
+    });
+
     appTest('folding keeps the typed text', (tester) async {
       await openApp(tester, size: const Size(344, 800));
       await openFood(tester);
