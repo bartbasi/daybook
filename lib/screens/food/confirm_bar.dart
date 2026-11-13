@@ -45,6 +45,15 @@ class ConfirmBar extends StatefulWidget {
 class _ConfirmBarState extends State<ConfirmBar> {
   final _scroll = ScrollController();
 
+  /// A new message starts at its top, not where the last one was scrolled to.
+  @override
+  void didUpdateWidget(ConfirmBar old) {
+    super.didUpdateWidget(old);
+    if (old.message != widget.message && _scroll.hasClients) {
+      _scroll.jumpTo(0);
+    }
+  }
+
   @override
   void dispose() {
     _scroll.dispose();

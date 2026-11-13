@@ -1331,12 +1331,12 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     ]);
   }
 
-  /// Tests make picks through the handle until the correction sheet (task
-  /// 2.9) does, and read the newest result.
   /// Tests show a plain message of their own.
   @visibleForTesting
   void debugShowNotice(String text) => _showNotice(_Notice(text));
 
+  /// Tests make picks through the handle until the correction sheet (task
+  /// 2.9) does, and read the newest result.
   @visibleForTesting
   SessionHandle? get debugHandle => _handle;
 

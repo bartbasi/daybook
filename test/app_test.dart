@@ -115,7 +115,7 @@ void main() {
       DaybookApp(
         db: db,
         clock: () => Now.fromLocal('2026-11-12', 7 * 60 + 2, -360),
-        // Never completes: the Data check screen shows its loading text.
+        // Never completes: no screen in these tests needs the food data.
         foodsPath: Completer<String>().future,
       ),
     );
@@ -209,14 +209,13 @@ void main() {
     expect(find.text('Yesterday, 11:59 pm'), findsOneWidget);
   });
 
-  appTest('More opens, keeps Home alive, and leads to Data check', (
+  appTest('More opens, keeps Home alive, and leads to the saved meals', (
     tester,
   ) async {
     await openApp(tester);
     await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
     await tester.pumpAndSettle();
     expect(find.byType(MoreScreen), findsOneWidget);
-    expect(find.text('Data check'), findsOneWidget);
     // The saved meals row, with what is in it, leads to its own screen.
     expect(find.text('Saved meals and aliases'), findsOneWidget);
     expect(find.text('None yet'), findsOneWidget);
@@ -227,16 +226,6 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Data check'));
-    // Not pumpAndSettle: the loading spinner never stops.
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Getting the food database ready...'), findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
-
-    await tester.pageBack();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
     await tester.pumpAndSettle();
     expect(find.text('Thursday, Nov 12'), findsOneWidget);
@@ -488,7 +477,10 @@ void main() {
     await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
     await tester.pumpAndSettle();
     expect(find.text('My foods and recipes'), findsOneWidget);
-    expect(find.text('Foods you made, recipes, scanned products'), findsOneWidget);
+    expect(
+      find.text('Foods you made, recipes, scanned products'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('My foods and recipes'));
     await tester.pumpAndSettle();
     expect(find.byType(MyFoodsScreen), findsOneWidget);
@@ -508,9 +500,6 @@ void main() {
       await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final row = tester.getSize(find.widgetWithText(ListTile, 'Data check'));
-      expect(row.height, greaterThanOrEqualTo(48));
-      expect(row.width, lessThanOrEqualTo(600));
       final saved = tester.getSize(
         find.widgetWithText(ListTile, 'Saved meals and aliases'),
       );

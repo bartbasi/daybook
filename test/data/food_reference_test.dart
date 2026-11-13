@@ -30,24 +30,6 @@ INSERT INTO food_portion VALUES (1, 2, '1 cup', 100), (1, 1, '1 slice', 25);
 }
 
 void main() {
-  test('search ranks prefix matches and shorter descriptions first', () {
-    final ref = FoodReference(_tiny());
-    final hits = ref.search('toast');
-    expect(hits.map((h) => h.id), [4, 2, 1]);
-    expect(ref.search('BREAD toast').map((h) => h.id), [1, 4]);
-    expect(ref.search('toast', limit: 1), hasLength(1));
-    expect(ref.search('  '), isEmpty);
-    expect(ref.search('100%').map((h) => h.id), [3]);
-    expect(ref.search('zzz'), isEmpty);
-    // LIKE wildcards and the backslash are matched literally.
-    expect(ref.search('k_b').map((h) => h.id), [5]);
-    expect(ref.search('_').map((h) => h.id), [5]);
-    expect(ref.search('%').map((h) => h.id), [3]);
-    expect(ref.search(r'h\to').map((h) => h.id), [6]);
-    expect(ref.search('\\').map((h) => h.id), [6]);
-    ref.close();
-  });
-
   test('food returns nutrients and portions in order', () {
     final ref = FoodReference(_tiny());
     final f = ref.food(1)!;
@@ -94,8 +76,6 @@ void main() {
     final flour = ref.food(789890)!;
     expect(flour.nutrients[1177], 160);
     expect(flour.nutrients.containsKey(1190), isFalse);
-
-    expect(ref.search('egg, whole, raw').map((h) => h.id), contains(171287));
   });
 
   test('FNDDS foods keep the default amount portion', () {

@@ -73,15 +73,6 @@ bool _looksValid(String path) {
   }
 }
 
-class UsdaHit {
-  const UsdaHit(this.id, this.description, this.dataset);
-  final int id;
-  final String description;
-
-  /// 'foundation', 'sr_legacy' or 'fndds'.
-  final String dataset;
-}
-
 class UsdaPortion {
   const UsdaPortion(this.label, this.grams);
   final String label;
@@ -116,36 +107,6 @@ class FoodReference {
       FoodReference(sqlite3.open(path, mode: OpenMode.readOnly));
 
   final Database _db;
-
-  /// Foods whose description contains every word of [query], case
-  /// insensitive. Descriptions starting with the first word come first, then
-  /// shorter descriptions.
-  List<UsdaHit> search(String query, {int limit = 50}) {
-    final words = query.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
-    if (words.isEmpty) return const [];
-    String like(String w) =>
-        '%${w.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
-    final terms = [for (final w in words) like(w)];
-    final where = List.filled(
-      terms.length,
-      r"description LIKE ? ESCAPE '\'",
-    ).join(' AND ');
-    final prefix = terms.first.substring(1); // 'word%'
-    final rows = _db.select(
-      'SELECT id, description, dataset FROM food WHERE $where '
-      r"ORDER BY description LIKE ? ESCAPE '\' DESC, length(description), description "
-      'LIMIT ?',
-      [...terms, prefix, limit],
-    );
-    return [
-      for (final r in rows)
-        UsdaHit(
-          r['id'] as int,
-          r['description'] as String,
-          r['dataset'] as String,
-        ),
-    ];
-  }
 
   UsdaFood? food(int fdcId) {
     final rows = _db.select(

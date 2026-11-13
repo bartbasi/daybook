@@ -12,11 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 const _logAllowed = {'lib/error_log.dart'};
 
 /// Files that may import package:http.
-const _httpAllowed = {
-  'lib/data/off_client.dart',
-  // Temporary Phase 2 screen. Task 2.13 deletes it, then remove this line.
-  'lib/screens/data_check_screen.dart',
-};
+const _httpAllowed = {'lib/data/off_client.dart'};
 
 /// Entries in pubspec.yaml that are part of the Flutter SDK and need no row.
 const _sdkPackages = {
@@ -241,6 +237,15 @@ void main() {
     expect(_logCall.hasMatch('stderr.writeln(x)'), isTrue);
     expect(_netUse.hasMatch('final c = HttpClient();'), isTrue);
     expect(_netUse.hasMatch('MySocketThing()'), isFalse);
+    // Any other file importing package:http is caught, and only the barcode
+    // client is let through.
+    expect(
+      _httpImport.hasMatch("import 'package:http/http.dart' as http;"),
+      isTrue,
+    );
+    expect(_httpImport.hasMatch("export 'package:http/http.dart';"), isTrue);
+    expect(_httpImport.hasMatch("import 'package:httpish/x.dart';"), isFalse);
+    expect(_httpAllowed, {'lib/data/off_client.dart'});
     for (final name in [
       'readBarcodeImageUrl',
       'readBarcodesImageUrl',

@@ -958,6 +958,41 @@ void main() {
       }
     }
 
+    appTest('a new message opens at its top, not where the last one was '
+        'scrolled to', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      answer = (_) async => http.Response('{"status":0}', 404);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      await type(tester, '2 eggs, 1 slice toast');
+      await scan(tester, code);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pump();
+      final area = find
+          .descendant(
+            of: find.byType(ConfirmBar),
+            matching: find.byType(SingleChildScrollView),
+          )
+          .first;
+      double offset() =>
+          tester.widget<SingleChildScrollView>(area).controller!.offset;
+      await tester.drag(area, const Offset(0, -300));
+      await tester.pump();
+      expect(offset(), greaterThan(0), reason: 'the first message scrolled');
+      final state = tester.state<FoodEntryScreenState>(
+        find.byType(FoodEntryScreen),
+      );
+      state.debugShowNotice(
+        'Another long message that needs room, so it is taller than the '
+        'space above the keyboard at this text size and has to scroll. '
+        'Its first words must be the ones in view.',
+      );
+      await tester.pump();
+      expect(find.textContaining('Another long message'), findsOneWidget);
+      expect(offset(), 0);
+    });
+
     appTest('a short message with the keyboard up shows in full, with no '
         'scrollbar', (tester) async {
       await openApp(tester, size: const Size(344, 800));
