@@ -9,7 +9,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
-| 3 Goals and daily budget | In progress. The budget math and goals data are being built |
+| 3 Goals and daily budget | In progress. The budget math and goals data are done, reviewed and pushed. The Goals screen and Home's budget card are next |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
@@ -20,7 +20,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 
 A release build of the work so far was installed on the Z Fold 5 on 2026-11-13, at your request, straight from this machine. No earlier Daybook build was on the phone, so nothing had to be uninstalled. It was replaced the same day with a build of commit b4775a4, installed over the first one, so anything you had logged is still there. It has weight entry, the Weight tab, the weight widget, and food entry: type a meal, tap a line to fix the food or the amount, save, edit or delete a logged meal from Home. There are no chips, saved meals list, barcode scanning or food editor in that build. The app started cleanly with no errors in its own log.
 
-A newer build with the chips, saved meals and barcode scanning (commit 5b643d5) was made on 2026-11-13, but the phone was no longer connected, so it is not installed. Plug the phone in and say so, and it will be installed.
+It was replaced again that evening with a build of commit 88fa76c, installed over the last one, so what you logged is still there. This one has the chips, saved meals, barcode scanning, the food and recipe editors and "My foods and recipes". It asks for the camera only when you first open the scan screen. It started cleanly with no errors in its own log. Goals and the calorie budget are not in it yet.
 
 ## Before you install the Phase 4 build
 
