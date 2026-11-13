@@ -159,7 +159,10 @@ class SavedMealItemNutrients extends Table {
 @DataClassName('Alias')
 class Aliases extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get phrase => text().unique()(); // normalized: lower case, trimmed
+  // Stored as the user typed it, trimmed. It is compared through nameKey
+  // (lib/parser/name_key.dart) when used, so a later change to the comparison
+  // rules cannot orphan saved aliases.
+  TextColumn get phrase => text().unique()();
   IntColumn get savedMealId =>
       integer().references(SavedMeals, #id, onDelete: KeyAction.cascade)();
 }

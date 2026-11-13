@@ -602,9 +602,10 @@ extension FoodData on AppDatabase {
   ], () => sameAsYesterday(forDate: forDate, slotId: slotId));
 
   /// Foods logged in [slotId] in the last 30 days: [today] and the 29 days
-  /// before it (a meal dated 30 days before [today] does not count), most logged first (meals it was in), then
-  /// most recent, then by ref so the order never changes between reads. Each
-  /// has the amount last logged. At most [limit] (8).
+  /// before it (a meal dated 30 days before [today] does not count). Most
+  /// logged first (meals it was in), then most recent, then by ref so the
+  /// order never changes between reads. Each has the amount last logged. At
+  /// most [limit] (8).
   Future<List<RecentFood>> recentFoods({
     required int slotId,
     required String today,

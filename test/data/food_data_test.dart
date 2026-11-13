@@ -7,7 +7,6 @@ import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/data/weight_data.dart';
-import 'package:daybook/parser/name_key.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -993,7 +992,7 @@ void main() {
         );
         expect(d.meal.name, 'Usual breakfast');
         expect(d.meal.createdAtMs, today.utcMs);
-        expect(d.aliases, ['usual breakfast', 'ub']);
+        expect(d.aliases, ['Usual Breakfast', 'ub']);
         expect(d.items.map((i) => i.item.foodName), ['Egg', 'Toast']);
         expect(d.items.map((i) => i.item.position), [0, 1]);
         expect(d.items[0].nutrients, {kcal: 176, protein: 12});
@@ -1002,9 +1001,13 @@ void main() {
       },
     );
 
-    test('alias phrases are stored normalized', () async {
+    test('alias phrases are stored as typed, trimmed', () async {
       final d = await create('X', aliases: ["  Mom's  CAFÉ!! "]);
-      expect(d.aliases, ['moms cafe']);
+      expect(d.aliases, ["Mom's  CAFÉ!!"]);
+      expect(
+        (await db.select(db.aliases).get()).single.phrase,
+        "Mom's  CAFÉ!!",
+      );
     });
 
     test(
@@ -1020,8 +1023,8 @@ void main() {
         expect(r.ok, isFalse);
         expect(r.saved, isNull);
         expect(r.problems, {
-          'ub': AliasProblem.taken,
-          'usual breakfast': AliasProblem.taken,
+          'UB.': AliasProblem.taken,
+          'Usual  Breakfast': AliasProblem.taken,
         });
         expect((await db.select(db.savedMeals).get()).length, 1);
         expect((await db.select(db.savedMealItems).get()).length, 1);
@@ -1029,20 +1032,69 @@ void main() {
       },
     );
 
-    test('an alias is stored under nameKey, and a spelling that parses the same is taken', () async {
-      final a = await create('A', aliases: ['pb&j', 'coffee w/ milk']);
-      expect(a.aliases, [nameKey('pb&j'), nameKey('coffee w/ milk')]);
-      expect(a.aliases, ['pb and j', 'coffee with milk']);
-      for (final same in ['pb and j', 'coffee with milk']) {
+    test('PB&J is stored and read back as typed, and spellings that parse the same are taken', () async {
+      final a = await create('A', aliases: ['PB&J', 'coffee w/ milk']);
+      expect(a.aliases, ['PB&J', 'coffee w/ milk']);
+      expect((await db.loadSavedMeal(a.meal.id))!.aliases, [
+        'PB&J',
+        'coffee w/ milk',
+      ]);
+      for (final same in [
+        'pb and j',
+        'pb & j',
+        'coffee with milk',
+        'Coffee W/ Milk',
+      ]) {
         final r = await db.createSavedMeal(
           name: 'B',
           items: [ml('usda:9')],
           now: today,
           aliases: [same],
         );
-        expect(r.problems, {same: AliasProblem.taken});
+        expect(r.problems, {same: AliasProblem.taken}, reason: same);
       }
       expect((await db.select(db.savedMeals).get()).length, 1);
+      expect((await db.select(db.aliases).get()).length, 2);
+    });
+
+    test('the same alias can be saved again on the same saved meal', () async {
+      final a = await create('A', aliases: ['PB&J']);
+      final again = await db.updateSavedMeal(a.meal.id, aliases: ['PB&J']);
+      expect(again.saved!.aliases, ['PB&J']);
+      final respelled = await db.updateSavedMeal(
+        a.meal.id,
+        aliases: ['pb and j'],
+      );
+      expect(respelled.saved!.aliases, ['pb and j']);
+    });
+
+    test('aliases that differ only in case or accents clash', () async {
+      await create('A', aliases: ['Café au lait']);
+      for (final same in [
+        'CAFÉ AU LAIT',
+        'cafe au lait',
+        'Cafe\u0301 au lait',
+      ]) {
+        final r = await db.createSavedMeal(
+          name: 'B',
+          items: [ml('usda:9')],
+          now: today,
+          aliases: [same],
+        );
+        expect(r.problems, {same: AliasProblem.taken}, reason: same);
+      }
+    });
+
+    test('two spellings of one alias in one save are stored once', () async {
+      final a = await create('A', aliases: ['PB&J', 'pb and j']);
+      expect(a.aliases, ['PB&J']);
+    });
+
+    test('the snapshot gets the phrase as typed', () async {
+      final a = await create('A', aliases: ['PB&J']);
+      final s = await db.loadUserSnapshot();
+      expect(s.aliases.single.phrase, 'PB&J');
+      expect(s.aliases.single.savedMealId, a.meal.id);
     });
 
     test('an empty phrase is refused', () async {
@@ -1069,7 +1121,7 @@ void main() {
         name: 'B2',
         aliases: ['Alpha'],
       );
-      expect(bad.problems, {'alpha': AliasProblem.taken});
+      expect(bad.problems, {'Alpha': AliasProblem.taken});
       final still = (await db.loadSavedMeal(b.meal.id))!;
       expect(still.meal.name, 'B');
       expect(still.aliases, ['beta']);

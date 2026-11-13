@@ -45,7 +45,7 @@ Version 1 was amended before any release (`goals.fixed_calories` became `calorie
 | `meal_entries` | One line of a meal | `food_ref`, `food_name`, `quantity` and `unit_label` as entered ("2 slice"), `base_quantity` and `base_unit` (60 g) |
 | `meal_entry_nutrients` | Nutrients for the amount eaten | (`entry_id`, `nutrient_id`), `amount` |
 | `saved_meals`, `saved_meal_items`, `saved_meal_item_nutrients` | Saved meals, same shape as meals | |
-| `aliases` | "usual breakfast" expands to a saved meal | `phrase` (unique, normalized), `saved_meal_id` |
+| `aliases` | "usual breakfast" expands to a saved meal | `phrase` (unique), `saved_meal_id`. The phrase is stored as the user typed it, trimmed, and compared through `nameKey` (`lib/parser/name_key.dart`) when it is used or checked for a clash, so a later change to the comparison rules cannot orphan saved aliases. |
 | `learned_matches` | Corrections the parser learns: "toast" means this bread | `phrase` (key), `food_ref`, last `unit_label` and `quantity`, `times_used` |
 
 Default meal slots and rules come from the brief:

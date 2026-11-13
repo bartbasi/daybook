@@ -47,7 +47,7 @@ class SavedMealDetail {
 
   final SavedMeal meal;
 
-  /// Normalized phrases, in the order they were added.
+  /// The phrases as the user typed them (trimmed), in the order added.
   final List<String> aliases;
   final List<StoredSavedItem> items;
   final int timesUsedInSlot;
@@ -56,7 +56,7 @@ class SavedMealDetail {
 }
 
 enum AliasProblem {
-  /// Nothing is left of the phrase once it is normalized.
+  /// Nothing is left of the phrase once it is keyed with nameKey.
   empty,
 
   /// Another saved meal already has the phrase.
@@ -65,7 +65,7 @@ enum AliasProblem {
 
 /// The result of creating or updating a saved meal. When any alias is refused
 /// nothing is written, [saved] is null and [problems] says which phrases
-/// (normalized; '' for an empty one) and why.
+/// (as typed, trimmed; '' for an empty one) and why.
 class SavedMealResult {
   const SavedMealResult.saved(SavedMealDetail this.saved) : problems = const {};
   const SavedMealResult.refused(this.problems) : saved = null;
@@ -292,7 +292,7 @@ extension FoodLibraryData on AppDatabase {
   );
 
   /// Creates a saved meal with [items] (each with its nutrient copy) and
-  /// [aliases] (other names, stored normalized). If an alias is refused
+  /// [aliases] (other names, stored as typed and compared through nameKey). If an alias is refused
   /// nothing is written (see [SavedMealResult]).
   Future<SavedMealResult> createSavedMeal({
     required String name,
@@ -302,7 +302,7 @@ extension FoodLibraryData on AppDatabase {
   }) async {
     _checkName(name);
     return transaction(() async {
-      final phrases = <String>{};
+      final phrases = <String>[];
       final problems = await _aliasProblems(aliases, null, phrases);
       if (problems.isNotEmpty) return SavedMealResult.refused(problems);
       final id = await into(savedMeals).insert(
@@ -328,7 +328,7 @@ extension FoodLibraryData on AppDatabase {
       if (await loadSavedMeal(id) == null) {
         throw StateError('No such saved meal');
       }
-      final phrases = <String>{};
+      final phrases = <String>[];
       if (aliases != null) {
         final problems = await _aliasProblems(aliases, id, phrases);
         if (problems.isNotEmpty) return SavedMealResult.refused(problems);
@@ -358,32 +358,37 @@ extension FoodLibraryData on AppDatabase {
     if (name.trim().isEmpty) throw ArgumentError('A saved meal needs a name');
   }
 
-  /// Normalizes [wanted] into [out] and returns the ones that cannot be used.
-  /// [ownId] is the saved meal being updated, whose own phrases are fine.
+  /// Puts the trimmed phrases of [wanted] into [out] (one per nameKey, the
+  /// first typed wins) and returns the ones that cannot be used. A phrase
+  /// clashes when its nameKey equals the nameKey of a phrase stored for
+  /// another saved meal. [ownId] is the saved meal being updated, whose own
+  /// phrases are fine.
   Future<Map<String, AliasProblem>> _aliasProblems(
     List<String> wanted,
     int? ownId,
-    Set<String> out,
+    List<String> out,
   ) async {
     final problems = <String, AliasProblem>{};
+    final stored = <String, int>{
+      for (final a in await select(aliases).get())
+        if (a.savedMealId != ownId) nameKey(a.phrase): a.savedMealId,
+    };
+    final seen = <String>{};
     for (final w in wanted) {
-      final p = nameKey(w);
-      if (p.isEmpty) {
+      final p = w.trim();
+      final key = nameKey(p);
+      if (key.isEmpty) {
         problems[''] = AliasProblem.empty;
         continue;
       }
+      if (!seen.add(key)) continue;
       out.add(p);
-      final other = await (select(
-        aliases,
-      )..where((a) => a.phrase.equals(p))).getSingleOrNull();
-      if (other != null && other.savedMealId != ownId) {
-        problems[p] = AliasProblem.taken;
-      }
+      if (stored.containsKey(key)) problems[p] = AliasProblem.taken;
     }
     return problems;
   }
 
-  Future<void> _writeAliases(int savedMealId, Set<String> phrases) async {
+  Future<void> _writeAliases(int savedMealId, List<String> phrases) async {
     for (final p in phrases) {
       await into(aliases)
           .insert(AliasesCompanion.insert(phrase: p, savedMealId: savedMealId));
