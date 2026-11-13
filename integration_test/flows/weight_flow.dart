@@ -11,6 +11,8 @@
 // with whatever database the app was started with, and it copes with rows that
 // are already there: it only looks at the rows its own save added.
 
+import 'dart:async';
+
 import 'package:daybook/app.dart';
 import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
@@ -74,15 +76,19 @@ Future<void> waitForWeightSheet(WidgetTester tester) async {
 /// plugin uses, then waits for the sheet. This is the one step of the widget
 /// path a test cannot do for real (see integration_test/widget_launch_test.dart).
 Future<void> deliverWidgetLink(WidgetTester tester) async {
-  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
-    'home_widget/updates',
-    // On iOS the widget's URL carries the plugin's query item.
-    const StandardMethodCodec().encodeSuccessEnvelope(
-      defaultTargetPlatform == TargetPlatform.android
-          ? weightLaunchLink
-          : '$weightLaunchLink?homeWidget',
+  // Not awaited: the answer comes through real async code that a widget test
+  // cannot run while it waits. The sheet below is what shows it arrived.
+  unawaited(
+    tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      'home_widget/updates',
+      // On iOS the widget's URL carries the plugin's query item.
+      const StandardMethodCodec().encodeSuccessEnvelope(
+        defaultTargetPlatform == TargetPlatform.android
+            ? weightLaunchLink
+            : '$weightLaunchLink?homeWidget',
+      ),
+      (_) {},
     ),
-    (_) {},
   );
   await waitForWeightSheet(tester);
 }
@@ -169,9 +175,15 @@ Future<void> runWeightFlow(WidgetTester tester) async {
   final db = appDatabase(tester);
   final rowsBefore = {for (final r in await storedWeights(tester)) r.id};
   final unitsBefore = (await tester.runAsync(db.getUnits))!;
-  final startedMs = DateTime.now().millisecondsSinceEpoch;
+  // The app's own clock, from its scope: the device clock on a device, the
+  // fixed clock in the widget harness. The flow never looks at a date.
+  final startedMs = tester
+      .element(find.byType(HomeShell))
+      .getInheritedWidgetOfExactType<AppScope>()!
+      .clock()
+      .utcMs;
 
-  /// The device clock, so the test never looks at a date.
+  /// Checks the row was stored at about the time the app's clock says.
   void expectNow(WeightEntry row) {
     expect(
       (row.measuredAtMs - startedMs).abs(),
@@ -238,8 +250,16 @@ Future<void> runWeightFlow(WidgetTester tester) async {
           if (!rowsBefore.contains(r.id)) r.id,
       ];
       await (db.delete(db.weightEntries)..where((w) => w.id.isIn(added))).go();
-      await db.setUnits(unitsBefore);
     });
+    // The screens reload after the delete, and that needs frames. A second
+    // write started before they finish would wait for them forever.
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.runAsync(() => db.setUnits(unitsBefore));
     await tester.pump(const Duration(milliseconds: 500));
   }
 }

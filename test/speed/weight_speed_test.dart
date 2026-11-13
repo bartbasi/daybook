@@ -184,6 +184,12 @@ void main() {
     await tester.runAsync(db.close);
   });
 
+  appTest('the device flow runs here as it runs on a device, under the '
+      'fixed clock and an in-memory database', (tester) async {
+    await openApp(tester);
+    await runWeightFlow(tester);
+  });
+
   group('from Home', () {
     appTest('2 counted taps and typing 181.8 store one row of 181.8 lb', (
       tester,

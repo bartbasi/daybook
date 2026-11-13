@@ -280,6 +280,13 @@ void main() {
     expect(find.text('Undo'), findsNothing);
   });
 
+  appTest('the device flow runs here as it runs on a device, under the '
+      'fixed clock and an in-memory database', (tester) async {
+    await openApp(tester);
+    await runFoodFlow(tester);
+    expect(await storedMeals(tester), isEmpty);
+  });
+
   appTest('target 1: Undo removes the new meal and no other', (tester) async {
     final y = await logYesterday(tester);
     await openApp(tester);

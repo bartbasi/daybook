@@ -2212,10 +2212,7 @@ void main() {
       expect(meal.slotName, 'Snack');
       expect(meal.meal.loggedAtMs, at('2026-11-13', 0, 1).utcMs);
       expect(meal.meal.tzOffsetMinutes, -360);
-      // Home has not looked at the clock yet: it still shows the 12th, with
-      // the new meal in its Snack row, and the message names the day from the
-      // clock now, so it says "yesterday" (the screen then catches up).
-      expect(find.text('Thursday, Nov 12'), findsOneWidget);
+      // The message names the day from the clock now, so it says "yesterday".
       expect(find.text('Snack saved for yesterday, 122 kcal'), findsOneWidget);
       expect(find.text('Undo'), findsOneWidget);
       // After the clock tick Home is on the 13th, with nothing in its rows

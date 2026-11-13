@@ -10,7 +10,8 @@
 //
 // Every tap goes through the TapCounter. Typing is not a tap.
 
-import 'package:daybook/clock.dart';
+import 'package:daybook/app.dart';
+import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
@@ -317,16 +318,27 @@ Future<void> runFoodFlow(WidgetTester tester) async {
       lines: 5,
       kcal: 490,
       whenOpen: () async {
-        final opened = systemNow();
+        // The app's own clock, from its own scope, as the screen reads it.
+        final opened = tester
+            .element(find.byType(HomeShell, skipOffstage: false))
+            .getInheritedWidgetOfExactType<AppScope>()!
+            .clock();
         shownDay = opened.localDate;
         defaultSlot = (await tester.runAsync(
           () => db.defaultMealSlot(opened.minuteOfDay),
         ))!.name;
-        shownSlot = tester
+        // The slot is picked after a database query, so wait for it.
+        Iterable<String> selected() => tester
             .widgetList<ChoiceChip>(find.byType(ChoiceChip))
             .where((c) => c.selected)
-            .map((c) => (c.label as Text).data!)
-            .single;
+            .map((c) => (c.label as Text).data!);
+        await waitFor(
+          tester,
+          () => selected().length == 1,
+          'one meal chip to be selected',
+          tries: 480,
+        );
+        shownSlot = selected().single;
       },
     );
     taps.expectCount(2, flow: '+ Food, type the meal, Save');
