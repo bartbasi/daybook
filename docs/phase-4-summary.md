@@ -53,6 +53,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 23. **No dotted underline in the text box under a picked item's words.** The wireframe drew one. Styling part of a live text field risks the keyboard's own composing and selection, so the line under the box carries the "Your pick" marker instead.
 24. **At double text size on the cover screen, with the keyboard up and an item not found, there is no room for the lines.** The top row, the text box and the "Fix 1 item" button stay on screen, and the lines come back when the keyboard goes down. Text is never shrunk to make room.
 25. **A food you pick for a line that was not typed (a logged meal being edited, a scan, a chip) is not marked "Your pick" and is not learned.** Learning is tied to the words you typed, and such a line has none.
+26. **When nothing matches in the correction sheet's search, the sentence saying so sits under the search box.** The wireframe had it above; at large text it pushed the box out of view.
 
 ## Open questions from the plan: answered
 
@@ -116,6 +117,7 @@ Parser speed on the development machine, against the budgets (a phone will be sl
 Two more behaviors to know about:
 - "coffee, black" reads "black" as a second food and guesses black beans. "black coffee" is fine.
 - "kiwis" and other plurals of words ending in "i" ("zucchinis", "martinis") are not reduced to the singular, because of an exception meant for words like "basis". They still find the food through typo correction, as a guess.
+- Amounts a reviewer found odd while testing the correction sheet: "2 strips bacon" does not read "strips" as a unit, so the amount is assumed (16 g); "half an avocado" comes to 15 g; "1 glass orange juice" is assumed at 248 g; and for cheddar, a typed "1 slice" means a 9 g cracker-size slice.
 - A word that is spelled right but is not in the USDA data can be "corrected" into another food as a guess: "skyr" becomes a Skor toffee bar.
 
 ## Known gaps to decide later
