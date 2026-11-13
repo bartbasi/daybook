@@ -152,7 +152,7 @@ Why include FNDDS (+2.4 MB):
 
 Building it:
 - Foods with no energy value at all are skipped (50 unfinished Foundation entries, 1 FNDDS entry). SR Legacy still covers those foods.
-- FNDDS portions: "Guideline amount per ..." rows are survey coding aids and are skipped. "Quantity not specified" is kept with its label and sequence number. The app never lists it as a choice and uses it only as the default amount.
+- FNDDS portions: "Guideline amount per ..." rows are survey coding aids and are skipped. "Quantity not specified" is kept with its label, in its FNDDS position. The app never lists it as a choice and uses it only as the default amount.
 - The build fills a few standard nutrient ids from close equivalents, so the app reads one id per nutrient. The rules are also stored in the database's `meta` table:
 
   | Nutrient | Filled from, in order |

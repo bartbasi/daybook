@@ -183,6 +183,7 @@ Nothing else. Checked against every frame note: custom food servings, recipe ser
 - `tools/build_food_db.py` gets its sources by downloading `https://fdc.nal.usda.gov/fdc-datasets/<file>` into `build/usda-cache/` (git-ignored) when the file is missing, then checking each file's pinned SHA-256. The cache is not on the development machine now, so the first run downloads.
 - Checked 2026-11-12: all three pinned files answer at that address (SR Legacy CSV 6,074,592 bytes, Foundation JSON 696,866 bytes, FNDDS JSON 3,835,292 bytes). Whether their hashes still match is only known when the script runs.
 - The implementer needs network access to fdc.nal.usda.gov, Python 3 (3.14 is installed) and about 100 MB of disk. If a hash does not match, stop and report. Never change a pinned hash without Bart.
+- Found in review of task 0.2: two foods also have the portions "Quantity not specified, if appetizer" and "Quantity not specified, if main course in meal". Portion pickers (task 2.9) hide every label that starts with "Quantity not specified".
 
 ### 3.3 Tasks
 
