@@ -292,8 +292,8 @@ extension FoodLibraryData on AppDatabase {
   );
 
   /// Creates a saved meal with [items] (each with its nutrient copy) and
-  /// [aliases] (other names, stored as typed and compared through nameKey). If an alias is refused
-  /// nothing is written (see [SavedMealResult]).
+  /// [aliases] (other names, stored as typed and compared through nameKey). If
+  /// an alias is refused nothing is written (see [SavedMealResult]).
   Future<SavedMealResult> createSavedMeal({
     required String name,
     required List<MealLineInput> items,
@@ -439,8 +439,8 @@ extension FoodLibraryData on AppDatabase {
   });
 
   /// Puts back a deleted saved meal with the same ids, and relinks the logged
-  /// meals that still exist. An alias that another saved meal has taken since
-  /// is not restored.
+  /// meals that still exist. An alias whose nameKey another saved meal has
+  /// taken since is not restored.
   Future<SavedMealDetail> undoDeleteSavedMeal(DeletedSavedMeal deleted) =>
       transaction(() async {
         final d = deleted.detail;
@@ -449,11 +449,11 @@ extension FoodLibraryData on AppDatabase {
           await into(savedMealItems).insert(i.item.toCompanion(false));
           await _insertSavedNutrients(i.item.id, i.nutrients);
         }
+        final keys = <String>{
+          for (final a in await select(aliases).get()) nameKey(a.phrase),
+        };
         for (final p in d.aliases) {
-          final taken = await (select(
-            aliases,
-          )..where((a) => a.phrase.equals(p))).getSingleOrNull();
-          if (taken == null) {
+          if (keys.add(nameKey(p))) {
             await into(aliases).insert(
               AliasesCompanion.insert(phrase: p, savedMealId: d.meal.id),
             );

@@ -59,6 +59,18 @@ const nameKeys = <(String, String)>[
   ('chicken (grilled)', 'chicken grilled'),
   ('ben+jerry', 'ben jerry'),
   ('!!!', ''),
+  // No plural stemming and no synonyms (grammar 6.1).
+  ('usual breakfasts', 'usual breakfasts'),
+  ('oj', 'oj'),
+  // Multiplier and multiplication sign.
+  ('x3', 'x 3'),
+  ('2 × eggs', '2 eggs'),
+  // A w/ touching a word.
+  ('coffee w/milk', 'coffee with milk'),
+  // More accents. ø and œ are letters of their own, not folded today.
+  ('Häagen-Dazs açaí smørrebrød', 'haagen dazs acai smørrebrød'),
+  ('Straße', 'strasse'),
+  ('cœur', 'cœur'),
 ];
 
 /// Food words as the amount step leaves them, and the learned key (grammar
@@ -111,6 +123,20 @@ const learnedKeys = <(String, String)>[
   // Accents and case.
   ('Café Latte', 'cafe latte'),
   ('', ''),
+  // Every filler word of grammar 5.2 step 5.
+  (
+    'a an the of and or with in on for to my i im had have ate eaten drank '
+        'then also just made prepared topped plus about around approximately '
+        'roughly',
+    '',
+  ),
+  // Words that are not filler today.
+  ('some fresh homemade', 'fresh homemade some'),
+  // Plural exceptions and look-alikes.
+  ('swiss cheese', 'cheese swiss'),
+  ('kiwis', 'kiwis'),
+  ('quizzes', 'quizz'),
+  ('moms chili', 'chili mom'),
 ];
 
 void main() {

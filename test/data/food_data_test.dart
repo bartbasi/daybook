@@ -1193,6 +1193,32 @@ void main() {
     });
 
     test(
+      'Undo skips a restored alias whose key a newer saved meal has',
+      () async {
+        final a = await create('A', aliases: ['PB & J', 'keep me']);
+        final held = await db.deleteSavedMeal(a.meal.id);
+        final e = await create('E', aliases: ['pb and j']);
+
+        final back = await db.undoDeleteSavedMeal(held);
+        expect(back.aliases, ['keep me']);
+        final stored = await db.select(db.aliases).get();
+        expect(
+          {for (final s in stored) s.phrase: s.savedMealId},
+          {'pb and j': e.meal.id, 'keep me': a.meal.id},
+        );
+      },
+    );
+
+    test('Undo with no clash restores every alias as typed', () async {
+      final a = await create('A', aliases: ['PB & J', 'Usual  Café', 'ub']);
+      final held = await db.deleteSavedMeal(a.meal.id);
+      await create('B', aliases: ['other']);
+
+      final back = await db.undoDeleteSavedMeal(held);
+      expect(back.aliases, unorderedEquals(['PB & J', 'Usual  Café', 'ub']));
+    });
+
+    test(
       'expanding multiplies amounts and nutrients, and marks the items',
       () async {
         final a = await create(
