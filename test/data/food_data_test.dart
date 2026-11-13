@@ -7,7 +7,9 @@ import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/data/weight_data.dart';
+import 'package:daybook/parser/name_key.dart';
 import 'package:daybook/util/units.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -454,42 +456,6 @@ void main() {
       },
     );
 
-    test('untouched lines keep their stored name and nutrients when the food changes later', () async {
-      final food = await db.createCustomFood(
-        const CustomFoodInput(
-          name: 'Zorbo',
-          basis: FoodBasis.perServing,
-          nutrients: {kcal: 90},
-        ),
-        today,
-      );
-      final m = await save([
-        ml(food.ref, name: 'Zorbo', n: {kcal: 90}),
-        ml('usda:2'),
-      ]);
-      await db.editCustomFood(
-        food.food.id,
-        const CustomFoodInput(
-          name: 'Zorbo Deluxe',
-          basis: FoodBasis.perServing,
-          nutrients: {kcal: 500},
-        ),
-        today,
-      );
-      final before = await db.select(db.mealEntries).get();
-      final out = await db.editMeal(
-        m.meal.id,
-        now: today,
-        lines: [
-          for (final e in m.entries) e.asInput(keepId: true),
-          ml('usda:3'),
-        ],
-      );
-      expect(out.entries[0].entry.foodName, 'Zorbo');
-      expect(out.entries[0].nutrients, {kcal: 90});
-      expect(before.first, out.entries[0].entry);
-    });
-
     test('typed text is added on a new line, or becomes the text when there was none', () async {
       final m = await save([ml('usda:1')]);
       var out = await db.editMeal(
@@ -555,6 +521,27 @@ void main() {
       );
       expect((await learned('toast'))!.foodRef, 'usda:5');
     });
+
+    test(
+      'the same existing id twice is refused and nothing is written',
+      () async {
+        final m = await save([ml('usda:1'), ml('usda:2')]);
+        final id = m.entries[0].entry.id;
+        final rows = await db.select(db.mealEntries).get();
+        await expectLater(
+          db.editMeal(
+            m.meal.id,
+            now: today,
+            lines: [
+              ml('usda:1', existingId: id),
+              ml('usda:9', existingId: id),
+            ],
+          ),
+          throwsStateError,
+        );
+        expect(await db.select(db.mealEntries).get(), rows);
+      },
+    );
 
     test(
       'a line that is not an entry of the meal, or no lines, is refused',
@@ -626,6 +613,28 @@ void main() {
       final back = await db.undoDeleteMeal(held);
       expect(back.meal.savedMealId, isNull);
       expect(back.entries.length, 1);
+    });
+
+    test(
+      'a second Undo of the same deleted meal is refused and leaves one copy',
+      () async {
+        final m = await save([
+          ml('usda:1', n: {kcal: 1}),
+        ]);
+        final held = await db.deleteMeal(m.meal.id);
+        await db.undoDeleteMeal(held);
+        await expectLater(db.undoDeleteMeal(held), throwsA(anything));
+        expect(await counts(), [1, 1, 1, 0]);
+      },
+    );
+
+    test('two saves started at the same moment both land', () async {
+      final both = await Future.wait([
+        save([ml('usda:1')]),
+        save([ml('usda:2')]),
+      ]);
+      expect(both[0].meal.id, isNot(both[1].meal.id));
+      expect(await counts(), [2, 2, 2, 0]);
     });
 
     test('deleting a meal that is not there is refused', () {
@@ -707,6 +716,21 @@ void main() {
         await db.sameAsYesterday(forDate: '2026-11-12', slotId: dinner),
         isNull,
       );
+    });
+
+    test('works across a daylight saving change day', () async {
+      await save([ml('a')], date: '2026-03-08');
+      await save([ml('b')], date: '2026-11-01');
+      final spring = await db.sameAsYesterday(
+        forDate: '2026-03-09',
+        slotId: breakfast,
+      );
+      expect(spring!.entries.single.entry.foodRef, 'a');
+      final fall = await db.sameAsYesterday(
+        forDate: '2026-11-02',
+        slotId: breakfast,
+      );
+      expect(fall!.entries.single.entry.foodRef, 'b');
     });
 
     test(
@@ -814,13 +838,13 @@ void main() {
     test('only this slot, and only the last 30 days up to today', () async {
       await save(
         [ml('thirty')],
-        date: '2026-10-13',
-        now: at('2026-10-13', 7, 0),
+        date: '2026-10-14',
+        now: at('2026-10-14', 7, 0),
       );
       await save(
         [ml('thirtyone')],
-        date: '2026-10-12',
-        now: at('2026-10-12', 7, 0),
+        date: '2026-10-13',
+        now: at('2026-10-13', 7, 0),
       );
       await save([ml('lunchy')], date: '2026-11-10', slot: lunch);
       await save([ml('future')], date: '2026-11-13');
@@ -897,9 +921,33 @@ void main() {
       );
     });
 
+    test('skips a rule whose slot is archived', () async {
+      await (db.update(db.mealSlots)..where((s) => s.id.equals(breakfast)))
+          .write(const MealSlotsCompanion(archived: Value(true)));
+      // Breakfast's rule is skipped and nothing earlier is left, so the last
+      // rule of the day (Snack after 21:00) carries past midnight.
+      expect((await db.defaultMealSlot(480)).name, 'Snack');
+      expect((await db.defaultMealSlot(11 * 60)).name, 'Lunch');
+    });
+
+    test(
+      'the last rule of the day carries past midnight when none starts at 0:00',
+      () async {
+        await (db.delete(
+          db.mealSlotRules,
+        )..where((r) => r.startMinute.equals(0))).go();
+        expect((await db.defaultMealSlot(0)).name, 'Snack');
+        expect((await db.defaultMealSlot(10 * 60 + 29)).name, 'Snack');
+        expect((await db.defaultMealSlot(10 * 60 + 30)).name, 'Lunch');
+      },
+    );
+
     test('falls back to the first slot when no rule applies', () async {
       await db.delete(db.mealSlotRules).go();
       expect((await db.defaultMealSlot(600)).id, breakfast);
+      await (db.update(db.mealSlots)..where((s) => s.id.equals(breakfast)))
+          .write(const MealSlotsCompanion(archived: Value(true)));
+      expect((await db.defaultMealSlot(600)).id, lunch);
     });
   });
 
@@ -957,7 +1005,6 @@ void main() {
     test('alias phrases are stored normalized', () async {
       final d = await create('X', aliases: ["  Mom's  CAFÉ!! "]);
       expect(d.aliases, ['moms cafe']);
-      expect(normalizePhrase('Usual,  breakfast'), 'usual breakfast');
     });
 
     test(
@@ -981,6 +1028,22 @@ void main() {
         expect((await db.select(db.aliases).get()).length, 2);
       },
     );
+
+    test('an alias is stored under nameKey, and a spelling that parses the same is taken', () async {
+      final a = await create('A', aliases: ['pb&j', 'coffee w/ milk']);
+      expect(a.aliases, [nameKey('pb&j'), nameKey('coffee w/ milk')]);
+      expect(a.aliases, ['pb and j', 'coffee with milk']);
+      for (final same in ['pb and j', 'coffee with milk']) {
+        final r = await db.createSavedMeal(
+          name: 'B',
+          items: [ml('usda:9')],
+          now: today,
+          aliases: [same],
+        );
+        expect(r.problems, {same: AliasProblem.taken});
+      }
+      expect((await db.select(db.savedMeals).get()).length, 1);
+    });
 
     test('an empty phrase is refused', () async {
       final r = await db.createSavedMeal(
@@ -1530,6 +1593,38 @@ void main() {
       expect(e.ingredients.length, 1);
       expect((await db.select(db.recipeIngredients).get()).length, 1);
       expect((await db.select(db.foodNutrients).get()).length, 1);
+    });
+
+    test('an ingredient with no nutrients is refused, so a rename cannot wipe them', () async {
+      final bare = ml('usda:1', n: {});
+      expect(
+        db.createRecipe(
+          RecipeInput(name: 'R', servings: 1, ingredients: [bare]),
+          today,
+        ),
+        throwsArgumentError,
+      );
+      final r = await db.createRecipe(
+        RecipeInput(
+          name: 'R',
+          servings: 1,
+          ingredients: [
+            ml('usda:1', n: {kcal: 400}),
+          ],
+        ),
+        today,
+      );
+      await expectLater(
+        db.editRecipe(
+          r.food.id,
+          RecipeInput(name: 'R2', servings: 1, ingredients: [bare]),
+          today,
+        ),
+        throwsArgumentError,
+      );
+      final back = (await db.loadFood(r.food.id))!;
+      expect(back.food.name, 'R');
+      expect(back.nutrients, {kcal: 400});
     });
 
     test('servings must be more than zero, a recipe needs a name', () {

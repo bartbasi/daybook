@@ -55,23 +55,6 @@ bool sameNutrients(Map<int, double> a, Map<int, double> b) {
   return true;
 }
 
-/// A food phrase in the form stored for aliases (grammar 6.1): lower case,
-/// accents and apostrophes removed, other punctuation read as a space, words
-/// separated by single spaces.
-String normalizePhrase(String text) {
-  const from = 'àáâãäåāçèéêëìíîïñòóôõöøùúûüýÿ';
-  const to = 'aaaaaaaceeeeiiiinoooooouuuuyy';
-  final word = RegExp(r'[\p{L}\p{N}%]', unicode: true);
-  final out = StringBuffer();
-  for (final ch in text.toLowerCase().split('')) {
-    final i = from.indexOf(ch);
-    final c = i >= 0 ? to[i] : ch;
-    if (c == "'" || c == '’') continue;
-    out.write(word.hasMatch(c) ? c : ' ');
-  }
-  return out.toString().split(' ').where((w) => w.isNotEmpty).join(' ');
-}
-
 /// One line of a meal as it is written: what [FoodData.saveMeal] and
 /// [FoodData.editMeal] take, and what a saved meal or recipe item is made from.
 ///
@@ -314,7 +297,7 @@ extension FoodData on AppDatabase {
         final id = l.existingId;
         if (id == null) continue;
         if (!stored.containsKey(id)) throw StateError('Not an entry of meal');
-        keep.add(id);
+        if (!keep.add(id)) throw StateError('Entry used twice');
       }
       for (final id in stored.keys) {
         if (!keep.contains(id)) {
@@ -559,7 +542,10 @@ extension FoodData on AppDatabase {
   }
 
   /// The meals of a day with entries, in meal slot order, then by logged time.
-  Future<DayLog> loadDay(String localDate) async {
+  Future<DayLog> loadDay(String localDate) =>
+      transaction(() => _loadDay(localDate));
+
+  Future<DayLog> _loadDay(String localDate) async {
     final rows = await (select(
       meals,
     )..where((m) => m.localDate.equals(localDate))).get();
@@ -615,8 +601,8 @@ extension FoodData on AppDatabase {
     mealEntryNutrients,
   ], () => sameAsYesterday(forDate: forDate, slotId: slotId));
 
-  /// Foods logged in [slotId] in the last 30 days up to [today] (a meal dated
-  /// 30 days before [today] counts), most logged first (meals it was in), then
+  /// Foods logged in [slotId] in the last 30 days: [today] and the 29 days
+  /// before it (a meal dated 30 days before [today] does not count), most logged first (meals it was in), then
   /// most recent, then by ref so the order never changes between reads. Each
   /// has the amount last logged. At most [limit] (8).
   Future<List<RecentFood>> recentFoods({
@@ -629,7 +615,7 @@ extension FoodData on AppDatabase {
             .join([innerJoin(meals, meals.id.equalsExp(mealEntries.mealId))])
           ..where(
             meals.slotId.equals(slotId) &
-                meals.localDate.isBiggerOrEqualValue(addDays(today, -30)) &
+                meals.localDate.isBiggerOrEqualValue(addDays(today, -29)) &
                 meals.localDate.isSmallerOrEqualValue(today),
           )
           ..orderBy([
@@ -692,19 +678,28 @@ extension FoodData on AppDatabase {
 
   /// The default meal slot at a time of day (0 to 1439): the rule with the
   /// latest start at or before it, so a boundary belongs to the later slot.
+  /// Rules whose slot is archived are skipped. If no rule starts at or before
+  /// the time, the last rule of the day carries past midnight. With no usable
+  /// rule at all, the first slot that is not archived.
   Future<MealSlot> defaultMealSlot(int minuteOfDay) async {
-    final rule =
-        await (select(mealSlotRules)
-              ..where((r) => r.startMinute.isSmallerOrEqualValue(minuteOfDay))
-              ..orderBy([(r) => OrderingTerm.desc(r.startMinute)])
-              ..limit(1))
-            .getSingleOrNull();
-    if (rule != null) {
-      return (select(
-        mealSlots,
-      )..where((s) => s.id.equals(rule.slotId))).getSingle();
+    final rows =
+        await (select(mealSlotRules).join([
+                innerJoin(
+                  mealSlots,
+                  mealSlots.id.equalsExp(mealSlotRules.slotId),
+                ),
+              ])
+              ..where(mealSlots.archived.equals(false))
+              ..orderBy([OrderingTerm.asc(mealSlotRules.startMinute)]))
+            .get();
+    MealSlot? pick;
+    for (final r in rows) {
+      if (r.read(mealSlotRules.startMinute)! > minuteOfDay) break;
+      pick = r.readTable(mealSlots);
     }
-    // No rule covers it: the first slot that is not archived.
+    if (pick == null && rows.isNotEmpty) pick = rows.last.readTable(mealSlots);
+    if (pick != null) return pick;
+    // No usable rule: the first slot that is not archived.
     return (select(mealSlots)
           ..where((s) => s.archived.equals(false))
           ..orderBy([(s) => OrderingTerm.asc(s.position)])
@@ -728,7 +723,10 @@ extension FoodData on AppDatabase {
   /// Everything the parser needs from the user's data, in plain types. Foods
   /// that are archived are left out; learned matches are all there (the
   /// parser ignores one whose food is gone, grammar 7.3).
-  Future<UserSnapshotData> loadUserSnapshot({int version = 0}) async {
+  Future<UserSnapshotData> loadUserSnapshot({int version = 0}) =>
+      transaction(() => _loadUserSnapshot(version));
+
+  Future<UserSnapshotData> _loadUserSnapshot(int version) async {
     final foodRows = await (select(
       foods,
     )..where((f) => f.archived.equals(false))).get();

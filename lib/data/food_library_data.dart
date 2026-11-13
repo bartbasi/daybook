@@ -4,6 +4,7 @@
 import 'package:drift/drift.dart';
 
 import '../clock.dart';
+import '../parser/name_key.dart';
 import 'database.dart';
 import 'food_data.dart';
 import 'nutrients.dart';
@@ -196,7 +197,10 @@ extension FoodLibraryData on AppDatabase {
   // Saved meals
 
   /// Reads a saved meal, or null.
-  Future<SavedMealDetail?> loadSavedMeal(int id) async {
+  Future<SavedMealDetail?> loadSavedMeal(int id) =>
+      transaction(() => _loadSavedMeal(id));
+
+  Future<SavedMealDetail?> _loadSavedMeal(int id) async {
     final rows = await (select(
       savedMeals,
     )..where((s) => s.id.equals(id))).get();
@@ -255,7 +259,10 @@ extension FoodLibraryData on AppDatabase {
   /// Every saved meal. With [slotId], ordered by how many logged meals used it
   /// in that slot (through meals.saved_meal_id), then by name; without, by
   /// name. Updated after every change to saved meals, aliases or meals.
-  Future<List<SavedMealDetail>> savedMealsList({int? slotId}) async {
+  Future<List<SavedMealDetail>> savedMealsList({int? slotId}) =>
+      transaction(() => _savedMealsList(slotId));
+
+  Future<List<SavedMealDetail>> _savedMealsList(int? slotId) async {
     final rows = await select(savedMeals).get();
     final used = <int, int>{};
     if (slotId != null) {
@@ -360,7 +367,7 @@ extension FoodLibraryData on AppDatabase {
   ) async {
     final problems = <String, AliasProblem>{};
     for (final w in wanted) {
-      final p = normalizePhrase(w);
+      final p = nameKey(w);
       if (p.isEmpty) {
         problems[''] = AliasProblem.empty;
         continue;
@@ -572,7 +579,11 @@ extension FoodLibraryData on AppDatabase {
     });
   }
 
-  /// Creates a recipe (kind 'recipe'): base amount is [RecipeInput.servings]
+  /// Creates a recipe (kind 'recipe'). Every ingredient must have its
+  /// nutrients (an empty map is refused with [ArgumentError]): stored
+  /// ingredients carry none, so when reopening a recipe the caller must
+  /// recompute each ingredient's nutrients from the food data before saving
+  /// it again. Base amount is [RecipeInput.servings]
   /// of base unit 'serving', and the nutrients are the whole recipe's, the sum
   /// of its ingredient lines. The ingredients are stored in order.
   Future<FoodDetail> createRecipe(RecipeInput r, Now now) =>
@@ -612,6 +623,9 @@ extension FoodLibraryData on AppDatabase {
       });
 
   void _checkRecipe(RecipeInput r) {
+    if (r.ingredients.any((i) => i.nutrients.isEmpty)) {
+      throw ArgumentError('Every ingredient needs its nutrients');
+    }
     if (r.name.trim().isEmpty) throw ArgumentError('A recipe needs a name');
     if (!(r.servings > 0)) throw ArgumentError('A recipe makes some servings');
   }
