@@ -50,6 +50,9 @@ Each is the recommended option from the plan's open questions, or a small call m
 20. **A count with no unit is shown as "2, 100 g".** Some wireframe frames showed "2 egg, 100 g"; the grammar gives a count no unit word.
 21. **On the food screen the text box is always at the top, under the meal chips.** Lines that were not typed (a logged meal being edited, and later scans and chips) are listed under it, before the typed lines. Two wireframe frames drew them above the box; keeping the box fixed is what stops it scrolling out of view while you type.
 22. **Changing one item of a typed saved meal turns it into its items for that meal.** If you type "usual breakfast" and then change or remove one of its items, the saved meal's name is replaced by its items as ordinary lines, and the change applies to that line. The saved meal itself is not altered and nothing is learned from it.
+23. **No dotted underline in the text box under a picked item's words.** The wireframe drew one. Styling part of a live text field risks the keyboard's own composing and selection, so the line under the box carries the "Your pick" marker instead.
+24. **At double text size on the cover screen, with the keyboard up and an item not found, there is no room for the lines.** The top row, the text box and the "Fix 1 item" button stay on screen, and the lines come back when the keyboard goes down. Text is never shrunk to make room.
+25. **A food you pick for a line that was not typed (a logged meal being edited, a scan, a chip) is not marked "Your pick" and is not learned.** Learning is tied to the words you typed, and such a line has none.
 
 ## Open questions from the plan: answered
 
