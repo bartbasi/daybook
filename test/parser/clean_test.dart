@@ -213,6 +213,17 @@ void main() {
     });
   });
 
+  group('hyphen between a digit and a letter', () {
+    _row('2-percent', '2-percent milk', '2% milk');
+    _row('2-eggs', '2-eggs', '2 eggs');
+    _row('3-pack', '3-pack', '3 pack');
+    _row('7-up', '7-up', '7 up');
+    _row('V-8 still joins', 'V-8', 'V8');
+    test('2-percent milk has no quantity of 2', () {
+      expect(cleanText('2-percent milk').text, '2% milk');
+    });
+  });
+
   group('review fixes', () {
     _row(
       'R12 percent runs after the hyphen rules',

@@ -684,6 +684,42 @@ void main() {
       expect(readWith('my oatmeal', []), ['oatmeal||']);
     });
 
+    test('R38 a name of two or more words is protected in full', () {
+      expect(readWith('big mac', ['Big Mac']), ['big mac||']);
+      expect(readWith('thin mints', ['Thin Mints']), ['thin mints||']);
+      expect(readWith('mini wheats', ['Mini Wheats']), ['mini wheats||']);
+      expect(readWith('2 big mac', ['Big Mac']), ['big mac|2|']);
+      expect(readWith('coffee, big mac', ['Big Mac']), [
+        'coffee||',
+        'big mac||',
+      ]);
+      // Without the name the size word is read.
+      expect(readWith('big mac', []), ['mac|1|']);
+    });
+
+    test('R38 a plural of a name does not match and does not throw', () {
+      expect(() => readWith('2 big macs', ['Big Mac']), returnsNormally);
+      expect(readWith('2 big macs', ['Big Mac']), ['macs|2|']);
+    });
+
+    test('R38 a one-word name gets no protection', () {
+      expect(readWith('1 bowl of rice', ['Bowl']), ['rice|1|bowl']);
+      expect(readWith('2 thin slices toast', ['Thin']), ['toast|2|slice']);
+    });
+
+    test('R38 only part of a name is not protected', () {
+      expect(readWith('had a banana', ['A banana bread']), ['banana|1|']);
+      expect(readWith('big coffee', ['Big Mac']), ['coffee|1|']);
+      expect(readWith('mac', ['Big Mac']), ['mac||']);
+    });
+
+    test('R38 a name keeps its separator and filler words', () {
+      expect(readWith('toast with jam', ['Toast with jam']), [
+        'toast with jam||',
+      ]);
+      expect(readWith('the one', ['The One']), ['the one||']);
+    });
+
     test('the prepared object and the plain strings agree', () {
       const names = ['Eggs and toast', 'my oatmeal', '7up'];
       const text = 'eggs and toast, 2 my oatmeal and 7up';

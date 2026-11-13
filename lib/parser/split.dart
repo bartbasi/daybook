@@ -17,9 +17,11 @@ import 'tokens.dart';
 /// and pass it to [splitItems] and [cleanText].
 ///
 /// Each name goes through the 2.1 clean-up first, so "Eggs & toast" is the
-/// phrase `eggs and toast`. It is a protected phrase (2.3) when it has a
-/// separator or filler word, a number word or a digit. A name that is one word
-/// with digits (`7up`) also stays whole when a number touches letters.
+/// phrase `eggs and toast`. A name of two or more words is a protected phrase
+/// in full (2.3): never split, never read as quantity, size or unit, never
+/// removed as filler, whatever words it contains. A one-word name gets no
+/// protection, except that a one-word name with digits (`7up`) stays whole
+/// when a number touches letters.
 class UserNames {
   const UserNames._(this.keepWhole, this._byFirst);
 
@@ -42,9 +44,9 @@ class UserNames {
         for (final chunk in _hardChunks(cleanText(trimmed).text))
           for (final t in chunk) t.text.toLowerCase(),
       ];
-      if (words.isNotEmpty && words.any(_triggersProtection)) {
-        phrases.add(words);
-      }
+      // A name of two or more words is protected in full (R38). A one-word
+      // name needs no protection.
+      if (words.length >= 2) phrases.add(words);
     }
     final byFirst = <String, List<List<String>>>{};
     for (final p in phrases) {
@@ -88,20 +90,6 @@ class UserNames {
     return 0;
   }
 }
-
-bool _isNumberWord(String w) =>
-    onesWords.containsKey(w) ||
-    teensWords.containsKey(w) ||
-    tensWords.containsKey(w) ||
-    fractionWords.containsKey(w) ||
-    w == 'dozen' ||
-    w == 'couple' ||
-    w.contains(RegExp(r'\d'));
-
-/// A user name is protected when it has a separator or filler word (`and`,
-/// `with`, `plus`, `my`), a number word or a digit (2.3).
-bool _triggersProtection(String w) =>
-    fillerWords.contains(w) || _isNumberWord(w);
 
 /// Splits [text] into items and reads each item's amount. Deterministic: the
 /// same text and user names always give the same items.

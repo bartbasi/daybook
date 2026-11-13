@@ -94,8 +94,8 @@ class _Buf {
   }
 }
 
-// A letter is a letter plus any combining marks after it (R17), so "e" then
-// U+0301 is one letter and never splits a word.
+// A combining mark belongs to the letter before it, so "e" then U+0301 is one
+// letter and never splits a word.
 const _lm = r'[\p{L}\p{M}]';
 
 final _vulgar = RegExp('[${vulgarFractions.keys.join()}]');
@@ -116,11 +116,13 @@ final _percent = RegExp(
   r'(?<![\d.])(\d+(?:\.\d+)?|\.\d+)\s*percent\b',
   caseSensitive: false,
 );
-final _hyphenLetters = RegExp('(?<=$_lm)-(?=\\p{L})', unicode: true);
-final _hyphenLetterDigit = RegExp(
-  '(?<=$_lm)-(?=\\d)|(?<=\\d)-(?=\\p{L})',
+// A hyphen between two letters, or between a digit and a letter, is a space.
+final _hyphenLetters = RegExp(
+  '(?<=$_lm)-(?=\\p{L})|(?<=\\d)-(?=\\p{L})',
   unicode: true,
 );
+// A hyphen between a letter and a digit is removed: V-8 is V8.
+final _hyphenLetterDigit = RegExp('(?<=$_lm)-(?=\\d)', unicode: true);
 final _other = RegExp(r'[^\p{L}\p{M}\d \n,;./%+\-~×]', unicode: true);
 final _run = RegExp(r'[^\s,;+×]+');
 final _manySpaces = RegExp(' {2,}');
