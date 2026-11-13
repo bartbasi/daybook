@@ -141,7 +141,7 @@ jobs:
     name: Integration test on iOS simulator
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -153,15 +153,65 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Boot an iPhone simulator and run the tests
+      # Prefer a simulator whose iOS version matches the Xcode in use. If none
+      # does, take the newest iPhone on the image.
+      - name: Pick and boot an iPhone simulator
         run: |
-          xcrun simctl list devices available
-          UDID="$(xcrun simctl list devices available | grep -E '^[[:space:]]+iPhone' | grep -Eo '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | tail -n 1 || true)"
+          xcodebuild -version
+          xcrun simctl list runtimes
+          SDKVER="$(xcodebuild -showsdks | grep -Eo 'iphonesimulator[0-9.]+' | head -n 1 | sed 's/iphonesimulator//' || true)"
+          echo "Xcode simulator SDK: $SDKVER"
+          IDRE='[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}'
+          UDID=""
+          if [ -n "$SDKVER" ]; then
+            UDID="$(xcrun simctl list devices available | awk -v h="-- iOS $SDKVER --" '$0==h{f=1;next} /^-- /{f=0} f' | grep -E '^[[:space:]]+iPhone' | grep -Eo "$IDRE" | tail -n 1 || true)"
+          fi
+          if [ -z "$UDID" ]; then
+            UDID="$(xcrun simctl list devices available | grep -E '^[[:space:]]+iPhone' | grep -Eo "$IDRE" | tail -n 1 || true)"
+          fi
           if [ -z "$UDID" ]; then
             echo "::error::No iPhone simulator is available on this runner image."
             exit 1
           fi
           echo "Using simulator $UDID"
+          xcrun simctl list devices | grep "$UDID"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
-          flutter test integration_test -d "$UDID"
+
+      # On a freshly booted simulator the log stream that Flutter reads to find
+      # the Dart VM service can start after the app has already printed its
+      # address. Flutter then waits forever (seen in run 43378321995: the app
+      # printed "The Dart VM service is listening" 0.1 s before the stream
+      # started). So the first attempt has a time limit and one retry follows.
+      # The retry finds the build cached and the simulator warm.
+      - name: Run the integration test
+        id: attempt1
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          set -o pipefail
+          flutter test integration_test -d "$UDID" --timeout 10m --verbose 2>&1 | tee flutter-test-1.log
+
+      - name: Run the integration test again if the first try failed
+        if: steps.attempt1.outcome != 'success'
+        timeout-minutes: 12
+        run: |
+          echo "::warning::The first integration test try failed, trying once more."
+          xcrun simctl terminate "$UDID" io.github.bartbasi.daybook || true
+          set -o pipefail
+          flutter test integration_test -d "$UDID" --timeout 10m --verbose 2>&1 | tee flutter-test-2.log
+
+      - name: What the simulator and the app said
+        if: always()
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices booted
+          for f in flutter-test-1.log flutter-test-2.log; do
+            echo "Lines about the VM service and results in $f"
+            grep -n -E "VM Service|Waiting for|Lost connection|All tests passed|Some tests failed|\+[0-9]+: |Exception|Error" "$f" | tail -n 30 || true
+          done
+          echo "Messages from the app in the simulator log, last 30 minutes"
+          xcrun simctl spawn "$UDID" log show --last 30m --style compact --predicate 'process == "Runner" AND (eventMessage CONTAINS "flutter:" OR eventMessage CONTAINS "Terminating" OR eventMessage CONTAINS "crash")' 2>&1 | tail -n 80 || true
+          echo "Crash reports"
+          ls -l ~/Library/Logs/DiagnosticReports 2>/dev/null | tail -n 10 || true
