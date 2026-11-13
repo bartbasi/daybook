@@ -22,6 +22,9 @@ Everything was checked against the bundled reference data (`assets/food/usda.sql
 12. [Limits and speed](#12-limits-and-speed)
 13. [Changes needed outside this document](#13-changes-needed-outside-this-document)
 14. [Decisions and open questions for Bart](#14-decisions-and-open-questions-for-bart)
+    - [14.1 Decided in review](#141-decided-in-review)
+    - [14.2 Open questions](#142-open-questions)
+    - [14.3 Clarified during the build](#143-clarified-during-the-build)
 
 ## 1. Overview
 
@@ -61,19 +64,24 @@ Before anything else:
 | `w/` | ` with ` | `coffee w/ milk` |
 | `w/o` | ` without ` | |
 | `<number> percent` | `<number>%` | `2 percent milk` becomes `2% milk` |
-| Curly quotes and apostrophes | removed | `mom's` becomes `moms` |
+| Curly quotes, and apostrophes both straight and curly | removed | `mom's` becomes `moms` |
 | A hyphen between two letters | a space | `half-and-half`, `extra-large`, `hard-boiled`, `twenty-five` |
-| A hyphen between a letter and a digit | removed | `V-8` becomes `V8` |
+| A hyphen between a letter and a following digit | removed | `V-8` becomes `V8` |
+| A hyphen between a digit and a following letter | a space | `2-percent` becomes `2 percent` |
 | A hyphen with a digit on both sides | kept, for the quantity rules in section 3 | `2-3` (a range), `1-1/2` (a mixed number) |
 | Any other character that is not a letter, digit, space, `,` `;` `.` `/` `%` `+` `-` `~` `×` or new line | a space | `!!!` becomes nothing |
 
 Because `&`, `w/` and `w/o` are replaced here, the later steps and the grammar in section 10 only ever see the words "and", "with" and "without".
 
+The `<number> percent` row is applied after the hyphen rows, so `2-percent milk` becomes `2 percent milk` and then `2% milk`, not a quantity of 2.
+
+**Tokens with no letter or digit.** A token made only of punctuation or symbols, such as `-`, `/`, `%` or `×` on its own, is ignored once the quantity rules in section 3 have had their chance to use it (in a range or a multiplier, for example). It never becomes a food word. `2 eggs - coffee` is read as if the hyphen were not there.
+
 **Words that contain digits.**
 
 - A word that starts with letters and contains digits is one word: `V8`, `G2`, `B12`. There are 32 bundled food names with such words ("Gatorade G2", "vitamins B6 and B12"). The exception is `x` or `×` followed by digits, which is always a multiplier: `x3` is `x 3`.
 - A number in any form (whole, decimal or fraction) touching letters after it is split into the number and a word: `100g` is `100 g`, `2c` is `2 c`, `1T` is `1 T`, `1/2c` is `1/2 c`, `2x` is `2 x`, `2eggs` is `2 eggs`.
-- The exception is a word that is itself an entry in the synonym list (5.3), the built-in protected list (2.3), or the user's own names: it stays whole. `7up` stays one word because it is a synonym entry.
+- The exception is a word that is itself an entry in the synonym list (5.3), the built-in protected list (2.3), or the user's own names: it stays whole. `7up` stays one word because it is a synonym entry. For the user's names this holds only when the whole name is that one word (a product named "7up"), not for a word inside a longer name (2.3).
 
 Case is kept until the units step, because `T` and `t` mean different units. All other comparisons ignore case.
 
@@ -85,7 +93,7 @@ These always end an item:
 - `,` and `;`
 - `+` and the word `plus`
 - end of sentence: a `.` followed by a space or the end of the text. There are two exceptions, where the period belongs to the word before it:
-  - that word is a unit spelling (`oz.`, `tbsp.`, `fl. oz.`);
+  - that word is a unit spelling read as a unit there, because it follows a quantity or a size word or comes before `of` (`2 oz.`, `1 tbsp.`), or it is the abbreviation `fl` (`fl. oz.`). A unit spelling used as a food word does not count, so `I ate a candy bar. Coffee with milk.` is two sentences;
   - that word is one of the title abbreviations `dr`, `mr`, `mrs`, `ms`, `st`, `jr`, `sr`, `vs`, so `1 can Dr. Pepper` stays one item.
 
   A `.` between or before digits is a decimal point.
@@ -94,7 +102,7 @@ A comma is never a decimal point (see [section 12](#12-limits-and-speed)).
 
 ### 2.3 Protected phrases
 
-A protected phrase is a food name that contains a separator word. Its words are never split and never read as quantities. Protected phrases are found first, longest match first, scanning left to right.
+A protected phrase is a food name that contains a separator word, a number word or digits. Its words are never split and never read as quantities. For filler only, any of the user's own names is also a protected phrase (item 2 below). Protected phrases are found first, longest match first, scanning left to right.
 
 The protected list is:
 
@@ -104,7 +112,11 @@ The protected list is:
 
    One more phrase is protected only so that its `a` is never read as a quantity: `a la` (as in "chicken a la king", "pie a la mode").
 
-2. **The user's own names** that contain a separator word (`and`, `with`, `plus`) or a number word or digit: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. For example, a saved meal called "eggs and toast" or a product called "7 Up" stays whole.
+2. **The user's own names** that contain a separator word (`and`, `with`, `plus`) or a number word or digit: names of the user's foods, recipes and cached Open Food Facts products, saved meal names, and alias phrases. For example, a saved meal called "eggs and toast" or a product called "7 Up" stays whole. A number word here means digits, the number words one to ninety-nine as written in 10.2, half, quarter, third, dozen and couple.
+
+   Each name goes through the clean-up in 2.1 before it becomes a protected phrase, so a product named "Coca-Cola 330ml" becomes "coca cola 330 ml". The 2.1 rule that keeps a word with digits whole applies only when the whole name is that one word (such as "7up"), so this product does not stop `330ml milk` being read as 330 ml of milk.
+
+   Words inside a protected phrase are never filler words (2.6 rule 1). For this, every alias phrase, saved meal name and user food name counts as protected, even one with no separator word or number word. So with an alias "my oatmeal", the "my" in `I had my oatmeal` is kept.
 
 Why a short hand-made list and not one built from the data: the bundled descriptions contain 2,610 names with " and " and 523 different "word and word" pairs, but the most common are "lean and fat" (781 times), "meat and skin" (149) and "solids and liquids" (114), and the list also holds pairs such as "egg and cheese" (from restaurant sandwiches) and "beef and rice". A list built from the data would stop "eggs and cheese" or "beef and rice" from splitting in ways nobody could predict.
 
@@ -121,6 +133,8 @@ These are joined into one quantity before soft separators are applied. "and" ins
 
 The fraction after `and` must be less than 1: a written fraction (`1/2`), a unicode fraction, or one of the fraction phrases in [section 3](#3-quantities). `2 eggs and 3 slices toast` is not a number phrase, because 3 is not a fraction.
 
+A size word between the number and the unit does not stop the join: `2 large cups and a half milk` is read like `2 cups and a half milk`.
+
 ### 2.5 Soft separators: "and" and "with"
 
 After protected phrases and number phrases are marked, **every remaining `and` and `with` splits the chunk into pieces** (including those that came from `&` and `w/`). There is no other exception.
@@ -135,7 +149,7 @@ The alternative reading, keeping "chicken and rice" whole because FNDDS has a di
 
 Phone dictation often leaves out commas: `two eggs two slices of sourdough toast one tablespoon of butter`. Inside a piece, read the tokens left to right:
 
-1. An item has **food words** once it has at least one word that is not a filler word ([section 10](#10-grammar-and-token-lists)). "I had" alone is not food words.
+1. An item has **food words** once it has at least one word that is not a filler word ([section 10](#10-grammar-and-token-lists)). "I had" alone is not food words. Filler words before the first food word are dropped from the food words whether or not an amount was typed: `I had coffee` and `I had 1 coffee` both give the food words "coffee". Words inside a protected phrase are never filler (2.3). So when the user has an alias, saved meal or food named "my oatmeal", `I had my oatmeal`, `I had 1 my oatmeal` and `2 my oatmeal` all give "my oatmeal", and with "usual breakfast", `I had usual breakfast` gives "usual breakfast". Without such a name, `my oatmeal` gives "oatmeal".
 2. When a **quantity** (digits, a number word, `dozen`, or a fraction phrase) appears after the current item already has food words, it is the item's **amount after the food** only when both of these hold:
    - the item has no amount yet;
    - the quantity is followed by a unit (and that unit is not followed by `of`), or nothing follows it in the piece except a trailing multiplier.
@@ -148,12 +162,13 @@ Phone dictation often leaves out commas: `two eggs two slices of sourdough toast
    **Words after an amount typed after the food stay with the item**: `chicken breast 6 oz grilled` is one item, "chicken breast grilled", 6 oz; `rice 1 cup cooked` is one item. Only a quantity, or `a`/`an`, starts a new item after that. If those trailing words are followed by a quantity that would be their own amount after the food (the test above), they leave with it as a new item: `chicken 200g rice 1 cup` still gives "chicken, 200 g" and "rice, 1 cup", and `chicken 200g rice 1 cup cooked` gives "chicken, 200 g" and "rice cooked, 1 cup". The cost: `chicken 200g rice`, with no amount for the rice, is one item, "chicken rice", 200 g. A comma fixes it.
 3. **A second quantity before any food word** is part of the food name, together with a unit spelling right after it. `2 slices 12 grain bread` is 2 slices of "12 grain bread". Two exceptions:
    - a number right after a multiplier is part of the amount: in `2x 100g chicken breast` the 100 g is the amount;
-   - **compound amounts**: when the second quantity has a unit of the same kind as the first (mass and mass, or volume and volume), the two add up, expressed in the first unit. `1 lb 4 oz steak` is 1.25 lb (567 g); `1 cup 2 tbsp milk` is 1.125 cup. "oz" counts as mass here. Mixed kinds (`1 cup 4 oz milk`) do not add; the second amount becomes part of the food name as above.
-4. `x2` or `× 2` after food words is a multiplier of the current item, never a new item: `eggs x3`, `2 eggs x3` (6 eggs).
+   - **compound amounts**: when the second quantity has a unit of the same kind as the first (mass and mass, or volume and volume), the two add up, expressed in the first unit. `1 lb 4 oz steak` is 1.25 lb (567 g); `1 cup 2 tbsp milk` is 1.125 cup. "oz" counts as mass here. More amounts of the same kind can follow and add the same way: `1 cup 2 tbsp 1 tsp`. Each added amount must be a single plain number (digits, a decimal or a fraction) followed by a unit; word numbers are not added, so `one cup two tablespoons milk` is not a compound amount. Household and count units never add. Mixed kinds (`1 cup 4 oz milk`) do not add; the second amount becomes part of the food name as above.
+4. `x2` or `× 2` after food words is a multiplier of the current item, never a new item: `eggs x3`, `2 eggs x3` (6 eggs). So is a number directly followed by `x` at the end of the item: `eggs 2x` is read like `eggs x2` (3.2).
 5. **`a` and `an`.**
    - First, phrases that start with "a" are matched as a whole, longest first, before "a" is read on its own: the quantity phrases `a couple of`, `a couple`, `a dozen`, `a half`, `a quarter`, `a third`, the vague phrases `a bit of`, `a bit`, `a little`, `a few`, and the protected phrase `a la`. So `a couple of eggs` is 2 and `a few almonds` has no quantity.
    - Otherwise, when only filler words come before them in the item, they are the quantity 1. This reading wins over filler: `I had a banana` is 1 banana.
    - After food words they always start a new item, with quantity 1: `two eggs a banana` gives "two eggs" and "a banana".
+   - When nothing else is in the item, a lone `a` or `an` is not an amount, and the item gives no line (8.1). So `vitamin a` gives one item, "vitamin", and no second line.
    - Inside `a la` they are food words (2.3).
 
 Foods typed with no separator and no quantity between them stay one item: `eggs toast` is one item and will be a guess at best. This is a stated limit.
@@ -198,6 +213,7 @@ The dictated version `two eggs two slices of sourdough toast one tablespoon of b
 `2x`, `2 x`, `x2`, `x 2`, `2×`, `×2` (either case of x). A multiplier multiplies the item's quantity:
 
 - `eggs x3` = 3 eggs; `2x eggs` = 2 eggs;
+- `eggs 2x` = 2 eggs, the same as `eggs x2`: a number directly followed by `x` at the end of an item, after food words, is a trailing multiplier;
 - `2x 100g chicken breast` = 200 g;
 - `half usual breakfast x2` = 1 times the saved meal.
 
@@ -225,6 +241,7 @@ One line each:
 - Ordinals ("second helping").
 - A comma as decimal point (`1,5`).
 - Quantities written after units, such as `cups 2`.
+- Numbers too large to read as a finite value. Such a number is not a quantity; the parser never produces an infinite or not-a-number amount.
 
 ## 4. Units, sizes and grams
 
@@ -236,7 +253,7 @@ A word is read as a unit only **directly after a quantity** (or after a quantity
 
 | Unit | Accepted spellings | Grams |
 |---|---|---|
-| g | `g`, `gr`, `gm`, `gms`, `gram`, `grams`, `gramme`, `grammes` | 1 |
+| g | `g`, `G`, `gr`, `gm`, `gms`, `gram`, `grams`, `gramme`, `grammes` | 1 |
 | kg | `kg`, `kgs`, `kilo`, `kilos`, `kilogram`, `kilograms` | 1000 |
 | mg | `mg`, `milligram`, `milligrams` | 0.001 |
 | oz | `oz`, `ozs`, `ounce`, `ounces` | 28.349523125 (but see 4.2) |
@@ -256,11 +273,11 @@ A word is read as a unit only **directly after a quantity** (or after a quantity
 | ml | `ml`, `mls`, `milliliter`, `milliliters`, `millilitre`, `millilitres` | 1 |
 | l | `l`, `L`, `liter`, `liters`, `litre`, `litres`, `ltr` | 1000 |
 
-**Household and count units**: converted only through a portion of the food that names them (4.5). Each is accepted in the singular, with `s`, and with `es`:
+**Household and count units**: converted only through a portion of the food that names them (4.5). Each is accepted in the singular, with `s`, and with `es`. The `es` plural applies to whole words only; the abbreviations (`pc`, `svg`, `pkt`, `pkg`) take only `s`:
 
-`slice`, `piece` (also `pc`, `pcs`), `serving` (also `svg`), `portion`, `can`, `bottle`, `glass`, `mug`, `bowl`, `scoop`, `clove`, `container`, `packet` (also `pkt`), `package` (also `pkg`), `bag`, `box`, `carton`, `jar`, `pouch`, `tub`, `bar`, `stick`, `pat`, `strip`, `link`, `patty`, `fillet` (also `filet`), `wedge`, `leaf` (plural `leaves`), `stalk`, `spear`, `sprig`, `head`, `ear`, `handful`, `square`, `cube`, `sheet`, `shot`, `jigger`
+`slice`, `piece` (also `pc`, `pcs`), `serving` (also `svg`), `portion`, `can`, `bottle`, `glass`, `mug`, `bowl`, `scoop`, `clove`, `container`, `packet` (also `pkt`), `package` (also `pkg`), `bag`, `box`, `carton`, `jar`, `pouch`, `tub`, `bar`, `stick`, `pat`, `strip`, `link`, `patty` (plural `patties`), `fillet` (also `filet`), `wedge`, `leaf` (plural `leaves`), `stalk`, `spear`, `sprig`, `head`, `ear`, `handful`, `square`, `cube`, `sheet`, `shot`, `jigger`
 
-Upper and lower case are the same for every unit spelling longer than one letter. A period right after any unit spelling is part of it (`tbsp.`).
+Upper and lower case are the same for every unit spelling longer than one letter. A period right after a unit spelling is part of it (`tbsp.`) when the word is read as a unit there; see 2.2.
 
 ### 4.2 How ambiguous abbreviations are read
 
@@ -275,9 +292,11 @@ Upper and lower case are the same for every unit spelling longer than one letter
 | `oz` | **fluid ounce if the food has a "fl oz" portion, otherwise weight ounce** | 1,111 foods have a "fl oz" portion and they are almost all drinks, milks, juices, soups and liquid creams. Only one food has both a "fl oz" portion and a weight "oz" portion. So `8 oz milk` is 8 fl oz (244 g) and `3 oz salmon` is 85 g. See [open question 3](#142-open-questions). |
 | `fl oz` | fluid ounce | always |
 
+Local foods follow the same `oz` rule: a fluid ounce when the food has a "fl oz" portion, otherwise a weight ounce. On a local food measured in ml (base unit `ml`), a weight ounce cannot be converted (4.5), so the line gets the default amount (4.6).
+
 ### 4.3 Size words and "of"
 
-**Size words**: `small`, `medium`, `large`, `big` (read as large), `extra large`, `extra-large`, `xl`, `jumbo`, `mini`, `miniature`, `regular`, `thin`, `thick`.
+**Size words**: `small`, `medium`, `large`, `big` (read as large), `extra large`, `extra-large`, `xl` (read as "extra large", the wording portion labels use), `jumbo`, `mini`, `miniature`, `regular`, `thin`, `thick`.
 
 A size word is read as a size right after a quantity (`2 large eggs`), between a quantity and a unit (`3 thick slices toast`), or at the start of an item (`large coffee`, which means 1 large). It picks a portion (4.5). If the food has no portion with that size word, the size is ignored and the line keeps its state. FNDDS gives eggs one portion, "1 egg" = 50 g, which is a large egg, so `2 large eggs` is 100 g.
 
@@ -291,15 +310,16 @@ Each portion row has a label and a gram weight (`food_portion` for USDA foods, `
 <amount> <unit phrase>[, <modifier> | (<note>)]
 ```
 
-- **amount**: the leading number, such as `1`, `0.5`, `1 1/2`. Labels that do not start with a number ("Skin from 1 medium", 28 rows) are skipped. So are the 20 labels that start with a number range such as "1-3 ring", because their amount is unclear.
+- **amount**: the leading number, such as `1`, `0.5`, `1 1/2`. Labels that do not start with a number ("Skin from 1 medium", 28 rows) are skipped. So are the 20 labels that start with a number range such as "1-3 ring", because their amount is unclear. So is a label whose number touches a symbol (such as `1" wedge`), whose amount is zero or has a zero denominator, or whose gram weight is zero or less.
 - **unit phrase**: the words after the amount up to the first comma or opening bracket. In `1 cup, chopped` it is "cup"; in `1 medium or regular slice` it is "medium or regular slice"; in `1 cup (8 fl oz)` it is "cup".
-- **unit**: `fl oz` if the unit phrase starts with it; otherwise the first word of the unit phrase if it is in the unit tables in 4.1.
+- **unit**: `fl oz` if the unit phrase starts with it; otherwise the first word of the unit phrase if it is in the unit tables in 4.1. A one-letter word in a label is never a unit.
 - **plain**: a label with nothing after the unit phrase.
 - **grams per unit** = gram weight divided by amount.
+- **label shown**: when a default (4.6) or a portion is shown as a line's unit, the unit label is the portion's label after its leading amount, with a leading unit word written in its canonical form from 4.1. "1 tablespoon" gives "tbsp"; "1 cup, cooked" gives "cup, cooked"; "1 drink (12 fl oz)" gives "drink (12 fl oz)". Examples 14, 40, 41 and 73 print it this way.
 
 Portions are always taken in the stored order (`seq`), which is USDA's own order.
 
-The FNDDS row labeled exactly `Quantity not specified` is the food's **default portion** (see 4.6 and [section 13](#13-changes-needed-outside-this-document)). It is never offered as a unit in the correction sheet.
+The FNDDS row labeled exactly `Quantity not specified` is the food's **default portion** (see 4.6 and [section 13](#13-changes-needed-outside-this-document)). It is never offered as a unit in the correction sheet: the portion pickers hide every label that starts with "Quantity not specified". Only the exact label counts as the default portion. One food, the antipasto usda:2706874, has the labels "Quantity not specified, if appetizer" and "Quantity not specified, if main course in meal" instead; neither is the default portion, so its default comes from 4.6 rule 5 (1 cup, 115 g).
 
 ### 4.5 Typed unit to grams
 
@@ -312,19 +332,19 @@ For a food F and an item with quantity q:
 2. Otherwise, if F has any volume portion, take the first plain volume portion, or else the first volume portion, and scale by the milliliter ratio. Grams = q × (grams per unit of that portion) × ml(U) ÷ ml(its unit). This is how a food with only a cup portion gives tablespoons: FNDDS "Cream, half and half" has "1 cup" = 240 g and no tablespoon, so 1 tbsp = 240 × 14.787 ÷ 236.588 = 15 g.
 3. Otherwise the unit cannot be converted for this food.
 
-**`serving` or `portion`**: the first portion whose unit phrase contains "serving" (size word, then medium or regular, then first, as below). If there is none, one default portion (4.6). So "serving" always converts.
+**`serving` or `portion`**: the first portion whose unit phrase contains "serving" (size word, then medium or regular, then first, as below). If there is none, one default portion (4.6). So "serving" always converts. In that case the unit label stays as typed (`serving` or `portion`), the amount is not assumed, and each serving weighs what the 4.6 default weighs: without the recipe in example 74, `2 servings chili` is matched as 2 × 255 g (default) of "Chili, NFS".
 
 **Other household unit U**: the portions whose unit phrase contains U. Choose, in order: the first containing the typed size word; the first containing "medium" or "regular"; the first. Grams = q × its grams per unit. If there is no such portion, the unit cannot be converted. FNDDS "Bread, sour dough, toasted" has five slice portions; `2 slices` takes "1 medium or regular slice" (28 g), so 56 g.
 
 **No unit (a bare count, such as `2 eggs`)**: the first rule that finds a portion wins:
 1. a size word was typed: the first portion whose unit phrase contains it;
 2. a portion whose unit phrase is exactly one word, and that word (singular) is one of the item's food words after typo correction (5.2): "1 egg", "1 banana", "1 sandwich", "1 breast". So `2 bananna` uses "1 banana". "1 Bagel Thin" does not count for "bagel" because its unit phrase has two words;
-3. the default portion from FNDDS ("Quantity not specified");
+3. the default portion from FNDDS (only the exact label "Quantity not specified", so a local food goes on to rules 4 and 5);
 4. the first portion whose unit phrase contains "medium" or "regular";
 5. the first portion whose unit is neither mass nor volume ("1 large", "1 pat");
 6. otherwise the count cannot be converted.
 
-Grams = q × the grams per unit of that portion.
+Grams = q × the grams per unit of that portion. A bare count that found its portion by rule 1 has the size word as its unit label (`1 large`); one that found it by rules 2 to 5 has an empty unit label.
 
 **Local foods** (user foods, recipes, cached Open Food Facts products) use the same rules with their `food_portions` rows. Their base unit adds one rule: when it is `ml`, volume units convert directly and mass units do not; when it is `serving`, `serving` and bare counts convert directly and mass and volume units do not.
 
@@ -346,7 +366,7 @@ Used when no amount was typed, or the typed unit cannot be converted. The first 
 
 For a local food: learned amount, then 1 serving if the base unit is `serving`, then its first portion, then its base amount and unit.
 
-**How a default is stored and shown**: if a portion of the food has exactly the default's gram weight and an amount of 1, the line shows and stores quantity 1 with that portion's unit phrase ("1 small", 360 g, for coffee). Otherwise it shows and stores the grams ("20 g" for half and half).
+**How a default is stored and shown**: if a portion of the food has exactly the default's gram weight and an amount of 1, the line shows and stores quantity 1 with that portion's label as shown in 4.4 ("1 small", 360 g, for coffee). Likewise, when a default rule picks a portion whose amount is 1, the line shows quantity 1 of that portion ("1 drink (12 fl oz)" in example 73). Otherwise it shows and stores the amount in the food's base unit: grams ("20 g" for half and half), or `ml` for a local food measured by volume. A learned amount (rule 1) is shown with the quantity and unit label that were learned, as example 52 prints it ("2 slice (learned)").
 
 For typed items, amounts are not copied from past logs. Only an explicit amount correction is remembered (section 7). Added lines are different: a recent or frequent chip uses the amount last logged for that food, because the user picked that food on purpose ([9.3](#93-added-lines)).
 
@@ -359,7 +379,7 @@ When the meal is saved, each line (typed or added) becomes one `meal_entries` ro
 | `food_ref`, `food_name` | the matched food and its name at the time |
 | `position` | the line's order on screen: added lines first, in the order added, then typed lines in text order (9.3) |
 | `quantity` | the typed quantity, after multipliers (or the default's quantity) |
-| `unit_label` | the canonical unit (`g`, `oz`, `fl oz`, `tbsp`, `cup`, `slice`, ...), or the size word used as a unit (`large`), or the default portion's unit phrase (`small`), or an empty string for a bare count |
+| `unit_label` | the canonical unit (`g`, `oz`, `fl oz`, `tbsp`, `cup`, `slice`, ...), or the size word used as a unit (`large`), or the default portion's label as shown in 4.4 (`small`, `cup, cooked`), or an empty string for a bare count (4.5) |
 | `base_quantity`, `base_unit` | grams and `g`; for a local food with base unit `ml` or `serving`, that amount and unit |
 
 `meal_entry_nutrients` gets every nutrient the food has, scaled to the amount: USDA values are per 100 g, so amount = value × grams ÷ 100. `meals.source_text` keeps the whole typed text.
@@ -380,27 +400,29 @@ The same steps are applied to typed food words and to food descriptions:
 
 1. Lower case. Accents removed (é becomes e). Apostrophes removed.
 2. Split into words made of letters, digits and `%`. Descriptions are also split into **segments** at commas and opening brackets.
-3. **Plurals**: words of 4 letters or more lose a plural ending, in this order:
+3. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box.
+4. **Synonyms** (5.3) are applied to typed text. This comes before filler words are removed, because "pb and j" needs its "and".
+5. **Filler words** are dropped from typed text: `a an the of and or with in on for to my i im had have ate eaten drank then also just made prepared topped plus about around approximately roughly`.
+6. **Plurals**: words of 4 letters or more lose a plural ending, in this order:
    - `sses` becomes `ss`
-   - `ies` becomes `y` (berries, berry)
+   - `ies` becomes `y` in a word of 5 letters or more (berries, berry); a word of exactly 4 letters only drops the `s` (pies, pie)
    - `oes` becomes `o` (potatoes, potato)
    - `ches`, `shes`, `xes`, `zes` lose `es` (sandwiches)
    - otherwise a final `s` is dropped, except after `ss`, `us` or `is` (hummus, asparagus and couscous stay whole)
-4. **Filler words** are dropped from typed text: `a an the of and or with in on for to my i im had have ate eaten drank then also just made prepared topped plus about around approximately roughly`.
-5. **Synonyms** (5.3) are applied to typed text before step 3.
-6. **Negation**: `without`, `w/o` and `no` and every word after them in the same item are left out of matching. `coffee without sugar` matches "coffee". The words stay in the text box.
+
+   A word of 5 letters or more that ends in `ie` also becomes the stem ending in `y`, so cookie and cookies meet at "cooky". Words of 4 letters or fewer that end in `ie` are unchanged (pie, brie). The stem is a matching key only and is never shown.
 
 **Word order does not matter.** Matching compares sets of words, so `rice and beans` finds "Beans and white rice", and `greek yogurt` finds "Yogurt, Greek, ...".
 
-**Joined words.** Each pair of neighboring words in one description segment is also indexed written together. FNDDS spells it "Bread, sour dough", so `sourdough` matches "sour" plus "dough".
+**Joined words.** Each pair of neighboring words in one description segment is also indexed written together, except inside a segment that starts with "NS as to" (5.4). FNDDS spells it "Bread, sour dough", so `sourdough` matches "sour" plus "dough".
 
-**Typos.** A typed word of 4 letters or more that is not in the index, and is not the start of any indexed word (so half-typed words are left alone), is replaced by the closest indexed word. The distance is Damerau-Levenshtein, where swapping two neighboring letters counts as 1. The limit is 1 for words of 4 to 7 letters and 2 for 8 letters or more. Ties go to the word used by more foods, then to alphabetical order. **A line where any word was corrected this way is always a guess.** Examples from the data: `bananna` becomes banana, `chiken` becomes chicken, `brocoli` becomes broccoli, `oatmeel` becomes oatmeal.
+**Typos.** A typed word of 4 letters or more that is not in the index, and is not the start of any indexed word (so half-typed words are left alone), is replaced by the closest indexed word. The joined word pairs are part of the index here, so a half-typed `sourdoug` is left alone as the start of "sourdough" and is not corrected to another word. The distance is Damerau-Levenshtein, where swapping two neighboring letters counts as 1. The limit is 1 for words of 4 to 7 letters and 2 for 8 letters or more. Ties go to the word used by more foods, then to alphabetical order. **A line where any word was corrected this way is always a guess.** Examples from the data: `bananna` becomes banana, `chiken` becomes chicken, `brocoli` becomes broccoli, `oatmeel` becomes oatmeal.
 
 There is no partial-word (prefix) matching. A half-typed word such as `sourd` matches nothing until it is finished, so lines do not flash odd foods while the user types. In the prototype, prefix matching turned `2 slices sourd` into "Sourdock, young leaves (Alaska Native)".
 
 ### 5.3 Synonyms
 
-A short list kept in code, applied to typed text before matching, longest phrase first. A row that maps a phrase to itself protects that phrase from the shorter rows (so "french toast" is not turned into "french bread toasted").
+A short list kept in code, applied to typed text before matching, longest phrase first. Synonyms are applied after negation and before filler words and plurals are removed (5.2). Because they come before plurals are removed, each listed singular also matches its plural: `donuts`, `burgers`. A row that maps a phrase to itself protects that phrase from the shorter rows (so "french toast" is not turned into "french bread toasted").
 
 | Typed | Matched as |
 |---|---|
@@ -433,9 +455,11 @@ The **query** is the item's food words after normalizing. Let n be the number of
 
 A food is a **candidate** if at least half of the query words, rounded up and at least 1, appear among its words (or its joined pairs). So a typed word found nowhere does not, on its own, make the item not found. `zorbo bar` (an unknown brand) matches "bar" only, half of its two words, and becomes a **guess** of "Breakfast bar, NFS" (1 bar by default, 43 g, 162 kcal). Whether such an item should be not found instead is [open question 11](#142-open-questions).
 
-For each candidate, count its **extra words**: description words that are not query words and are not covered by a joined pair. These do not count as extra:
+For each candidate, count its **extra words**: description words that are not query words and are not covered by a joined pair. Extra words are counted as distinct words, so a word that appears twice in a description counts once. These do not count as extra:
 - the neutral words `nfs ns as to or and with of in whole plain regular raw fresh brewed cooked include` (compared after plural removal, so "Includes" in a description is "include");
 - every word of a segment that starts with "NS as to" ("Coffee, NS as to type").
+
+These words stay in the index, so a query can still match them; they just never count as extra words. Joined pairs are not built inside a segment that starts with "NS as to".
 
 A food is **generic** if its description contains "NFS" or a segment starting with "NS as to". There are 509 such foods. They are USDA's own entries for "the person did not say which kind".
 
@@ -444,7 +468,7 @@ Candidates are sorted by these keys, in order:
 1. More query words matched.
 2. **The user's own food that fits** first. A food fits when every query word is in its name and the last word of its name (singular) is one of the query words. Only these local foods can fit: custom foods and recipes, and cached Open Food Facts products that the user has logged at least once. A product that was only scanned and never logged does not fit, so one scanned yogurt does not take over every later "yogurt". It is still a candidate, ranked by the other keys.
 3. Fewer extra words.
-4. More times logged by this user (count of `meal_entries` rows with this food ref).
+4. More times logged by this user (count of `meal_entries` rows with this food ref). The count is kept per food ref, for USDA and local foods alike.
 5. Generic before not generic.
 6. Source: local foods, then FNDDS, then SR Legacy, then Foundation.
 7. Shorter description.
@@ -466,7 +490,7 @@ The top candidate gives a **matched** line when all three are true:
 
 1. Every query word was found in the food's words or joined pairs, and no typo correction was used.
 2. The food has **no extra words**, or the user has logged this food before, or it is the user's own food that fits (key 2).
-3. Every candidate that ties with it on sort keys 1 to 5 has energy within 10% (or 5 kcal, whichever is larger) per 100 g of the top candidate. In other words, if equally good matches differ in calories, the choice is shown as a guess.
+3. Every candidate that ties with it on sort keys 1 to 5 has energy within 10% (or 5 kcal, whichever is larger) per 100 g of the top candidate. In other words, if equally good matches differ in calories, the choice is shown as a guess. A food with no energy value counts as no evidence of a difference.
 
 Otherwise the line is a **guess**. A guess still counts toward meal totals.
 
@@ -505,17 +529,17 @@ The last four are poor defaults. The "Guess" marker flags each one, and one corr
 
 ### 5.7 The search box in the correction sheet
 
-The search box uses the same normalizing and ranking on whatever the user types into it, with one difference: a food is listed if it matches at least one word. It shows the top 20. The plain LIKE search in `FoodReference.search` stays for the Data check screen only.
+The search box uses the same normalizing and ranking on whatever the user types into it, including synonyms, typo correction and the user's own foods, exactly as matching does. There is one difference: a food is listed if it matches at least one word. It shows the top 20. The plain LIKE search in `FoodReference.search` stays for the Data check screen only.
 
 ## 6. Aliases and saved meals
 
 ### 6.1 Recognizing a name
 
-After an item's amount is read, its remaining text is compared with:
+After an item's amount is read, its food words (with leading filler words dropped, 2.6 rule 1) are compared with:
 1. every alias phrase (`aliases.phrase`);
 2. every saved meal name (`saved_meals.name`).
 
-Both sides are compared as: lower case, accents and punctuation removed, words separated by single spaces. There is no stemming and no filler-word removal, so "my" counts. The match must be exact. `usual breakfast` matches an alias "Usual breakfast"; `usual breakfasts` does not. Exact matching is what keeps expansions from happening by accident.
+Both sides are compared as: lower case, accents and punctuation removed, words separated by single spaces. There is no stemming and no other filler-word removal, and a word inside the user's own name is never filler (2.3), so "my" counts: `I had my oatmeal` matches an alias "my oatmeal", and `I had usual breakfast` matches "usual breakfast". The match must be exact. `usual breakfast` matches an alias "Usual breakfast"; `usual breakfasts` does not. Exact matching is what keeps expansions from happening by accident.
 
 Names that contain "and", "with" or a number word are protected phrases (2.3), so they reach this step whole.
 
@@ -548,8 +572,8 @@ A saved meal or alias beats every food, including a learned match and an exact U
 ### 7.1 The key
 
 A learned match is stored under the item's **learned key**:
-1. normalize the food words as in 5.2 steps 1 to 4 (no synonyms, size words already removed by the amount step);
-2. stem the words;
+1. take the item's food words (size words already removed by the amount step), lower case them and split them into words, and remove filler words, as in 5.2 steps 1, 2 and 5. The negation cut (step 3) and the synonym table (step 4) are not applied to the key;
+2. stem the words (5.2 step 6);
 3. sort them alphabetically;
 4. join with single spaces.
 
@@ -612,7 +636,7 @@ Two more markers describe where a food came from rather than a state:
 
 A line can carry "Guess" and "Assumed" together, or "Your pick" and "Assumed". Precedence for the single state name used in prose and tests: not found, then alias or saved meal, then guess, then amount assumed, then matched.
 
-An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`.
+An item made only of filler words ("I had") produces no line. Its text stays in the box and in `meals.source_text`. The same goes for any item with neither food words nor an amount: a vague word alone (`some`), or a lone `a` or `an`, which on its own is not an amount (2.6 rule 5). So `vitamin a` gives one line, for "vitamin". An item that has an amount but no food words is still not found, as in the table above and example 61.
 
 ### 8.2 Not by color alone
 
@@ -639,7 +663,7 @@ For a line that has a food:
 - **Candidates**: the current pick first, marked as chosen, then up to **7 others** in ranking order (5.4), skipping the current food. The list scrolls. Each row shows the food name, its dataset or "My food", and kcal for the line's amount. Added lines have no typed text to rank, so they show only the current food here.
 - **A note under the list**: "Your pick is remembered when you save the meal." (For added lines and saved meal items, which are never learned, the note is left out.)
 - **Search box**: below the list, as in 5.7.
-- **Amount**: a quantity field and a unit picker. The picker lists g, oz, the food's portions (except "Quantity not specified"), and the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion.
+- **Amount**: a quantity field and a unit picker. The picker lists g, oz, the food's portions (except any whose label starts with "Quantity not specified"), and the volume units the food can convert (tsp, tbsp, cup, fl oz, ml) when it has any volume portion.
 - **Forget this match**: only when a learned match produced the line (7.4).
 - **Remove from meal**: for a typed line, deletes the item's text from the box; for an added line, deletes the line.
 
@@ -667,7 +691,7 @@ The parser runs again on **every** change to the text, with no debounce. The spe
 
 ### 9.1 Keeping a correction attached
 
-Each typed line remembers the span of text it came from, and, when the user picked a food in the sheet, a **sticky correction** (the chosen food ref). After every text change:
+Each typed line remembers the span of text it came from, and, when the user picked a food in the sheet, a **sticky correction** (the chosen food ref). A span is a pair of UTF-16 indexes into the text exactly as typed, before any clean-up (2.1). After every text change:
 
 1. Find the changed region: the longest common start and the longest common end of the old and new text.
 2. Items wholly before the region keep their correction. Items wholly after it keep theirs, with spans shifted by the change in length.
@@ -712,7 +736,7 @@ Rules:
 
 ### 10.1 Grammar
 
-ISO 14977 style EBNF: `|` is a choice, `[ ]` optional, `{ }` zero or more, `(* *)` a comment. Words match without regard to case unless the token lists say otherwise. The grammar describes the text after the clean-up in 2.1, so `&`, `w/` and `w/o` never appear in it. EBNF cannot express protected phrases (2.3) or where a quantity starts a new item (2.6); the rules in sections 2 to 4 decide those.
+ISO 14977 style EBNF: `|` is a choice, `[ ]` optional, `{ }` zero or more, `(* *)` a comment. Words match without regard to case unless the token lists say otherwise. The grammar describes the text after the clean-up in 2.1, so `&`, `w/` and `w/o` never appear in it. A token with no letter or digit that no rule below uses is ignored (2.1). EBNF cannot express protected phrases (2.3) or where a quantity starts a new item (2.6); the rules in sections 2 to 4 decide those.
 
 ```ebnf
 meal          = chunk , { hard_sep , chunk } ;
@@ -722,18 +746,23 @@ soft_sep      = "and" | "with" ;                  (* "&" and "w/" were replaced 
 piece         = item , { item } ;                 (* split by rule 2.6 *)
 
 item          = { lead_filler } , [ amount ] , { lead_filler } , food , [ post_amount ] , [ negation ]
-              | { lead_filler } , amount ;        (* no food words: not found *)
+              | { lead_filler } , amount ;        (* no food words: not found. A vague word or a
+                                                     lone "a" alone is no amount and gives no line: 8.1 *)
 lead_filler   = filler - ( "a" | "an" ) ;         (* "a" before any food word is the quantity 1 *)
 
 amount        = [ lead_mult ] , measure , [ trail_mult ] ;
-measure       = quantity , [ size ] , [ unit , [ unit_half | unit_add ] ] , [ "of" ]
+measure       = quantity , [ size ] , [ unit , [ unit_half | unit_add , { unit_add } ] ] , [ "of" ]
               | size , [ unit ] , [ "of" ]          (* "large coffee" means 1 large *)
               | unit , "of"                       (* "cup of coffee" means 1 cup *)
               | vague , [ "of" ] ;                (* no quantity *)
 unit_half     = "and" , ( "a" | "one" ) , "half" ;  (* "a cup and a half" *)
-unit_add      = number , unit ;                   (* same kind as the first unit: "1 lb 4 oz", rule 2.6.3 *)
-post_amount   = quantity , [ unit ] , [ trail_mult ]   (* only where rule 2.6.2 allows *)
-              | trail_mult ;
+unit_add      = number , unit ;                   (* same kind as the first unit, never a household or
+                                                     count unit: "1 lb 4 oz", "1 cup 2 tbsp 1 tsp", rule 2.6.3 *)
+post_amount   = quantity , [ unit ] , [ trail_mult ] , { trail_word }
+                                                  (* only where rule 2.6.2 allows *)
+              | trail_mult
+              | number , ( "x" | "×" ) ;          (* "eggs 2x": only at the end of the item, rule 3.2 *)
+trail_word    = food_word | mid_filler ;          (* "chicken breast 6 oz grilled": rule 2.6.2 *)
 lead_mult     = number , ( "x" | "×" ) ;
 trail_mult    = ( "x" | "×" ) , number ;
 
@@ -791,7 +820,8 @@ negation      = ( "without" | "no" ) , { any_token } ;
 | protected phrases | the list in 2.3, plus the user's names |
 | synonyms | the table in 5.3 |
 | title abbreviations | dr mr mrs ms st jr sr vs |
-| `SENTENCE_END` | a `.` followed by a space or the end of text, not right after a unit spelling or a title abbreviation, and not part of a number |
+| `SENTENCE_END` | a `.` followed by a space or the end of text, not right after a word read as a unit (2.2), `fl` or a title abbreviation, and not part of a number |
+| symbol tokens (ignored) | a token with no letter or digit, such as `-`, `/`, `%` or `×` alone, that no quantity rule has used; never a food word (2.1) |
 
 ## 11. Worked examples
 
@@ -801,12 +831,12 @@ negation      = ( "without" | "no" ) , { any_token } ;
 - **Columns.** Each line shows the state, the food reference and name, the amount, the grams and the kcal.
 - **Exactness.** A test passes when:
   - the number of lines is the same;
-  - each line's state and food ref are the same;
-  - grams are within 0.05;
-  - kcal is within 0.5, computed as energy (1008) per 100 g × grams ÷ 100.
+  - each line's state and food ref are the same. A saved meal header line has no food ref; it is compared by its state, name, multiplier and kcal subtotal. When an example lists no item lines under a header (example 50), only the header is compared (state, name, multiplier), and its items are not counted in the number of lines;
+  - grams are within 0.05, where the example gives grams;
+  - kcal is within 0.5, where the example gives kcal, computed as energy (1008) per 100 g × grams ÷ 100. A local food measured in servings has no grams, so its kcal is compared directly.
 - **Reference data.** The examples assume the bundled data plus the FNDDS "Quantity not specified" portions, which the proposed build change in [section 13](#13-changes-needed-outside-this-document) keeps. Every amount that comes from that portion is marked "(default)". Amounts from the other default rules name the rule, for example "(default rule 4)".
 
-Saved meal fixtures for examples 47 to 49:
+Saved meal fixtures for examples 47 to 50:
 - **"Usual breakfast"**, alias "usual breakfast":
   - 2 egg, usda:2707153, 100 g, 176 kcal;
   - 1 slice, usda:2707647, 28 g, 83.7 kcal.
@@ -956,7 +986,7 @@ Phase 3 changes no code. Everything below is for Phase 4.
 - keep that row in `food_portion` with its label unchanged;
 - no table or column changes;
 - the data version changes on its own because the file contents change;
-- the Data check screen and the portion pickers must hide that label.
+- the Data check screen and the portion pickers must hide that label. The pickers hide every portion label that starts with "Quantity not specified", which also covers the antipasto food's two longer labels (4.4).
 
 Without it, defaults fall back to rules 3 to 6 of 4.6, which give worse amounts for drinks. For example, coffee would default to "1 medium" (480 g) instead of 360 g, and every example marked "(default)" in section 11 would change. This is [open question 4](#142-open-questions).
 
@@ -1048,3 +1078,29 @@ Each has two or more reasonable readings. The recommendation is listed first.
     - **(a) Recommended:** a user food comes first when it contains every typed word and the last word of its name was typed. "Turkey chili" wins for `chili`; "Peanut butter cookies" does not win for `butter`. This applies to custom foods and recipes, and to scanned Open Food Facts products only once the user has logged them, so a product that was merely scanned does not take over a common word like "yogurt".
     - (b) User foods always come first when they contain every typed word. This is simpler, but `butter` would give the cookies, and once they are logged that would even be a confident match.
     - (c) No special treatment. `2 servings chili` would then give "Chili, NFS", because the user's "Turkey chili" has the extra word "turkey".
+
+### 14.3 Clarified during the build
+
+In these places the document was silent or two of its rules disagreed. The lead settled them on 2026-11-13 while building the parser, and they are written into the sections named. None changes a worked example. Bart can overrule any of them. Only the ones a user would notice are listed.
+
+- Leading filler is dropped whether or not an amount was typed, but never from the user's own names: `I had my oatmeal` finds the alias "my oatmeal" (2.3, 2.6 rule 1, 6.1).
+- A period after a unit word ends the sentence unless the word is read as a unit there: `I ate a candy bar. Coffee with milk.` is two sentences (2.2).
+- A product name with a size in it, such as "Coca-Cola 330ml", does not stop `330ml milk` being read as 330 ml of milk (2.1, 2.3).
+- `xl` is read as "extra large" (4.3).
+- `G` means grams, `patties` is the plural of patty, and abbreviations such as `pc` take only `s` (4.1).
+- `eggs 2x` is read like `eggs x2` (2.6 rule 4, 3.2).
+- Compound amounts can chain (`1 cup 2 tbsp 1 tsp`), but only with plain numbers, not word numbers (2.6 rule 3).
+- Stray punctuation such as a lone `-` is ignored and never becomes a food word (2.1).
+- Straight apostrophes are removed like curly ones, and `2-percent milk` is 2% milk, not a quantity of 2, because a hyphen between a digit and a letter becomes a space (2.1).
+- An item with neither food words nor an amount, such as `some` or a lone `a`, gives no line, so `vitamin a` gives one line; an amount with no food is still not found (2.6 rule 5, 8.1).
+- `2 large cups and a half milk` is read like `2 cups and a half milk` (2.4).
+- The plural rule for words ending in "ie" and "ies": berries and berry meet, pies becomes pie, cookie and cookies meet (5.2 step 6).
+- Synonyms also match plurals, such as `donuts` and `burgers` (5.3).
+- The search box in the correction sheet uses synonyms, typo correction and the user's own foods, as matching does (5.7).
+- The unit shown for a default or a portion is the portion's label without its amount ("tbsp", "cup, cooked") (4.4, 4.6).
+- Typed "serving" on a food with no serving portion keeps the unit as typed, is not marked "Assumed", and weighs what the default weighs (4.5).
+- A bare count shows the size word as its unit only when a portion with that size was found (4.5).
+- `oz` on a user food is a fluid ounce when the food has a "fl oz" portion; otherwise it is a weight ounce, and on a food measured in ml it falls back to the default amount (4.2).
+- The antipasto food gets 1 cup as its default, because its two "Quantity not specified" labels are not the exact default label (4.4).
+- The portion pickers hide every label that starts with "Quantity not specified" (4.4, 8.3, 13).
+- A learned match's key leaves out the negation cut and synonyms, so `coffee without sugar` and `coffee` have different keys (7.1).
