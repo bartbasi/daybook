@@ -1,0 +1,147 @@
+// Daybook. Copyright 2026 Play, Inc.
+// Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
+
+import 'tokens.dart';
+
+/// A range of characters in the text the user typed: [start] included, [end]
+/// not. Always an index into the original text, not the cleaned text.
+class Span {
+  const Span(this.start, this.end);
+
+  final int start;
+  final int end;
+
+  @override
+  bool operator ==(Object other) =>
+      other is Span && other.start == start && other.end == end;
+
+  @override
+  int get hashCode => Object.hash(start, end);
+
+  @override
+  String toString() => 'Span($start, $end)';
+}
+
+/// An item that has been split out of the text and had its amount read, but is
+/// not yet matched to a food (grammar 2.2 to 2.7, 3 and 4.1 to 4.3).
+class ItemDraft {
+  const ItemDraft({
+    required this.span,
+    required this.foodText,
+    required this.hasFoodWords,
+    this.quantity,
+    this.multiplier,
+    this.isRange = false,
+    this.unit,
+    this.size,
+    this.amountSpans = const [],
+  });
+
+  /// Where the whole item came from in the typed text.
+  final Span span;
+
+  /// The item's words that are not part of its amount, in order, joined by
+  /// single spaces. Filler words are kept (the alias match of 6.1 needs "my"),
+  /// except filler that comes before the amount. Case is as typed.
+  final String foodText;
+
+  /// True when at least one word of [foodText] is not a filler word. An item
+  /// with an amount and no food words is "not found" (8.1).
+  final bool hasFoodWords;
+
+  /// The quantity after any multiplier, or null when none was typed (the
+  /// default amount applies). A size word or a unit followed by "of" with no
+  /// number is 1. A range gives its midpoint. A multiplier alone is the
+  /// quantity.
+  final double? quantity;
+
+  /// The multiplier (`x3`, `2x`) when one was typed. Already in [quantity].
+  final double? multiplier;
+
+  /// True when [quantity] is the midpoint of a range (the "Assumed" marker).
+  final bool isRange;
+
+  /// The unit as typed, if any. For `oz` the caller decides between weight and
+  /// fluid ounces (4.2).
+  final UnitDef? unit;
+
+  /// The size word, normalized (`big` is `large`), or null.
+  final String? size;
+
+  /// The parts of the text that make up the amount: quantity, size, unit and
+  /// multipliers. Adjacent parts are merged. Later tasks use this to rewrite
+  /// only the amount in the text (8.3).
+  final List<Span> amountSpans;
+
+  /// Whether an amount was typed at all.
+  bool get hasAmount => quantity != null;
+
+  @override
+  String toString() =>
+      'ItemDraft(span: $span, food: "$foodText", '
+      'foodWords: $hasFoodWords, quantity: $quantity, multiplier: $multiplier, '
+      'range: $isRange, unit: ${unit?.label}, size: $size, '
+      'amountSpans: $amountSpans)';
+}
+
+/// The state of a line (grammar 8.1). Precedence for the single name used in
+/// prose and tests: notFound, aliasOrSavedMeal, guess, amountAssumed, matched.
+enum LineState { matched, guess, amountAssumed, notFound, aliasOrSavedMeal }
+
+/// Markers a line can carry (8.1, 8.2). A line can carry several, for example
+/// Guess and Assumed.
+enum Marker { guess, assumed, yourPick, scanned }
+
+/// One line of a meal, typed or added (8.1, 9.3). Later tasks fill in the food,
+/// grams and nutrients; the splitting and amount steps fill [span] and the
+/// typed quantity and unit.
+class Line {
+  const Line({
+    required this.state,
+    this.foodRef,
+    this.foodName,
+    this.quantity,
+    this.unitLabel,
+    this.baseQuantity,
+    this.baseUnit,
+    this.nutrients = const {},
+    this.markers = const {},
+    this.learnedKey,
+    this.span,
+    this.multiplier,
+    this.items = const [],
+  });
+
+  final LineState state;
+
+  /// `usda:<fdc id>` or `local:<id>`. Null when not found.
+  final String? foodRef;
+
+  /// The food's name at the time, or the saved meal's name for a header line.
+  final String? foodName;
+
+  /// What is stored in `meal_entries` (4.7): the quantity after multipliers and
+  /// its unit label (empty string for a bare count).
+  final double? quantity;
+  final String? unitLabel;
+
+  /// The amount in grams and `g`, or the base amount and unit of a local food.
+  final double? baseQuantity;
+  final String? baseUnit;
+
+  /// Nutrient id (USDA ids) to the amount for this line, already scaled.
+  final Map<int, double> nutrients;
+
+  final Set<Marker> markers;
+
+  /// The key of 7.1 for a line made from typed text.
+  final String? learnedKey;
+
+  /// Where the line came from in the typed text. Null for added lines.
+  final Span? span;
+
+  /// For a saved meal header (state aliasOrSavedMeal): the multiplier (6.4),
+  /// and below it the item lines. Both are unused on other lines.
+  final double? multiplier;
+  final List<Line> items;
+}
