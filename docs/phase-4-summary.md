@@ -44,6 +44,10 @@ Each is the recommended option from the plan's open questions, or a small call m
 14. **The unit picker in the correction sheet offers only what can be typed.** Changing an amount there rewrites the text, and some portion names cannot be typed back ("drink (12 fl oz)"). The picker lists grams, ounces and the portions that read back as the same thing, and every rewrite is checked before it is applied.
 15. **Aliases are stored as you typed them.** They are compared on the fly, so a later change to the comparison rules cannot make saved aliases stop working. A test also pins the keys the app stores for learned corrections: after release, changing one means migrating stored data.
 16. **The speed tests run in their own CI step.** Run beside the rest of the suite they failed once from machine load alone. The budgets are unchanged.
+17. **Editing a logged meal has no Undo.** Saving an edit replaces the meal's lines, and the earlier version is not kept. Deleting a whole meal, and saving a new one, both offer Undo. Say if you want Undo after an edit too; it needs a little more in the data layer.
+18. **Undo of a saved meal keeps what the app learned from it.** If you corrected "toast" to a bread, saved, then tapped Undo, the meal is removed but the correction is still remembered.
+19. **Home lists each meal's foods by the first word of their names** ("Egg, Bread, Butter, Coffee, Cream"). The wireframe showed the words as typed; a stored line keeps the food's name, not the typed words.
+20. **A count with no unit is shown as "2, 100 g".** Some wireframe frames showed "2 egg, 100 g"; the grammar gives a count no unit word.
 
 ## Open questions from the plan: answered
 
@@ -108,6 +112,10 @@ Two more behaviors to know about:
 - "coffee, black" reads "black" as a second food and guesses black beans. "black coffee" is fine.
 - "kiwis" and other plurals of words ending in "i" ("zucchinis", "martinis") are not reduced to the singular, because of an exception meant for words like "basis". They still find the food through typo correction, as a guess.
 - A word that is spelled right but is not in the USDA data can be "corrected" into another food as a guess: "skyr" becomes a Skor toffee bar.
+
+## Known gaps to decide later
+
+- **Text typed in the food box is lost if Android kills the app in the background** (for example after switching to another app for a while). The text is kept through folding, rotation and a failed save, and closing the screen offers Undo, but it is not written to disk until Save. Saving a draft when the app is paused would cover it.
 
 ## Not finished
 
