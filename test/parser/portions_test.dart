@@ -146,9 +146,37 @@ void main() {
       expect(_p('1/2 cup', 120).gramsPerUnit, 240);
       expect(_p('4 oz', 113.4).gramsPerUnit, closeTo(28.35, 1e-9));
     });
-    test('4.4 a negative weight is not usable', () {
-      expect(readPortion('1 cup', -1), isNull);
-    });
+    test(
+      '4.4 a weight that is not above zero or not finite is not usable (R29)',
+      () {
+        expect(readPortion('1 cup', -1), isNull);
+        expect(readPortion('1 cup', 0), isNull);
+        expect(readPortion('1 cup', double.nan), isNull);
+        expect(readPortion('1 cup', double.infinity), isNull);
+        final ps = Portions.read([
+          ('1 cup', 0),
+          ('1 slice', double.nan),
+          ('1 egg', 50),
+          ('Quantity not specified', 0),
+        ]);
+        expect(ps.usable.map((p) => p.label), ['1 egg']);
+        expect(ps.defaultPortion, isNull, reason: 'R29 default row weight');
+        expect(
+          Portions.read([('Quantity not specified', double.nan)])
+              .defaultPortion,
+          isNull,
+        );
+      },
+    );
+    test(
+      '4.1 abbreviations take s only, not es (same table as amount.dart)',
+      () {
+        expect(_p('2 pkgs').unit?.label, 'package');
+        expect(_p('2 pkges').unit, isNull);
+        expect(_p('2 pcs').unit?.label, 'piece');
+        expect(_p('2 boxes').unit?.label, 'box');
+      },
+    );
   });
 
   group('4.4 what a line shows as the unit (4.7)', () {

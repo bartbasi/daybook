@@ -12,6 +12,7 @@ import 'dart:io';
 import 'package:daybook/data/food_reference.dart';
 import 'package:daybook/parser/grams.dart';
 import 'package:daybook/parser/line.dart';
+import 'package:daybook/parser/normalize.dart';
 import 'package:daybook/parser/portions.dart';
 import 'package:daybook/parser/split.dart';
 import 'package:daybook/parser/tokens.dart';
@@ -1269,6 +1270,80 @@ void main() {
     );
   });
 
+  group('4.6 which portion a default shows (R25)', () {
+    test(
+      '4.6 R25 the portion the rule picked, not an equal weight earlier',
+      () {
+        final f = _usda([('1 cup', 89), ('1 leek', 89)]);
+        _amount(
+          '4.6 R25 picked portion',
+          defaultAmount(f),
+          base: 89,
+          quantity: 1,
+          label: 'leek',
+          via: AmountRule.defaultNonMeasure,
+        );
+      },
+    );
+    test(
+      '4.6 R25 a picked portion of amount 22 shows the first 1 of that weight',
+      () {
+        final f = _usda([('22 chips', 28.35), ('1 oz', 28.35)]);
+        _amount(
+          '4.6 R25 chips',
+          defaultAmount(f),
+          base: 28.35,
+          quantity: 1,
+          label: 'oz',
+          via: AmountRule.defaultNonMeasure,
+        );
+      },
+    );
+    test('4.6 R25 otherwise grams in the base unit', () {
+      final f = _usda([('22 chips', 28.35), ('1 cup', 100)]);
+      _amount(
+        '4.6 R25 grams',
+        defaultAmount(f),
+        base: 28.35,
+        quantity: 28.35,
+        label: 'g',
+      );
+    });
+  });
+
+  group('4.7 a local food with an unusable base amount (R30)', () {
+    for (final bad in [0.0, -1.0, double.nan, double.infinity]) {
+      test('no infinite or NaN values for base amount $bad', () {
+        final f = PortionFood.local(
+          baseUnit: 'g',
+          baseAmount: bad,
+          portions: const [],
+          nutrients: {1008: 100},
+        );
+        expect(scaleNutrients(f, 50), isEmpty, reason: 'R30 scaling');
+        for (final r in [
+          defaultAmount(f),
+          resolveAmount(_item(), f),
+          resolveAmount(_item(q: 2, unit: 'cup'), f),
+          resolveAmount(_item(q: 3, unit: 'g'), f),
+        ]) {
+          expect(r.baseQuantity.isFinite, isTrue, reason: 'R30 $r');
+          expect(r.quantity.isFinite, isTrue, reason: 'R30 $r');
+        }
+      });
+    }
+    test('a zero or negative base amount on a serving food', () {
+      final f = PortionFood.local(
+        baseUnit: 'serving',
+        baseAmount: 0,
+        portions: const [],
+        nutrients: {1008: 100},
+      );
+      expect(scaleNutrients(f, 2), isEmpty);
+      expect(resolveAmount(_item(q: 2, unit: 'serving'), f).baseQuantity, 2);
+    });
+  });
+
   group('real bundled database', () {
     late Directory dir;
     late FoodReference ref;
@@ -1417,17 +1492,65 @@ void main() {
       final r = resolveAmount(_item(q: 2), f, foodWords: ['egg']);
       expect(scaleNutrients(f, r.baseQuantity)[1008], closeTo(176, 0.5));
     });
+    test('4.5 count 2: plural words meet their portion (2 cookies)', () {
+      // foodWords are the normalized query words, as the matcher gives them.
+      final puertoRican = food(2707992);
+      _amount(
+        '4.5 count 2 cookies, default 38 g',
+        convertAmount(
+          _item(q: 2),
+          puertoRican,
+          foodWords: queryWords('cookies'),
+        ),
+        base: 38,
+        via: AmountRule.countFoodWord,
+      );
+      _amount(
+        '4.5 count 2 fig bars',
+        convertAmount(
+          _item(q: 2),
+          food(172721),
+          foodWords: queryWords('cookies'),
+        ),
+        base: 32,
+        via: AmountRule.countFoodWord,
+      );
+      _amount(
+        '4.5 count 2 brownies',
+        convertAmount(
+          _item(q: 2),
+          food(174949),
+          foodWords: queryWords('brownies'),
+        ),
+        base: 48,
+        via: AmountRule.countFoodWord,
+      );
+      _amount(
+        '4.5 count 2 pies',
+        convertAmount(_item(q: 2), food(167522), foodWords: queryWords('pies')),
+        base: 2274,
+        via: AmountRule.countFoodWord,
+      );
+    });
+    test('4.6 the leek default shows the portion the rule picked', () {
+      _amount(
+        '4.6 R25 leek',
+        defaultAmount(food(169246)),
+        base: 89,
+        quantity: 1,
+        label: 'leek',
+      );
+    });
 
     group('11.2 worked examples: the amount of each line', () {
       // Examples where the typed text does not split into one item per
       // expected line (saved meals and not found lines have no amount here).
       const skipped = {47, 48, 49, 50, 59, 60, 61, 62, 63};
-      final typos = {'bananna': 'banana'};
 
-      List<String> wordsOf(String text) => [
-        for (final w in text.toLowerCase().split(RegExp(r'[^a-z0-9%]+')))
-          if (w.isNotEmpty) typos[w] ?? w,
-      ];
+      // What the real caller passes: the normalized query words, with the typo
+      // of example 42 already corrected.
+      List<String> wordsOf(String text) =>
+          queryWords(text.replaceAll('bananna', 'banana'));
 
       void check(
         WorkedExample ex,

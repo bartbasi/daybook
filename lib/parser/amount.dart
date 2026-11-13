@@ -111,6 +111,14 @@ bool isUnitSpelling(String lower) {
       lower == 'fl';
 }
 
+/// The unit that a lower case word, or `fl oz` and its other two word
+/// spellings, spells (4.1), or null. One-letter spellings are left out: they
+/// count only directly after a number. Used to read portion labels (4.4).
+UnitDef? unitForWord(String lower) {
+  _build();
+  return _unitByWord[lower] ?? _multiWordUnits[lower];
+}
+
 String? _w(List<Tok> t, int i) =>
     (i < 0 || i >= t.length || t[i].prot) ? null : t[i].text.toLowerCase();
 

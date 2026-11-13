@@ -7,6 +7,7 @@
 // amount in the food's base unit, not always grams. Pure Dart: this file does
 // not import the database code, so the callers map their rows to pairs.
 
+import 'amount.dart';
 import 'tokens.dart';
 
 /// The FNDDS portion used as the default amount (grammar 4.4). The same text
@@ -127,6 +128,7 @@ class Portions {
     for (final (label, grams) in rows) {
       final trimmed = label.trim();
       if (trimmed == defaultPortionText) {
+        if (!_goodWeight(grams)) continue;
         def ??= Portion(
           label: trimmed,
           grams: grams,
@@ -156,11 +158,11 @@ final _flOzRe = RegExp(r'^fl\.?\s*oz\b\.?', caseSensitive: false);
 /// Reads one portion label. Null when the label does not start with a number
 /// followed by a space or the end (`Skin from 1 medium`, `1-3 ring thin
 /// pretzel`, `Quantity not specified, if appetizer`), when the amount is zero
-/// or has a zero denominator, or when the weight is below zero.
+/// or has a zero denominator, or when the weight is not finite and above zero.
 Portion? readPortion(String label, double grams) {
   final text = label.trim();
   final m = _amountRe.firstMatch(text);
-  if (m == null || grams < 0) return null;
+  if (m == null || !_goodWeight(grams)) return null;
   final amount = _amountOf(m.group(1)!);
   if (amount == null || amount <= 0) return null;
   final rest = text.substring(m.end).trim();
@@ -220,35 +222,5 @@ List<String> wordsOf(String s) => [
     if (w.isNotEmpty) w,
 ];
 
-Map<String, UnitDef>? _units;
-
-/// The unit a lower case word spells, or null. Reads the tables of 4.1 for
-/// spellings longer than one letter (a single letter in a label is not a
-/// unit). `fl oz` is found by that exact text. The household and count units
-/// come with `s` and `es`.
-UnitDef? unitForWord(String word) {
-  final map = _units ??= _buildUnits();
-  return map[word];
-}
-
-Map<String, UnitDef> _buildUnits() {
-  final map = <String, UnitDef>{};
-  for (final e in unitTable) {
-    for (final s in e.spellings) {
-      if (s.length < 2) continue;
-      map[s.toLowerCase().replaceAll('.', '').replaceAll(RegExp(r'\s+'), ' ')] =
-          e.def;
-    }
-  }
-  for (final (label, extras) in householdUnits) {
-    final def = UnitDef(label, UnitKind.count, 0);
-    for (final s in [label, ...extras]) {
-      map[s] = def;
-      map['${s}s'] = def;
-      map['${s}es'] = def;
-    }
-    final irregular = householdIrregularPlurals[label];
-    if (irregular != null) map[irregular] = def;
-  }
-  return map;
-}
+/// A weight must be finite and above zero (R29).
+bool _goodWeight(double grams) => grams.isFinite && grams > 0;

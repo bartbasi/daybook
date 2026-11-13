@@ -6,7 +6,9 @@
 // (4.7) and nutrient scaling. The food is given; matching text to a food is
 // another task. Pure Dart.
 
+import 'amount.dart';
 import 'line.dart';
+import 'normalize.dart';
 import 'portions.dart';
 import 'tokens.dart';
 
@@ -163,15 +165,19 @@ class PortionFood {
 /// The nutrients of a line: each nutrient the food lists, scaled to
 /// [baseQuantity] of its base unit (USDA values are per 100 g, so value times
 /// grams divided by 100). Not rounded. A nutrient the food does not list is
-/// absent, never zero.
+/// absent, never zero. A food whose base amount is not finite and above zero
+/// gives an empty map, never infinite or NaN values.
 Map<int, double> scaleNutrients(PortionFood food, double baseQuantity) => {
-  for (final e in food.nutrients.entries)
-    e.key: e.value * baseQuantity / food.baseAmount,
+  if (_goodBase(food))
+    for (final e in food.nutrients.entries)
+      e.key: e.value * baseQuantity / food.baseAmount,
 };
 
 /// The amount of a line (4.5 and 4.6): the typed amount when there is one and
 /// it converts for [food], otherwise the default amount. [foodWords] are the
-/// item's food words after typo correction, used for the bare count rule 2.
+/// normalized query words after typo correction, as `FoodMatch.words` gives
+/// them; they are used for the bare count rule 2 and compared by their
+/// singular (`stem` in normalize.dart) on both sides.
 /// [learned] is the learned amount for the item's key, if any (4.6 rule 1).
 AmountResult resolveAmount(
   ItemDraft draft,
@@ -198,7 +204,7 @@ AmountResult? convertAmount(
   final q = draft.quantity;
   if (q == null) return null;
   final c = _convert(food, q, draft.unit, draft.size, foodWords);
-  if (c == null) return null;
+  if (c == null || !c.base.isFinite) return null;
   return AmountResult(
     quantity: q,
     unitLabel: c.unitLabel,
@@ -406,10 +412,10 @@ _Conv? _bareCount(
     }
   }
   // 2. A one word unit phrase that is one of the food words.
-  final stems = {for (final w in foodWords) _stem(w.toLowerCase())};
+  final stems = {for (final w in foodWords) stem(w.toLowerCase())};
   for (final p in usable) {
     final words = p.phraseWords;
-    if (words.length == 1 && stems.contains(_stem(words.first))) {
+    if (words.length == 1 && stems.contains(stem(words.first))) {
       return hit(p, AmountRule.countFoodWord);
     }
   }
@@ -491,9 +497,20 @@ _Default _defaultOf(PortionFood f) {
   final usable = f.portions.usable;
 
   _Default fromPortion(Portion p, AmountRule rule) {
-    // A portion of amount 1 with exactly this weight is shown as quantity 1
-    // with its unit phrase; otherwise the grams are shown.
+    // R25: a picked portion of amount 1 is shown as quantity 1 of it. The
+    // "Quantity not specified" row is no portion to show. Otherwise the first
+    // portion of amount 1 with exactly this weight is shown; otherwise the
+    // grams in the base unit.
     final g = p.grams;
+    if (p.amount == 1 && !identical(p, f.portions.defaultPortion)) {
+      return (
+        quantity: 1,
+        unitLabel: p.unitLabel,
+        base: g,
+        rule: rule,
+        portion: p,
+      );
+    }
     for (final u in usable) {
       if (u.amount == 1 && (u.grams - g).abs() < 1e-9) {
         return (
@@ -527,10 +544,11 @@ _Default _defaultOf(PortionFood f) {
     if (usable.isNotEmpty) {
       return fromPortion(usable.first, AmountRule.defaultFirstPortion);
     }
+    final base = _goodBase(f) ? f.baseAmount : 100.0;
     return (
-      quantity: f.baseAmount,
+      quantity: base,
       unitLabel: f.baseUnit,
-      base: f.baseAmount,
+      base: base,
       rule: AmountRule.defaultBase,
       portion: null,
     );
@@ -556,25 +574,5 @@ _Default _defaultOf(PortionFood f) {
   );
 }
 
-// Words.
-
-/// The plural rules of 5.2 step 3, so `eggs` and `egg` compare equal.
-String _stem(String w) {
-  if (w.length < 4) return w;
-  if (w.endsWith('sses')) return '${w.substring(0, w.length - 4)}ss';
-  if (w.endsWith('ies')) return '${w.substring(0, w.length - 3)}y';
-  if (w.endsWith('oes')) return w.substring(0, w.length - 2);
-  if (w.endsWith('ches') ||
-      w.endsWith('shes') ||
-      w.endsWith('xes') ||
-      w.endsWith('zes')) {
-    return w.substring(0, w.length - 2);
-  }
-  if (w.endsWith('s') &&
-      !w.endsWith('ss') &&
-      !w.endsWith('us') &&
-      !w.endsWith('is')) {
-    return w.substring(0, w.length - 1);
-  }
-  return w;
-}
+/// A food's base amount must be finite and above zero to scale anything.
+bool _goodBase(PortionFood f) => f.baseAmount.isFinite && f.baseAmount > 0;
