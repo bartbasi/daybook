@@ -179,7 +179,7 @@ About screen text:
 
 ## FDA Daily Values
 
-Primary source: 21 CFR 101.9(c)(8)(iv) (reference daily intakes and Daily Reference Values) and 21 CFR 101.9(c)(9), as amended by the 2016 final rule (81 FR 33742), at https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9
+Primary source: 21 CFR 101.9(c)(8)(iv) (Reference Daily Intakes for vitamins and minerals) and (c)(9) (Daily Reference Values), as set by the 2016 Nutrition Facts label final rule, at https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9
 
 Used for: the default goal of each tracked nutrient that has a Daily Value, for adults and children 4 years and over. The values are in `Nutrients.dailyValues` in `lib/data/nutrients.dart`. Total sugars and trans fat have no Daily Value, so they get no default goal.
 
