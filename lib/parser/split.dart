@@ -490,6 +490,9 @@ ItemDraft? _build(_Item it, int end, List<Tok> t, CleanText clean) {
     size: it.size,
     amountSpans: amountSpans,
     negationProtected: protectedNegation,
+    foodStart: food.isEmpty
+        ? null
+        : clean.originalSpan(food.first.start, food.first.end).start,
     matchText: protectedNegation
         ? food
               .sublist(0, cut < 0 ? food.length : cut)

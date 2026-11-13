@@ -57,32 +57,84 @@ class SnapshotRequest extends WorkerRequest {
   final UserSnapshotData data;
 }
 
-/// A pick for the typed line with this span. Answered with a [ParseResult].
+/// Starts a new opening of the food entry screen: text, picks and the item
+/// cache are cleared; the index and the snapshot stay. Answered with a
+/// [ParseResult] with no lines.
+class ResetRequest extends WorkerRequest {
+  const ResetRequest(super.id);
+}
+
+/// A pick for the typed line with this span. [text] is the text the span came
+/// from: if the worker's text is not that, nothing is done. Answered with an
+/// [ActionResult].
 class PickRequest extends WorkerRequest {
-  const PickRequest(super.id, this.line, this.foodRef, this.marker);
+  const PickRequest(super.id, this.text, this.line, this.foodRef, this.marker);
+  final String text;
   final Span line;
   final String foodRef;
   final Marker marker;
 }
 
-/// Drops the pick of the line with this span. Answered with a [ParseResult].
+/// Drops the pick of the line with this span, for the same [text] rule.
+/// Answered with an [ActionResult].
 class ClearPickRequest extends WorkerRequest {
-  const ClearPickRequest(super.id, this.line);
+  const ClearPickRequest(super.id, this.text, this.line);
+  final String text;
   final Span line;
 }
 
-/// The correction sheet's candidates for a line. Answered with an
+/// The correction sheet's candidates for a line, for the same [text] rule (a
+/// text that is not the worker's gives none). Answered with an
 /// [AlternativesResult].
 class AlternativesRequest extends WorkerRequest {
-  const AlternativesRequest(super.id, this.line);
+  const AlternativesRequest(super.id, this.text, this.line);
+  final String text;
   final Span line;
 }
 
-/// The correction sheet's search box. Answered with a [SearchResult].
+/// The correction sheet's search box. [forText] and [forLine] name the line the
+/// energy is worked out for; with a [forText] that is not the worker's text the
+/// energy is left out. Answered with a [SearchResult].
 class SearchRequest extends WorkerRequest {
-  const SearchRequest(super.id, this.text, this.forLine);
+  const SearchRequest(super.id, this.text, this.forText, this.forLine);
   final String text;
+  final String? forText;
   final Span? forLine;
+}
+
+/// The unit picker for a line (R42), for the same [text] rule. Answered with a
+/// [UnitChoicesResult].
+class UnitChoicesRequest extends WorkerRequest {
+  const UnitChoicesRequest(super.id, this.text, this.line);
+  final String text;
+  final Span line;
+}
+
+/// Rewrites the amount of a line in [text] (see
+/// [ParseSession.rewriteAmount]). Answered with a [RewriteResult].
+class RewriteRequest extends WorkerRequest {
+  const RewriteRequest(
+    super.id,
+    this.text,
+    this.cursor,
+    this.line,
+    this.quantity,
+    this.unit,
+  );
+  final String text;
+  final int cursor;
+  final Span line;
+  final double quantity;
+  final String unit;
+}
+
+/// The line for a food added without typing (see
+/// [ParseSession.lineForFood]). Answered with a [FoodLineResult].
+class FoodLineRequest extends WorkerRequest {
+  const FoodLineRequest(super.id, this.foodRef, this.quantity, this.unit);
+  final String foodRef;
+  final double? quantity;
+  final String unit;
 }
 
 sealed class WorkerReply {
@@ -112,6 +164,34 @@ class ParseResult extends WorkerReply {
   final int cursor;
   final int snapshotVersion;
   final List<Line> lines;
+}
+
+/// The answer to a pick or a clear: whether it was done, and the lines after.
+class ActionResult extends WorkerReply {
+  const ActionResult(this.id, this.applied, this.result);
+  final int id;
+  final bool applied;
+  final ParseResult result;
+}
+
+class UnitChoicesResult extends WorkerReply {
+  const UnitChoicesResult(this.id, this.choices);
+  final int id;
+  final List<UnitChoice> choices;
+}
+
+/// [text] is null when the rewrite was refused.
+class RewriteResult extends WorkerReply {
+  const RewriteResult(this.id, this.text, this.cursor);
+  final int id;
+  final String? text;
+  final int cursor;
+}
+
+class FoodLineResult extends WorkerReply {
+  const FoodLineResult(this.id, this.line);
+  final int id;
+  final Line? line;
 }
 
 class AlternativesResult extends WorkerReply {
@@ -192,16 +272,49 @@ class WorkerCore {
         case SnapshotRequest():
           session.setSnapshot(UserSnapshot.from(r.data));
           return _result(r.id);
+        case ResetRequest():
+          session.reset();
+          return _result(r.id);
         case PickRequest():
-          session.pickFood(r.line, r.foodRef, marker: r.marker);
-          return _result(r.id);
+          final ok =
+              session.text == r.text &&
+              session.pickFood(r.line, r.foodRef, marker: r.marker);
+          return ActionResult(r.id, ok, _result(r.id));
         case ClearPickRequest():
-          session.clearPick(r.line);
-          return _result(r.id);
+          final ok = session.text == r.text && session.clearPick(r.line);
+          return ActionResult(r.id, ok, _result(r.id));
         case AlternativesRequest():
-          return AlternativesResult(r.id, session.alternatives(r.line));
+          return AlternativesResult(
+            r.id,
+            session.text == r.text
+                ? session.alternatives(r.line)
+                : Alternatives.none,
+          );
         case SearchRequest():
-          return SearchResult(r.id, session.search(r.text, forLine: r.forLine));
+          final here = r.forText == session.text;
+          return SearchResult(
+            r.id,
+            session.search(r.text, forLine: here ? r.forLine : null),
+          );
+        case UnitChoicesRequest():
+          return UnitChoicesResult(
+            r.id,
+            session.text == r.text ? session.unitChoices(r.line) : const [],
+          );
+        case RewriteRequest():
+          final out = session.rewriteAmount(
+            r.text,
+            r.cursor,
+            r.line,
+            quantity: r.quantity,
+            unit: r.unit,
+          );
+          return RewriteResult(r.id, out?.text, out?.cursor ?? r.cursor);
+        case FoodLineRequest():
+          return FoodLineResult(
+            r.id,
+            session.lineForFood(r.foodRef, quantity: r.quantity, unit: r.unit),
+          );
       }
     } catch (e) {
       return WorkerFailure(r.id, FailureKind.request, e.runtimeType.toString());
@@ -241,8 +354,13 @@ abstract class WorkerLink {
 /// The main side's handle on the worker. One per open food entry screen, or
 /// one for the app.
 class ParseWorker {
-  /// A worker in its own isolate. Nothing runs until [start].
-  ParseWorker.isolate(String usdaPath) : _link = _IsolateLink(usdaPath);
+  /// A worker in its own isolate. Nothing runs until [start]. [killAfter] is how
+  /// long [dispose] waits for the worker to close its database and exit before
+  /// it stops the isolate.
+  ParseWorker.isolate(
+    String usdaPath, {
+    Duration killAfter = const Duration(seconds: 3),
+  }) : _link = _IsolateLink(usdaPath, killAfter);
 
   /// A worker on the calling isolate, for widget tests. [start] opens the
   /// file and builds the index at once, and every result is given before the
@@ -264,13 +382,14 @@ class ParseWorker {
   var _started = false;
   var _isReady = false;
   var _stopped = false;
+  WorkerFailure? _dead;
   var _dropped = 0;
 
   /// Called with each result that is newer than every result used before it.
   void Function(ParseResult result)? onResult;
 
-  /// Called with every failure that is not the answer to [alternatives] or
-  /// [search] (those fail their own future). Holds no user text.
+  /// Called with every failure that is not the answer to a question with its
+  /// own future (those fail the future). Holds no user text.
   void Function(WorkerFailure failure)? onFailure;
 
   /// True once the index is built.
@@ -292,7 +411,7 @@ class ParseWorker {
     _started = true;
     _link.start(_receive);
     for (final r in _beforeStart) {
-      _link.send(r);
+      if (_dead == null) _link.send(r);
     }
     _beforeStart.clear();
     return _ready.future;
@@ -306,28 +425,94 @@ class ParseWorker {
   int setSnapshot(UserSnapshotData data) =>
       _send((id) => SnapshotRequest(id, data));
 
-  /// Picks a food for the typed line with this span (see
-  /// [ParseSession.pickFood]). If the food is a new local one, send the
-  /// snapshot that holds it first.
-  int pick(Span line, String foodRef, {Marker marker = Marker.yourPick}) =>
-      _send((id) => PickRequest(id, line, foodRef, marker));
+  /// Starts a new opening of the food entry screen: the worker forgets the
+  /// text, the picks and the item cache, and keeps the index and the snapshot.
+  /// The screen sends this when it opens, so nothing survives from the
+  /// previous opening. Answered with an empty [ParseResult] like any request.
+  int reset() => _send(ResetRequest.new);
 
-  int clearPick(Span line) => _send((id) => ClearPickRequest(id, line));
+  /// Picks a food for the typed line with this span, which came from [text]
+  /// (see [ParseSession.pickFood]). Completes with false, and changes nothing,
+  /// when the worker's text is no longer [text], when there is no such line, or
+  /// when the food is unknown (if it is a new local food, send the snapshot
+  /// that holds it first). The lines after it also arrive through [onResult].
+  ///
+  /// A `Future<bool>` rather than a flag on the result, because the result can be
+  /// dropped as stale or replaced by a newer one, and the caller needs its own
+  /// answer.
+  Future<bool> pick(
+    String text,
+    Span line,
+    String foodRef, {
+    Marker marker = Marker.yourPick,
+  }) async {
+    final r = await _ask((id) => PickRequest(id, text, line, foodRef, marker));
+    return (r as ActionResult).applied;
+  }
 
-  /// The sheet's candidates for a line. Fails with a [WorkerFailure].
-  Future<Alternatives> alternatives(Span line) async {
-    final r = await _ask((id) => AlternativesRequest(id, line));
+  /// Drops the pick of a line, the same way as [pick].
+  Future<bool> clearPick(String text, Span line) async {
+    final r = await _ask((id) => ClearPickRequest(id, text, line));
+    return (r as ActionResult).applied;
+  }
+
+  /// The sheet's candidates for a line of [text]. Empty when the worker's text
+  /// is no longer [text]. Fails with a [WorkerFailure].
+  Future<Alternatives> alternatives(String text, Span line) async {
+    final r = await _ask((id) => AlternativesRequest(id, text, line));
     return (r as AlternativesResult).alternatives;
   }
 
-  /// The sheet's search box. Fails with a [WorkerFailure].
-  Future<List<FoodChoice>> search(String text, {Span? forLine}) async {
-    final r = await _ask((id) => SearchRequest(id, text, forLine));
+  /// The sheet's search box. With [forText] and [forLine] the energy of each
+  /// food is worked out for that line's amount. Fails with a [WorkerFailure].
+  Future<List<FoodChoice>> search(
+    String text, {
+    String? forText,
+    Span? forLine,
+  }) async {
+    final r = await _ask((id) => SearchRequest(id, text, forText, forLine));
     return (r as SearchResult).choices;
   }
 
+  /// The unit picker for a line of [text] (R42; see
+  /// [ParseSession.unitChoices]).
+  Future<List<UnitChoice>> unitChoices(String text, Span line) async {
+    final r = await _ask((id) => UnitChoicesRequest(id, text, line));
+    return (r as UnitChoicesResult).choices;
+  }
+
+  /// The new text for a changed amount (see [ParseSession.rewriteAmount]), or
+  /// null when it is refused. The worker's text is not changed: the screen puts
+  /// the text in the field and the usual [setText] follows.
+  Future<({String text, int cursor})?> rewriteAmount(
+    String text,
+    int cursor,
+    Span line, {
+    required double quantity,
+    String unit = '',
+  }) async {
+    final r = await _ask(
+      (id) => RewriteRequest(id, text, cursor, line, quantity, unit),
+    );
+    r as RewriteResult;
+    final t = r.text;
+    return t == null ? null : (text: t, cursor: r.cursor);
+  }
+
+  /// The line for a food added without typing (9.3; see
+  /// [ParseSession.lineForFood]), or null.
+  Future<Line?> foodLine(
+    String foodRef, {
+    double? quantity,
+    String unit = '',
+  }) async {
+    final r = await _ask((id) => FoodLineRequest(id, foodRef, quantity, unit));
+    return (r as FoodLineResult).line;
+  }
+
   /// Stops the worker and completes when it has stopped. Futures still waiting
-  /// for an answer fail.
+  /// for an answer fail. Nothing reaches [onResult] or [onFailure] after the
+  /// call.
   Future<void> dispose() async {
     if (_stopped) return;
     _stopped = true;
@@ -342,7 +527,8 @@ class ParseWorker {
     Completer<WorkerReply>? waiting,
   ]) {
     final id = _nextId++;
-    if (_stopped) return id;
+    // A stopped or dead worker answers nothing.
+    if (_stopped || _dead != null) return id;
     // Registered before sending: an inline worker answers inside the call.
     if (waiting != null) _pending[id] = waiting;
     final r = make(id);
@@ -360,6 +546,8 @@ class ParseWorker {
         const WorkerFailure(0, FailureKind.crashed, 'stopped'),
       );
     }
+    final dead = _dead;
+    if (dead != null) return Future.error(dead);
     final c = Completer<WorkerReply>();
     _send(make, c);
     return c.future;
@@ -374,25 +562,31 @@ class ParseWorker {
   }
 
   void _receive(WorkerReply reply) {
+    // After dispose nothing is passed on: the screen may be gone.
+    if (_stopped) return;
     switch (reply) {
       case ReadyReply():
         _isReady = true;
         if (!_ready.isCompleted) _ready.complete(true);
       case ParseResult():
-        // A result older than one already used is dropped, so a slow answer
-        // never replaces a newer one.
-        if (reply.id > _newest) {
-          _newest = reply.id;
-          onResult?.call(reply);
-        } else {
-          _dropped++;
-        }
+        _apply(reply);
+      case ActionResult():
+        _apply(reply.result);
+        _pending.remove(reply.id)?.complete(reply);
       case AlternativesResult():
         _pending.remove(reply.id)?.complete(reply);
       case SearchResult():
         _pending.remove(reply.id)?.complete(reply);
+      case UnitChoicesResult():
+        _pending.remove(reply.id)?.complete(reply);
+      case RewriteResult():
+        _pending.remove(reply.id)?.complete(reply);
+      case FoodLineResult():
+        _pending.remove(reply.id)?.complete(reply);
       case WorkerFailure():
         if (reply.kind != FailureKind.request) {
+          // The worker is not running: every later ask fails at once.
+          _dead = reply;
           _isReady = false;
           if (!_ready.isCompleted) _ready.complete(false);
           _fail(reply);
@@ -400,7 +594,18 @@ class ParseWorker {
           _pending.remove(reply.id)!.completeError(reply);
           return;
         }
-        if (!_stopped) onFailure?.call(reply);
+        onFailure?.call(reply);
+    }
+  }
+
+  // A result older than one already used is dropped, so a slow answer never
+  // replaces a newer one.
+  void _apply(ParseResult r) {
+    if (r.id > _newest) {
+      _newest = r.id;
+      onResult?.call(r);
+    } else {
+      _dropped++;
     }
   }
 }
@@ -445,9 +650,10 @@ class _InlineLink implements WorkerLink {
 const _shutdown = 'shutdown';
 
 class _IsolateLink implements WorkerLink {
-  _IsolateLink(this._path);
+  _IsolateLink(this._path, this._killAfter);
 
   final String _path;
+  final Duration _killAfter;
   final _early = <WorkerRequest>[];
   final _exited = Completer<void>();
   final _portArrived = Completer<void>();
@@ -535,7 +741,7 @@ class _IsolateLink implements WorkerLink {
       isolate?.kill(priority: Isolate.immediate);
     }
     await _exited.future.timeout(
-      const Duration(seconds: 3),
+      _killAfter,
       onTimeout: () {
         isolate?.kill(priority: Isolate.immediate);
         _in?.close();

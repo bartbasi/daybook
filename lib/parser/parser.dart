@@ -72,6 +72,16 @@ class SqliteUsdaFoods {
 /// (the statements then live until the database is closed).
 UsdaFoodLoader sqliteUsdaFoods(Database db) => SqliteUsdaFoods(db).call;
 
+/// True for a not found line that has the cursor in it: after its start, up to
+/// and including its end (grammar 9.2). Such a line is drawn as plain typing.
+bool underCursor(Line line, int cursor) {
+  final sp = line.span;
+  return line.state == LineState.notFound &&
+      sp != null &&
+      cursor > sp.start &&
+      cursor <= sp.end;
+}
+
 class Parser {
   Parser(this.usda, this.loadUsda);
 
@@ -81,17 +91,29 @@ class Parser {
 
   UserSnapshot? _rankerFor;
   Ranker? _ranker;
-  late final Map<String, String> _usdaNames = {
-    for (final f in usda.foods) f.ref: f.description,
+  late final Map<String, IndexFood> _usdaFoods = {
+    for (final f in usda.foods) f.ref: f,
   };
 
-  Ranker _rankerOf(UserSnapshot s) {
+  /// The ranker for [s], built once per snapshot and shared by parsing, the
+  /// correction sheet's candidates and its search.
+  Ranker rankerFor(UserSnapshot s) {
     if (!identical(_rankerFor, s)) {
       _ranker = Ranker(usda, user: s.index, history: s.history);
       _rankerFor = s;
     }
     return _ranker!;
   }
+
+  /// The portions and nutrients of the food [ref] (`usda:<id>` or
+  /// `local:<id>`) for [s], or null when there is no such food.
+  PortionFood? foodFor(String ref, UserSnapshot s) => _food(ref, s);
+
+  /// The name of the food [ref] for [s], or null.
+  String? nameFor(String ref, UserSnapshot s) => _name(ref, s);
+
+  /// The USDA index entry for [ref], or null (also for a local food).
+  IndexFood? usdaFood(String ref) => _usdaFoods[ref];
 
   /// The lines for [text], in screen order. A saved meal header carries its
   /// item lines in [Line.items]; on screen they follow it. [cursor] is an
@@ -106,12 +128,7 @@ class Parser {
     for (final d in splitItems(text, names: snapshot.names)) {
       var line = parseItem(d, snapshot);
       if (line == null) continue;
-      final sp = d.span;
-      if (line.state == LineState.notFound &&
-          cursor > sp.start &&
-          cursor <= sp.end) {
-        line = line.asPlain();
-      }
+      if (underCursor(line, cursor)) line = line.asPlain();
       out.add(line);
     }
     return out;
@@ -150,6 +167,7 @@ class Parser {
     var base = LineState.matched;
     List<String> words = const [];
     LearnedAmount? learnedAmount;
+    var fromLearned = false;
     final learned = key.isEmpty ? null : s.learned[key];
     if (learned != null) {
       final f = _food(learned.foodRef, s);
@@ -157,6 +175,7 @@ class Parser {
         ref = learned.foodRef;
         name = _name(learned.foodRef, s) ?? learned.foodName;
         food = f;
+        fromLearned = true;
         words = queryWords(d.foodText);
         final q = learned.quantity;
         if (q != null) {
@@ -165,7 +184,7 @@ class Parser {
       }
     }
     if (food == null) {
-      final m = _rankerOf(s).match(d.matchText, negation: !d.negationProtected);
+      final m = rankerFor(s).match(d.matchText, negation: !d.negationProtected);
       if (m.state == LineState.notFound || m.top == null) {
         // Every word was removed by the negation cut ("no sugar"): with an
         // amount it is not found (8.1), without one it gives no line (R36).
@@ -182,9 +201,67 @@ class Parser {
       words = m.words;
     }
 
-    final r = resolveAmount(d, food, foodWords: words, learned: learnedAmount);
+    return _finish(
+      d,
+      key: typedKey,
+      food: food,
+      ref: ref!,
+      name: name,
+      base: base,
+      words: words,
+      learned: learnedAmount,
+      fromLearned: fromLearned,
+    );
+  }
+
+  /// The line for item [d] when its food is [ref]: the item's own amount
+  /// worked out for that food (4.5, 4.6), the state matched, or amount assumed
+  /// when the amount falls back to a default, and [markers] added. This is the
+  /// tail of [parseItem]; a pick in the correction sheet uses it. A learned
+  /// amount is used only when the learned match is this food (7.2). Null when
+  /// there is no such food.
+  Line? lineFor(
+    ItemDraft d,
+    UserSnapshot s,
+    String ref, {
+    Set<Marker> markers = const {},
+  }) {
+    final food = _food(ref, s);
+    if (food == null) return null;
+    final key = learnedKey(d.foodText);
+    final learned = key.isEmpty ? null : s.learned[key];
+    final q = learned != null && learned.foodRef == ref
+        ? learned.quantity
+        : null;
+    return _finish(
+      d,
+      key: key.isEmpty ? null : key,
+      food: food,
+      ref: ref,
+      name: _name(ref, s) ?? ref,
+      base: LineState.matched,
+      words: readQuery(d.matchText, negation: !d.negationProtected).words,
+      learned: q == null ? null : LearnedAmount(q, learned!.unitLabel ?? ''),
+      extraMarkers: markers,
+    );
+  }
+
+  // From the amount onward (the shared end of parseItem and lineFor).
+  Line _finish(
+    ItemDraft d, {
+    required String? key,
+    required PortionFood food,
+    required String ref,
+    required String? name,
+    required LineState base,
+    required List<String> words,
+    required LearnedAmount? learned,
+    bool fromLearned = false,
+    Set<Marker> extraMarkers = const {},
+  }) {
+    final r = resolveAmount(d, food, foodWords: words, learned: learned);
     var state = base;
-    final markers = <Marker>{};
+    final markers = <Marker>{...extraMarkers};
     if (base == LineState.guess) markers.add(Marker.guess);
     if (r.assumed) {
       markers.add(Marker.assumed);
@@ -200,18 +277,20 @@ class Parser {
       baseUnit: r.baseUnit,
       nutrients: scaleNutrients(food, r.baseQuantity),
       markers: markers,
-      learnedKey: typedKey,
+      learnedKey: key,
       span: d.span,
       amountSpans: d.amountSpans,
       foodText: d.foodText,
+      fromLearnedMatch: fromLearned,
     );
   }
 
   PortionFood? _food(String ref, UserSnapshot s) =>
       ref.startsWith('local:') ? s.foods[ref]?.food : loadUsda(ref);
 
-  String? _name(String ref, UserSnapshot s) =>
-      ref.startsWith('local:') ? s.foods[ref]?.name : _usdaNames[ref];
+  String? _name(String ref, UserSnapshot s) => ref.startsWith('local:')
+      ? s.foods[ref]?.name
+      : _usdaFoods[ref]?.description;
 
   /// 6.1 and 6.2: the saved meal an item's text names, or null. Only a plain
   /// quantity, a multiplier, a range or the unit `serving` or `portion` may

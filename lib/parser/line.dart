@@ -37,6 +37,7 @@ class ItemDraft {
     this.amountSpans = const [],
     this.negationProtected = false,
     String? matchText,
+    this.foodStart,
   }) : matchText = matchText ?? foodText;
 
   /// Where the whole item came from in the typed text.
@@ -87,8 +88,31 @@ class ItemDraft {
   /// ice" is "no sugar cola".
   final String matchText;
 
+  /// Where the item's first food word starts in the typed text, after any
+  /// leading filler and any amount typed before it; null when there is no food
+  /// word. An amount that was not typed goes here (8.3), so that "I had toast"
+  /// becomes "I had 2 slice toast" and a name such as "my oatmeal" stays whole.
+  final int? foodStart;
+
   /// Whether an amount was typed at all.
   bool get hasAmount => quantity != null;
+
+  /// Everything the parser reads from the draft except where it sits in the
+  /// text ([span], [amountSpans], [foodStart]). Two drafts with the same key
+  /// parse to the same line (with another place in the text), so the key is
+  /// what a cache of parsed items must use. A new field that changes the parse
+  /// must be added here.
+  String get cacheKey => [
+    foodText,
+    matchText,
+    hasFoodWords,
+    quantity,
+    multiplier,
+    isRange,
+    unit?.label,
+    size,
+    negationProtected,
+  ].join('');
 
   @override
   String toString() =>
@@ -128,9 +152,15 @@ class Line {
     this.amountSpans = const [],
     this.foodText,
     this.plain = false,
+    this.fromLearnedMatch = false,
   });
 
   final LineState state;
+
+  /// True when the line's food came from a learned match (7.3), not from
+  /// ranking or a pick. The screen offers "Forget this match" for it, and
+  /// learning on Save (7.2) needs it.
+  final bool fromLearnedMatch;
 
   /// For a typed line: the item's food words as typed, for the not found
   /// sheet's search box (8.3).
@@ -142,8 +172,18 @@ class Line {
   final bool plain;
 
   /// The same line with [plain] set.
-  Line asPlain() => Line(
-    state: state,
+  Line asPlain() => copyWith(plain: true);
+
+  /// The same line with the given fields changed. A field given as null keeps
+  /// its value.
+  Line copyWith({
+    LineState? state,
+    Set<Marker>? markers,
+    Span? span,
+    List<Span>? amountSpans,
+    bool? plain,
+  }) => Line(
+    state: state ?? this.state,
     foodRef: foodRef,
     foodName: foodName,
     quantity: quantity,
@@ -151,15 +191,16 @@ class Line {
     baseQuantity: baseQuantity,
     baseUnit: baseUnit,
     nutrients: nutrients,
-    markers: markers,
+    markers: markers ?? this.markers,
     learnedKey: learnedKey,
-    span: span,
+    span: span ?? this.span,
     multiplier: multiplier,
     items: items,
     savedMealId: savedMealId,
-    amountSpans: amountSpans,
+    amountSpans: amountSpans ?? this.amountSpans,
     foodText: foodText,
-    plain: true,
+    plain: plain ?? this.plain,
+    fromLearnedMatch: fromLearnedMatch,
   );
 
   /// For a saved meal header: the id of the saved meal it expands.
