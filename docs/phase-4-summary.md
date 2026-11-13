@@ -54,6 +54,12 @@ Each is the recommended option from the plan's open questions, or a small call m
 24. **At double text size on the cover screen, with the keyboard up and an item not found, there is no room for the lines.** The top row, the text box and the "Fix 1 item" button stay on screen, and the lines come back when the keyboard goes down. Text is never shrunk to make room.
 25. **A food you pick for a line that was not typed (a logged meal being edited, a scan, a chip) is not marked "Your pick" and is not learned.** Learning is tied to the words you typed, and such a line has none.
 26. **When nothing matches in the correction sheet's search, the sentence saying so sits under the search box.** The wireframe had it above; at large text it pushed the box out of view.
+27. **The chips are two rows, not one.** The food entry wireframe draws whole meals ("Same as yesterday" and saved meals) in one row and recent and frequent foods in a second, each with its own label and each scrolling sideways. docs/design/speed-targets.md says "one row". The wireframe was followed. A row with nothing to show is left out.
+28. **"Same as yesterday" does not count as a use of a saved meal.** It copies yesterday's entries as a new meal and stores no saved meal with it, even when yesterday's meal came from one. So the order of the saved meal chips reflects only the times you logged a saved meal by its chip or its name. Say if a copy should count too.
+29. **The recent and frequent foods are from the 30 days up to today**, also when you are filling in an older day.
+30. **Closing the saved meal editor with unsaved changes drops them, with no question and no Undo.** The wireframes say nothing here, and the plan allows a confirmation only for Import. The food entry screen offers Undo for typed text; the editor does not. Say if it should.
+31. **A saved meal cannot be saved with no items.** The editor says "Add at least one item." To get rid of one, use Delete in its menu, which has Undo.
+32. **The saved meal editor has its own copy of the typing code from the food entry screen** (about 250 lines) so that the reviewed food screen did not have to be taken apart. The reviewer checked the copy against the same rules. Sharing the code is a clean-up for later, not a behavior change.
 
 ## Open questions from the plan: answered
 
