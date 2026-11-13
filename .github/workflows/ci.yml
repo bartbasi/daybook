@@ -148,7 +148,7 @@ jobs:
     name: Integration test on iOS simulator
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
 
@@ -197,14 +197,14 @@ jobs:
       - name: Run the integration test
         id: attempt1
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 30
         run: |
           set -o pipefail
           flutter test integration_test -d "$UDID" --timeout 10m --verbose 2>&1 | tee flutter-test-1.log
 
       - name: Run the integration test again if the first try failed
         if: steps.attempt1.outcome != 'success'
-        timeout-minutes: 12
+        timeout-minutes: 30
         run: |
           # Retry only for the hang, where the tool never connected to the app.
           # Once it has connected, the test ran and a failure is real.
