@@ -216,6 +216,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(MoreScreen), findsOneWidget);
     expect(find.text('Data check'), findsOneWidget);
+    // The saved meals row, with what is in it, leads to its own screen.
+    expect(find.text('Saved meals and aliases'), findsOneWidget);
+    expect(find.text('None yet'), findsOneWidget);
+    await tester.tap(find.text('Saved meals and aliases'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved meals'), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Data check'));
     // Not pumpAndSettle: the loading spinner never stops.
@@ -484,6 +493,11 @@ void main() {
       final row = tester.getSize(find.widgetWithText(ListTile, 'Data check'));
       expect(row.height, greaterThanOrEqualTo(48));
       expect(row.width, lessThanOrEqualTo(600));
+      final saved = tester.getSize(
+        find.widgetWithText(ListTile, 'Saved meals and aliases'),
+      );
+      expect(saved.height, greaterThanOrEqualTo(48));
+      expect(saved.width, lessThanOrEqualTo(600));
     });
   }
 

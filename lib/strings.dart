@@ -460,6 +460,93 @@ class S {
   static String savedMealCreated(String name) => 'Saved meal "$name" created.';
   static const cancel = 'Cancel';
 
+  // The chips row on the food screen (food-entry frame 1) and the message on
+  // Home when a whole-meal chip logs at once (frame 12).
+  static const chipsWholeLabel = 'Log a whole meal. Tap logs it now.';
+  static const chipsWholeLabelAdds = 'Tap adds its items';
+  static const chipsFoodLabel = 'Recent and frequent. Tap adds a line.';
+  static const chipSameAsYesterday = 'Same as yesterday';
+  static const chipSameAsYesterdayShort = 'same as yesterday';
+  static String chipYesterdaySub(String slot, int items, double? kcalValue) =>
+      '$slot, ${lineItems(items)}, ${kcal(kcalValue)}';
+  static String chipSavedSub(int items, double? kcalValue) =>
+      '${lineItems(items)}, ${kcal(kcalValue)}';
+  static String spokenWholeChip(
+    String name,
+    int items,
+    double? kcalValue,
+    bool logsNow,
+  ) =>
+      '${[name, '${lineItems(items)}${kcalValue == null ? '' : ', ${count(kcalValue.round())} calories'}'].join('. ')}. '
+      '${logsNow ? 'Double tap to log it now.' : 'Double tap to add its items.'}';
+  static String spokenFoodChip(String name, String amount, double? kcalValue) =>
+      '${[amount.isEmpty ? name : '$name, $amount', if (kcalValue != null) '${count(kcalValue.round())} calories'].join('. ')}. '
+      'Double tap to add a line.';
+  static const chipSavedMealGone = 'That saved meal is no longer there.';
+  static const chipsRowLabel = 'Meals and foods to add';
+  static String mealLogged(
+    String slot,
+    String what,
+    double? kcalValue, [
+    String? day,
+  ]) =>
+      '$slot logged${day == null ? '' : ' for $day'}: $what, '
+      '${kcalValue == null ? '-' : count(kcalValue.round())} kcal';
+
+  // Saved meals under More (saved-meals frames 1 and 2).
+  static const moreSavedMeals = 'Saved meals and aliases';
+  static const moreSavedMealsNone = 'None yet';
+  static String moreSavedMealsSummary(String first, int others) =>
+      others <= 0 ? first : '$first and $others more';
+  static const savedMealsTitle = 'Saved meals';
+  static const savedMealsNew = '+ New';
+  static const savedMealsNewLabel = 'New saved meal';
+  static const savedMealsHelpType =
+      "Type a saved meal's name, or one of its other names, in Food entry "
+      'and it expands to its items.';
+  static const savedMealsHelpMake =
+      'To save a meal you logged: open it from Home, then "Save as a saved '
+      'meal" in its menu.';
+  static String savedMealRowSub(int items, double? kcalValue) =>
+      '${lineItems(items)}, ${kcal(kcalValue)}';
+  static String savedMealAlsoTyped(List<String> names) =>
+      'Also typed as: ${names.join(', ')}';
+  static String savedMealRowLabel(
+    String name,
+    String sub,
+    String foods,
+    String also,
+  ) =>
+      '${[name, sub, if (foods.isNotEmpty) foods, if (also.isNotEmpty) also].join('. ')}. '
+      'Double tap to edit.';
+  static const savedMealEditNew = 'New saved meal';
+  static const savedMealOtherNames = 'Other names you can type';
+  static const savedMealNewName = 'New name';
+  static const savedMealAddName = '+ Add';
+  static String savedMealRemoveName(String name) => 'Remove the name $name';
+  static const savedMealItemsHeading = 'Items';
+  static const savedMealItemsEmpty = 'No items yet.';
+  static const savedMealBoxHint =
+      'Type to add items, the same way as Food entry';
+  static const savedMealBoxLabel = 'Items to add';
+  static const savedMealMenu = 'More options';
+  static const savedMealDelete = 'Delete saved meal';
+  static const savedMealNeedsItems = 'Add at least one item.';
+  static const savedMealAliasEmpty = 'Type a name to add.';
+  static String savedMealAliasInList(String p) =>
+      '"$p" is already in this list.';
+  static String savedMealAliasTaken(String p) =>
+      '"$p" is already used by another saved meal. Pick a different name.';
+  static const savedMealAliasBlank = 'A name was empty, so nothing was saved.';
+  static String savedMealSavedMsg(String name) => 'Saved meal "$name" saved.';
+  static String savedMealDeletedMsg(String name) =>
+      'Saved meal "$name" deleted.';
+  static const undoDeleteSavedMealFailed =
+      'Could not undo. The saved meal is still deleted.';
+  static const savedMealsLoadFailed = 'Could not read the saved meals.';
+  static const savedMealDeleteFailed =
+      'Could not delete. The saved meal is still there.';
+
   // Home: the meals.
   static const homeMeals = 'Meals';
   static const mealEmpty = 'Nothing yet. Tap to add.';

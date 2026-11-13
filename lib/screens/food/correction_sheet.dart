@@ -126,8 +126,6 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
     return q != null && q > 0 && b != null ? b / q : null;
   }
 
-  bool get _typedHeader => _kind == _Kind.header && _tap.added == null;
-
   /// A line whose sheet is about a span of the box's text.
   bool get _hasText => _tap.text != null;
 
@@ -391,8 +389,6 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
 
   Future<void> _done() async {
     if (_busy || _closed) return;
-    // An added saved meal has no text to put a multiplier in.
-    if (_kind == _Kind.header && !_typedHeader) return _pop();
     final ch = _amountChange();
     if (ch == null) return _pop();
     if (ch.bad) {
@@ -473,7 +469,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   }
 
   Widget _footer() {
-    final showDone = !_notFound && !(_kind == _Kind.header && !_typedHeader);
+    final showDone = !_notFound;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Wrap(
@@ -549,23 +545,21 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
   List<Widget> _headerBody(ThemeData theme) {
     return [
       const SizedBox(height: 12),
-      if (_typedHeader) ...[
-        SizedBox(
-          width: 160,
-          child: TextField(
-            controller: _qty,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _done(),
-            decoration: InputDecoration(
-              labelText: S.sheetMultiplier,
-              errorText: _qtyError,
-              border: const OutlineInputBorder(),
-            ),
+      SizedBox(
+        width: 160,
+        child: TextField(
+          controller: _qty,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _done(),
+          decoration: InputDecoration(
+            labelText: S.sheetMultiplier,
+            errorText: _qtyError,
+            border: const OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 8),
-      ],
+      ),
+      const SizedBox(height: 8),
       if (!_useFood)
         Align(
           alignment: Alignment.centerLeft,

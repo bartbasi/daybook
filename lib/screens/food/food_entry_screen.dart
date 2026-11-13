@@ -23,6 +23,7 @@ import '../weight/weight_sheet.dart';
 import 'confirm_bar.dart';
 import 'correction_sheet.dart';
 import 'food_line_tile.dart';
+import 'meal_chips.dart';
 
 // The one-screen food entry (food-entry.html, parser-grammar.md 8 and 9).
 //
@@ -38,8 +39,9 @@ import 'food_line_tile.dart';
 //   2.9  [FoodEntryScreenState.onLineTap] opens the correction sheet
 //        (correction_sheet.dart) for a [LineTap]; both a tap on a line and
 //        "Fix N items" end up there. The sheet asks this screen to act.
-//   2.10 [_chipsSeam] in the scroll area, under the box: the chips row. It adds
-//        lines with [FoodEntryScreenState.addLines].
+//   2.10 The chips row ([MealChips], first in the lines area, under the box).
+//        A whole-meal chip logs at once when the screen is empty, and otherwise
+//        adds lines with [FoodEntryScreenState.addLines].
 //   2.11 [_scanSeam] in the top bar: the Scan button, which also adds lines
 //        with [FoodEntryScreenState.addLines].
 //   3.2  [_leftTodaySeam] in the totals bar: the "left today" line.
@@ -48,11 +50,13 @@ import 'food_line_tile.dart';
 /// Shown from [line]; written from [stored] while it is untouched, so an
 /// untouched entry is saved exactly as it was, byte for byte.
 class AddedLine {
-  const AddedLine(this.line, {this.existingId, this.stored});
+  const AddedLine(this.line, {this.existingId, this.stored, this.savedMealId});
 
   /// A stored entry of a logged meal, drawn from its stored values (it is not
-  /// parsed again and not priced again).
-  factory AddedLine.fromEntry(StoredEntry e) {
+  /// parsed again and not priced again). With [copy] it is a new line made
+  /// from another meal's entry ("Same as yesterday"): it has no id of its own
+  /// to keep, so saving writes it as a new row.
+  factory AddedLine.fromEntry(StoredEntry e, {bool copy = false}) {
     final x = e.entry;
     return AddedLine(
       Line(
@@ -65,12 +69,47 @@ class AddedLine {
         baseUnit: x.baseUnit,
         nutrients: e.nutrients,
       ),
-      existingId: x.id,
-      stored: e.asInput(keepId: true),
+      existingId: copy ? null : x.id,
+      stored: e.asInput(keepId: !copy),
+    );
+  }
+
+  /// A saved meal chip tapped while there is text or a line: the saved meal
+  /// times [SavedMealExpansion.multiplier] as a header with its item lines
+  /// (grammar 6.4 and 9.3).
+  factory AddedLine.fromExpansion(SavedMealExpansion x) {
+    final items = [
+      for (final i in x.items)
+        Line(
+          state: LineState.matched,
+          foodRef: i.foodRef,
+          foodName: i.foodName,
+          quantity: i.quantity,
+          unitLabel: i.unitLabel,
+          baseQuantity: i.baseQuantity,
+          baseUnit: i.baseUnit,
+          nutrients: i.nutrients,
+        ),
+    ];
+    return AddedLine(
+      Line(
+        state: LineState.aliasOrSavedMeal,
+        foodName: x.name,
+        nutrients: sumNutrients(items.map((l) => l.nutrients)),
+        multiplier: x.multiplier,
+        items: items,
+        savedMealId: x.savedMealId,
+      ),
+      savedMealId: x.savedMealId,
     );
   }
 
   final Line line;
+
+  /// The saved meal this line came from: a saved meal chip, or one of its
+  /// items after the header was turned into its items. The meal is stored as
+  /// made from the first such saved meal in save order.
+  final int? savedMealId;
 
   /// The id of the stored entry this line came from, when editing a meal.
   final int? existingId;
@@ -133,7 +172,6 @@ class FoodDraft {
     required this.picks,
     required this.added,
     this.editingMealId,
-    this.savedMealId,
   });
 
   final String date;
@@ -145,10 +183,6 @@ class FoodDraft {
 
   /// Set when the screen was editing a logged meal.
   final int? editingMealId;
-
-  /// The saved meal whose items were made into added lines by a change to
-  /// one of them (the meal still counts as made from it).
-  final int? savedMealId;
 }
 
 /// What the screen hands back when it closes.
@@ -161,6 +195,15 @@ class FoodSaved extends FoodEntryResult {
   const FoodSaved(this.meal, {required this.edited});
   final StoredMeal meal;
   final bool edited;
+}
+
+/// A whole-meal chip logged [meal] at once (food-entry frame 12). [what] is
+/// what Home names in its message: the saved meal's name, or "same as
+/// yesterday".
+class FoodLogged extends FoodEntryResult {
+  const FoodLogged(this.meal, this.what);
+  final StoredMeal meal;
+  final String what;
 }
 
 /// The meal was deleted. [deleted] holds its rows for one Undo.
@@ -292,11 +335,9 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   // The correction sheet. [_changes] tells it that the box, the newest result
   // or the worker changed. [_addedChanged] is true once the user changed the
   // added lines of a logged meal being edited (it is then worth a draft).
-  // [_keptSavedMealId] is a saved meal whose items became added lines.
   var _sheetOpen = false;
   final _changes = _Signal();
   var _addedChanged = false;
-  int? _keptSavedMealId;
   final _currentKey = GlobalKey();
   String? _error;
 
@@ -315,7 +356,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     _slotId = d?.slotId ?? e?.meal.slotId ?? widget.slotId;
     _editingMealId = d?.editingMealId ?? e?.meal.id;
     _editingSlotName = d?.slotName ?? e?.slotName ?? '';
-    _keptSavedMealId = d?.savedMealId;
     _addedChanged = d?.editingMealId != null;
     _added = d != null
         ? [...d.added]
@@ -590,15 +630,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     for (final l in typed) ..._inputsFor(l, typed: true),
   ];
 
-  /// The first saved meal expanded in this meal, for `meals.saved_meal_id`.
+  /// The first saved meal in this meal, for `meals.saved_meal_id`, in save
+  /// order: added lines first (a chip, or a typed saved meal turned into its
+  /// items, in the order they were added), then typed lines.
   int? _savedMealId(List<Line> typed) {
-    for (final l in [for (final a in _added) a.line]) {
-      if (l.state == LineState.aliasOrSavedMeal && l.savedMealId != null) {
-        return l.savedMealId;
-      }
+    for (final a in _added) {
+      if (a.savedMealId != null) return a.savedMealId;
     }
-    // A saved meal turned into its items counts before one still typed.
-    if (_keptSavedMealId != null) return _keptSavedMealId;
     for (final l in typed) {
       if (l.state == LineState.aliasOrSavedMeal && l.savedMealId != null) {
         return l.savedMealId;
@@ -804,7 +842,10 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// (decision 22 in docs/phase-4-summary.md); on a refusal nothing changes.
   Future<List<AddedLine>?> _explode(LineTap tap) async {
     final header = tap.header!;
-    final fresh = [for (final i in header.items) AddedLine(i)];
+    final fresh = [
+      for (final i in header.items)
+        AddedLine(i, savedMealId: header.savedMealId),
+    ];
     if (tap.added != null) {
       final at = _added.indexWhere((a) => identical(a, tap.added));
       if (at < 0) {
@@ -817,7 +858,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
           ...fresh,
           ..._added.sublist(at + 1),
         ];
-        _keptSavedMealId ??= header.savedMealId;
         _addedChanged = true;
       });
       return fresh;
@@ -845,7 +885,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     _setText(out.text, out.cursor);
     setState(() {
       _added = [..._added, ...fresh];
-      _keptSavedMealId ??= header.savedMealId;
       _addedChanged = true;
     });
     return fresh;
@@ -875,12 +914,13 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       return false;
     }
     final id = target.existingId;
+    final fromSaved = target.savedMealId;
     setState(() {
       final list = [..._added];
       if (newLine == null) {
         list.removeAt(i);
       } else {
-        list[i] = AddedLine(newLine, existingId: id);
+        list[i] = AddedLine(newLine, existingId: id, savedMealId: fromSaved);
       }
       _added = list;
       _addedChanged = true;
@@ -966,8 +1006,51 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     _refused(S.foodSheetRefusedAmount);
   }
 
+  /// Grammar 6.4: the multiplier of an added saved meal. It has no text, so
+  /// the header's item lines are scaled and the header keeps its saved meal.
+  Future<void> _setAddedMultiplier(LineTap tap, double multiplier) async {
+    final at = _added.indexWhere((a) => identical(a, tap.added));
+    if (at < 0) return _stale();
+    final old = _added[at];
+    final header = old.line;
+    final f = multiplier / (header.multiplier ?? 1);
+    final items = [
+      for (final i in header.items)
+        Line(
+          state: i.state,
+          foodRef: i.foodRef,
+          foodName: i.foodName,
+          quantity: i.quantity! * f,
+          unitLabel: i.unitLabel,
+          baseQuantity: i.baseQuantity! * f,
+          baseUnit: i.baseUnit,
+          nutrients: {for (final e in i.nutrients.entries) e.key: e.value * f},
+          markers: i.markers,
+        ),
+    ];
+    setState(() {
+      _added = [..._added]
+        ..[at] = AddedLine(
+          Line(
+            state: LineState.aliasOrSavedMeal,
+            foodName: header.foodName,
+            nutrients: sumNutrients(items.map((l) => l.nutrients)),
+            markers: header.markers,
+            multiplier: multiplier,
+            items: items,
+            savedMealId: header.savedMealId,
+          ),
+          savedMealId: old.savedMealId,
+        );
+      _addedChanged = true;
+    });
+  }
+
   @override
   Future<void> sheetSetAmount(LineTap tap, List<AmountTry> tries) async {
+    if (tap.line.state == LineState.aliasOrSavedMeal && tap.added != null) {
+      return _setAddedMultiplier(tap, tries.first.quantity);
+    }
     if (_foodLevel(tap)) return _setAddedAmount(tap, tries);
     await _rewriteTyped(tap, tries);
   }
@@ -1033,6 +1116,122 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   @visibleForTesting
   ParseResult? get debugResult => _result;
 
+  // The chips row (task 2.10).
+
+  /// True while a whole-meal chip logs at once: no text, no lines, and not
+  /// editing a logged meal (food-entry frame 1).
+  bool get _logsNow =>
+      !_editing && _controller.text.trim().isEmpty && _added.isEmpty;
+
+  /// Logs a whole meal at once into the date and meal the chip was shown for,
+  /// through the same guarded write as Save. The flag is set before anything
+  /// is awaited, so a second tap, or a tap while a save is running, does
+  /// nothing. The screen closes and Home shows the message with Undo.
+  Future<void> _logNow(
+    Future<({List<MealLineInput> lines, int? savedMealId, String what})?>
+    Function()
+    choose,
+  ) async {
+    if (_busy || _closed) return;
+    final slotId = _slotId;
+    if (slotId == null) return;
+    final date = _date;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    var finished = false;
+    try {
+      final c = await choose();
+      if (c == null || !mounted || _closed) return;
+      final stored = await _guardedWrite(
+        () => _db.saveMeal(
+          now: _clock(),
+          localDate: date,
+          slotId: slotId,
+          lines: c.lines,
+          savedMealId: c.savedMealId,
+        ),
+      );
+      if (stored == null || !mounted) return;
+      finished = true;
+      _popSelf(FoodLogged(stored, c.what));
+    } finally {
+      if (!finished && mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _yesterdayChip(StoredMeal m) {
+    if (_busy || _closed) return;
+    if (_logsNow) {
+      unawaited(
+        _logNow(
+          () async => (
+            lines: [for (final e in m.entries) e.asInput()],
+            savedMealId: null,
+            what: S.chipSameAsYesterdayShort,
+          ),
+        ),
+      );
+    } else {
+      addLines([for (final e in m.entries) AddedLine.fromEntry(e, copy: true)]);
+    }
+  }
+
+  Future<void> _savedMealChip(SavedMealDetail meal) async {
+    if (_busy || _closed) return;
+    final id = meal.meal.id;
+    if (_logsNow) {
+      return _logNow(() async {
+        final x = await _guard(() => _db.expandSavedMeal(id));
+        if (x == null || x.items.isEmpty) {
+          if (mounted) _showNotice(const _Notice(S.chipSavedMealGone));
+          return null;
+        }
+        return (lines: x.items, savedMealId: x.savedMealId, what: x.name);
+      });
+    }
+    final x = await _guard(() => _db.expandSavedMeal(id));
+    if (!mounted || _busy || _closed) return;
+    if (x == null || x.items.isEmpty) {
+      return _showNotice(const _Notice(S.chipSavedMealGone));
+    }
+    addLines([AddedLine.fromExpansion(x)]);
+  }
+
+  /// A food chip always adds one line, at the amount last logged, priced by
+  /// the worker. The amount is refused if the food would only assume it; the
+  /// same weight is tried next, and then the food's usual amount with a line
+  /// that says so.
+  Future<void> _foodChip(RecentFood f) async {
+    if (_busy || _closed) return;
+    final priced = await _priceFood(
+      f.foodRef,
+      tries: [AmountTry(f.quantity, f.unitLabel)],
+      grams: f.baseUnit == 'g' ? f.baseQuantity : null,
+    );
+    if (!mounted || _busy || _closed) return;
+    if (priced == null) return _refused(S.foodSheetRefusedFood);
+    addLines([AddedLine(priced.line)]);
+    if (priced.reset) sheetNote(S.foodSheetAmountReset);
+  }
+
+  Widget _chips() {
+    final slotId = _slotId;
+    if (_editing || slotId == null || !_ready) return const SizedBox.shrink();
+    return MealChips(
+      db: _db,
+      date: _date,
+      slotId: slotId,
+      today: _clock().localDate,
+      logsNow: _logsNow,
+      enabled: !_busy,
+      onYesterday: _yesterdayChip,
+      onSavedMeal: (m) => unawaited(_savedMealChip(m)),
+      onFood: (f) => unawaited(_foodChip(f)),
+    );
+  }
+
   // Save.
 
   /// Rule 5: sends the text with no cursor, so that nothing counts as still
@@ -1049,6 +1248,22 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       return r;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// The one guarded write, for Save and for a whole-meal chip: [_writing] is
+  /// on for exactly the database write (the one time closing is refused), and
+  /// a failure leaves the screen as it was with the message of frame 11.
+  /// Null when the write failed.
+  Future<StoredMeal?> _guardedWrite(Future<StoredMeal> Function() write) async {
+    setState(() => _writing = true);
+    try {
+      return await write();
+    } catch (_) {
+      if (mounted) setState(() => _error = S.foodSaveFailed);
+      return null;
+    } finally {
+      if (mounted) setState(() => _writing = false);
     }
   }
 
@@ -1080,37 +1295,28 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       final inputs = _inputs(r.lines);
       if (inputs.isEmpty) return;
       final slotId = _slotId!;
-      final StoredMeal stored;
-      setState(() => _writing = true);
-      try {
-        final mealId = _editingMealId;
-        if (mealId != null) {
-          stored = await _db.editMeal(
-            mealId,
-            now: _clock(),
-            lines: inputs,
-            typedText: text,
-            localDate: _date,
-            slotId: slotId,
-            savedMealId: _savedMealId(r.lines),
-          );
-        } else {
-          stored = await _db.saveMeal(
-            now: _clock(),
-            localDate: _date,
-            slotId: slotId,
-            lines: inputs,
-            sourceText: text,
-            savedMealId: _savedMealId(r.lines),
-          );
-        }
-      } catch (_) {
-        if (mounted) setState(() => _error = S.foodSaveFailed);
-        return;
-      } finally {
-        if (mounted) setState(() => _writing = false);
-      }
-      if (!mounted) return;
+      final mealId = _editingMealId;
+      final stored = await _guardedWrite(
+        () => mealId != null
+            ? _db.editMeal(
+                mealId,
+                now: _clock(),
+                lines: inputs,
+                typedText: text,
+                localDate: _date,
+                slotId: slotId,
+                savedMealId: _savedMealId(r.lines),
+              )
+            : _db.saveMeal(
+                now: _clock(),
+                localDate: _date,
+                slotId: slotId,
+                lines: inputs,
+                sourceText: text,
+                savedMealId: _savedMealId(r.lines),
+              ),
+      );
+      if (stored == null || !mounted) return;
       finished = true;
       _popSelf(FoodSaved(stored, edited: _editing));
     } finally {
@@ -1180,7 +1386,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       picks: _picksNow(),
       added: _added,
       editingMealId: _editingMealId,
-      savedMealId: _keptSavedMealId,
     );
   }
 
@@ -1355,10 +1560,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
 
   /// A seam for task 2.11: the Scan button goes here, after the date.
   static const _scanSeam = SizedBox.shrink();
-
-  /// A seam for task 2.10: the chips row (Same as yesterday, saved meals,
-  /// recent foods) goes under the box.
-  static const _chipsSeam = SizedBox.shrink();
 
   /// A seam for task 3.2: the "left today" line goes under the totals.
   static const _leftTodaySeam = SizedBox.shrink();
@@ -1537,12 +1738,12 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _chips(),
           if (added.isNotEmpty) ...[
             _groupLabel(context, S.foodGroupAdded),
             for (var i = 0; i < added.length; i++) _addedTile(i),
           ],
           if (_handle == null && !_dead) const Text(S.foodLoading),
-          _chipsSeam,
           if (typed.isNotEmpty) ...[
             if (added.isNotEmpty) _groupLabel(context, S.foodGroupTyped),
             for (final l in typed) ..._typedTiles(l),

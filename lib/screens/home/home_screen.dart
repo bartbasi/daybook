@@ -190,6 +190,21 @@ class HomeScreenState extends State<HomeScreen> {
             failed: S.undoMealFailed,
           ),
         );
+      case FoodLogged(:final meal, :final what):
+        // A whole-meal chip wrote this meal (food-entry frame 12). Undo
+        // deletes it, once, like Undo of a save.
+        _showNotice(
+          _Notice(
+            () => S.mealLogged(
+              meal.slotName,
+              what,
+              meal.totals[Nutrients.energy],
+              _dayNamed(meal.meal.localDate),
+            ),
+            undo: () => db.deleteMeal(meal.meal.id),
+            failed: S.undoMealFailed,
+          ),
+        );
       case FoodDeleted(:final deleted):
         final m = deleted.meal;
         _showNotice(

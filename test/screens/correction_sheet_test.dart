@@ -812,7 +812,10 @@ void main() {
       expect(boxText(tester), '');
       expect(find.text('Added'), findsOneWidget);
       expect(tiles(), findsNWidgets(2));
-      expect(find.text('Usual breakfast'), findsNothing);
+      expect(
+        find.descendant(of: tiles(), matching: find.text('Usual breakfast')),
+        findsNothing,
+      );
       await tester.tap(saveButton());
       await settle(tester);
 
@@ -1400,7 +1403,10 @@ void main() {
       await tap(tester, checkedRow());
       expect(sheet(), findsNothing);
       expect(boxText(tester), 'usual breakfast, 1 apple');
-      expect(find.text('Usual breakfast'), findsOneWidget);
+      expect(
+        find.descendant(of: tiles(), matching: find.text('Usual breakfast')),
+        findsOneWidget,
+      );
       expect(find.text('Added'), findsNothing);
     });
 
@@ -1579,7 +1585,10 @@ void main() {
       await tap(tester, inSheet(find.text('Done')));
       expect(boxText(tester), contains('my oatmeal'));
       expect(boxText(tester), isNot(contains('usual')));
-      expect(find.text('My oatmeal'), findsOneWidget);
+      expect(
+        find.descendant(of: tiles(), matching: find.text('My oatmeal')),
+        findsOneWidget,
+      );
       expect(find.text('Added'), findsOneWidget);
       await saveIt(tester);
       final meal = await theMeal(tester);

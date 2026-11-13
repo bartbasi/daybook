@@ -553,7 +553,11 @@ void main() {
       await type(tester, 'usual breakfast');
       // One header and two items; the header adds nothing of its own.
       expect(tiles(), findsNWidgets(3));
-      expect(find.text('Usual breakfast'), findsOneWidget);
+      // The chip of the same name is not a line.
+      expect(
+        find.descendant(of: tiles(), matching: find.text('Usual breakfast')),
+        findsOneWidget,
+      );
       expect(find.text('2 items'), findsOneWidget);
       expect(find.textContaining('260 kcal', findRichText: true), findsWidgets);
       final bar = find.textContaining('260 kcal', findRichText: true);
