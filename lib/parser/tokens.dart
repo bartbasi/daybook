@@ -134,6 +134,10 @@ const householdUnits = <(String, List<String>)>[
   ('jigger', []),
 ];
 
+/// The abbreviations among the household spellings. They take "s" but not
+/// "es" (`pcs`, not `pcses`).
+const householdAbbreviations = <String>{'pc', 'pcs', 'svg', 'pkt', 'pkg'};
+
 /// Irregular plurals of household units, beyond `s` and `es`. The grammar names
 /// `leaves`; `patties` is added so "2 patties" reads as a unit.
 const householdIrregularPlurals = <String, String>{
@@ -148,7 +152,7 @@ const sizeWords = <String, String>{
   'large': 'large',
   'big': 'large',
   'extra large': 'extra large',
-  'xl': 'xl',
+  'xl': 'extra large',
   'jumbo': 'jumbo',
   'mini': 'mini',
   'miniature': 'miniature',
@@ -229,19 +233,12 @@ const vulgarFractions = <String, String>{
   '⅒': '1/10',
 };
 
-/// Phrases that start with "a" and are matched as a whole, longest first,
-/// before a lone "a" is read (2.6 rule 5). The quantity phrases and the vague
-/// phrases; `a la` is protected (see [builtInProtectedPhrases]).
-const aQuantityPhrases = <String>[
-  'a couple of',
-  'a couple',
-  'a dozen',
-  'a half',
-  'a quarter',
-  'a third',
-];
-
-/// Vague words that count as no quantity (3.4), longest first.
+/// Vague words that count as no quantity (3.4), longest first. The code reads
+/// these from this list. The quantity phrases that start with "a" (`a couple
+/// of`, `a dozen`, `a half`, `a quarter`, `a third`) are built into the
+/// quantity reader in amount.dart, and the approximation words (`about`,
+/// `around`, `approximately`, `roughly`) are in [fillerWords], where they are
+/// ignored.
 const vaguePhrases = <String>[
   'a bit of',
   'a bit',
@@ -250,15 +247,6 @@ const vaguePhrases = <String>[
   'few',
   'some',
 ];
-
-/// Approximation words, ignored (3.4). `~` is ignored too and is dropped when
-/// the text is split into words.
-const approximationWords = <String>{
-  'about',
-  'around',
-  'approximately',
-  'roughly',
-};
 
 /// Filler words (10.2). `a` and `an` are filler only where 2.6 rule 5 does not
 /// read them as the quantity 1.

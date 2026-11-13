@@ -110,9 +110,19 @@ class Line {
     this.span,
     this.multiplier,
     this.items = const [],
+    this.savedMealId,
+    this.amountSpans = const [],
   });
 
   final LineState state;
+
+  /// For a saved meal header: the id of the saved meal it expands.
+  final int? savedMealId;
+
+  /// For a typed line: the parts of the typed text that make up the amount
+  /// (numbers, unit, size, multiplier), as [ItemDraft.amountSpans], so the
+  /// correction sheet can rewrite only the amount (8.3).
+  final List<Span> amountSpans;
 
   /// `usda:<fdc id>` or `local:<id>`. Null when not found.
   final String? foodRef;

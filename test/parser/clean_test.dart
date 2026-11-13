@@ -148,9 +148,21 @@ void main() {
     _row('7UP keeps its case', '1 7UP', '1 7UP');
     _row('v8 as a synonym entry', 'v8', 'v8');
     _row(
-      'the user\'s own name keeps its digits',
+      'a user name that is one word with digits keeps them',
       '5Guys burger',
       '5Guys burger',
+      names: ['5Guys'],
+    );
+    _row(
+      'R5 a digit word inside a longer name does not keep them',
+      '330ml milk',
+      '330 ml milk',
+      names: ['Coca-Cola 330ml'],
+    );
+    _row(
+      'R5 a digit word of a longer name: 5guys',
+      '5guys burger',
+      '5 guys burger',
       names: ['5Guys Burger'],
     );
     _row('without the name it is split', '5guys burger', '5 guys burger');
@@ -198,6 +210,34 @@ void main() {
       final c = cleanText('eggs');
       expect(c.originalSpan(2, 2), const Span(2, 2));
       expect(c.originalSpan(4, 4), const Span(4, 4));
+    });
+  });
+
+  group('review fixes', () {
+    _row(
+      'R12 percent runs after the hyphen rules',
+      '2-percent milk',
+      '2% milk',
+    );
+    _row('R12 apostrophe', "mom's", 'moms');
+    _row('R12 curly apostrophe', 'mom’s', 'moms');
+    _row(
+      'R17 a combining accent stays in the word',
+      'café au lait',
+      'café au lait',
+    );
+    _row('R17 a hyphen after an accented letter', 'café-au', 'café au');
+    test('R1 a unicode fraction maps to its own character', () {
+      final c = cleanText('to1½ couple');
+      expect(c.text, 'to1 1/2 couple');
+      expect(c.originalSpan(2, 3), const Span(2, 3), reason: 'the digit');
+      expect(c.originalSpan(4, 7), const Span(3, 4), reason: 'the fraction');
+    });
+    test('R6 a long run of digits is cleaned quickly', () {
+      final watch = Stopwatch()..start();
+      cleanText('${'1' * 5000} eggs');
+      cleanText('${'1' * 5000} percent');
+      expect(watch.elapsedMilliseconds, lessThan(2000));
     });
   });
 

@@ -2,6 +2,7 @@
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
 import 'line.dart';
+import 'split.dart' show UserNames;
 import 'tokens.dart';
 
 /// The text after the character clean-up of grammar 2.1, with a way back to
@@ -70,7 +71,8 @@ class _Buf {
     hi = nhi;
   }
 
-  /// Inserts one space after each character index in [positions].
+  /// Inserts one space after each character index in [positions]. The space
+  /// maps to the character it follows.
   void insertSpaceAfter(Set<int> positions) {
     if (positions.isEmpty) return;
     final out = StringBuffer();
@@ -92,66 +94,107 @@ class _Buf {
   }
 }
 
-final _vulgar = RegExp('(\\d)?([${vulgarFractions.keys.join()}])');
+// A letter is a letter plus any combining marks after it (R17), so "e" then
+// U+0301 is one letter and never splits a word.
+const _lm = r'[\p{L}\p{M}]';
+
+final _vulgar = RegExp('[${vulgarFractions.keys.join()}]');
 final _quotes = RegExp('[\'‘’‚‛“”„‟]');
 final _wo = RegExp(
-  r'(?<![\p{L}\d])w/o(?!\p{L})',
+  r'(?<![\p{L}\p{M}\d])w/o(?!\p{L})',
   caseSensitive: false,
   unicode: true,
 );
-final _w = RegExp(r'(?<![\p{L}\d])w/', caseSensitive: false, unicode: true);
+final _w = RegExp(
+  r'(?<![\p{L}\p{M}\d])w/',
+  caseSensitive: false,
+  unicode: true,
+);
+// Only tried at the start of a run of digits, so a long run is not rescanned
+// from every digit.
 final _percent = RegExp(
-  r'(\d+(?:\.\d+)?|\.\d+)\s*percent\b',
+  r'(?<![\d.])(\d+(?:\.\d+)?|\.\d+)\s*percent\b',
   caseSensitive: false,
 );
-final _hyphenLetters = RegExp(r'(?<=\p{L})-(?=\p{L})', unicode: true);
+final _hyphenLetters = RegExp('(?<=$_lm)-(?=\\p{L})', unicode: true);
 final _hyphenLetterDigit = RegExp(
-  r'(?<=\p{L})-(?=\d)|(?<=\d)-(?=\p{L})',
+  '(?<=$_lm)-(?=\\d)|(?<=\\d)-(?=\\p{L})',
   unicode: true,
 );
-final _other = RegExp(r'[^\p{L}\d \n,;./%+\-~×]', unicode: true);
+final _other = RegExp(r'[^\p{L}\p{M}\d \n,;./%+\-~×]', unicode: true);
 final _run = RegExp(r'[^\s,;+×]+');
 final _manySpaces = RegExp(' {2,}');
 final _edgeSpaces = RegExp('^ +| +\$', multiLine: true);
+final _startsWithLetter = RegExp(r'^\p{L}', unicode: true);
+final _letter = RegExp(r'\p{L}', unicode: true);
+final _xDigits = RegExp(r'^[xX]\d[\d./]*\.*$');
+final _trailingPeriods = RegExp(r'\.+$');
+
+bool _isDigit(int unit) => unit >= 48 && unit <= 57;
+
+/// The lower case words with digits that stay whole whatever touches them:
+/// the single-word entries of the synonym table (`7up`). User names add their
+/// own single-word entries (see [UserNames]).
+final Set<String> baseKeepWhole = {
+  for (final k in synonyms.keys)
+    if (!k.contains(' ') && RegExp(r'\d').hasMatch(k)) k.toLowerCase(),
+};
 
 /// Grammar 2.1: the character clean-up that runs before anything else.
 ///
-/// [userNames] are the user's own names (foods, saved meals, aliases). A word
-/// of them that has digits stays whole when a number touches letters, as the
-/// words of the synonym table and the built-in protected phrases do. The case
-/// of the letters is kept, because `T` and `t` are different units.
-CleanText cleanText(String input, {Iterable<String> userNames = const []}) {
+/// [names] holds the user's own names, prepared once (see [UserNames]); a name
+/// that is a single word with digits (`7up`) stays whole when a number touches
+/// letters, as the synonym entries do. [userNames] is the slow way to pass the
+/// same thing as plain strings, rebuilt on every call. The case of the
+/// letters is kept, because `T` and `t` are different units.
+CleanText cleanText(
+  String input, {
+  UserNames? names,
+  Iterable<String> userNames = const [],
+}) {
+  final keepWhole = names != null
+      ? names.keepWhole
+      : (userNames.isEmpty
+            ? baseKeepWhole
+            : UserNames.from(userNames).keepWhole);
+  return _clean(input, keepWhole);
+}
+
+CleanText _clean(String input, Set<String> keepWhole) {
   final b = _Buf(input);
 
   b.replace(RegExp('⁄'), (_) => '/');
   b.replace(_quotes, (_) => '');
+  // A fraction maps to itself: the space before it, and the digits of n/d, all
+  // belong to the fraction character only (R1).
   b.replace(_vulgar, (m) {
-    final frac = vulgarFractions[m[2]]!;
-    return m[1] == null ? frac : '${m[1]} $frac';
+    final frac = vulgarFractions[m[0]]!;
+    final prev = m.start > 0 ? m.input.codeUnitAt(m.start - 1) : 0;
+    return _isDigit(prev) ? ' $frac' : frac;
   });
   b.replace(_wo, (_) => ' without ');
   b.replace(_w, (_) => ' with ');
   b.replace(RegExp('&'), (_) => ' and ');
-  b.replace(_percent, (m) => '${m[1]}%');
   b.replace(_hyphenLetters, (_) => ' ');
   b.replace(_hyphenLetterDigit, (_) => '');
+  // After the hyphen rules, so "2-percent" is "2% milk" and not a quantity.
+  b.replace(_percent, (m) => '${m[1]}%');
   b.replace(RegExp('×'), (_) => ' × ');
   b.replace(_other, (_) => ' ');
 
   // A number touching letters is split (2.1), unless the whole word is one of
   // the names that keep digits. A word that starts with letters stays whole,
   // except x or × followed by digits, which is a multiplier.
-  final whole = _wholeDigitWords(userNames);
   bool keep(String run) =>
-      whole.contains(run.toLowerCase().replaceAll(RegExp(r'\.+$'), ''));
+      keepWhole.contains(run.toLowerCase().replaceAll(_trailingPeriods, ''));
 
   final split = <int>{};
   for (final m in _run.allMatches(b.s)) {
     final run = m[0]!;
-    if (RegExp(r'^\p{L}', unicode: true).hasMatch(run) || keep(run)) continue;
+    if (_startsWithLetter.hasMatch(run) || keep(run)) continue;
     for (var i = 0; i + 1 < run.length; i++) {
-      if (RegExp(r'\d').hasMatch(run[i]) &&
-          RegExp(r'\p{L}', unicode: true).hasMatch(run[i + 1])) {
+      if (_isDigit(run.codeUnitAt(i)) &&
+          _letter.matchAsPrefix(run, i + 1) != null) {
         split.add(m.start + i);
       }
     }
@@ -160,29 +203,11 @@ CleanText cleanText(String input, {Iterable<String> userNames = const []}) {
 
   final xSplit = <int>{};
   for (final m in _run.allMatches(b.s)) {
-    if (RegExp(r'^[xX]\d[\d./]*\.*$').hasMatch(m[0]!)) xSplit.add(m.start);
+    if (_xDigits.hasMatch(m[0]!)) xSplit.add(m.start);
   }
   b.insertSpaceAfter(xSplit);
 
   b.replace(_manySpaces, (_) => ' ');
   b.replace(_edgeSpaces, (_) => '');
   return CleanText._(input, b.s, b.lo, b.hi);
-}
-
-/// The lower case words that contain a digit and are listed by the synonym
-/// table, the built-in protected phrases or the user's names.
-Set<String> _wholeDigitWords(Iterable<String> userNames) {
-  final out = <String>{};
-  for (final phrase in [
-    ...synonyms.keys,
-    ...builtInProtectedPhrases,
-    ...userNames,
-  ]) {
-    for (final w in phrase.toLowerCase().split(
-      RegExp(r'[^\p{L}\d%]+', unicode: true),
-    )) {
-      if (RegExp(r'\d').hasMatch(w)) out.add(w);
-    }
-  }
-  return out;
 }

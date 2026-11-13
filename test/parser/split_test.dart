@@ -5,6 +5,8 @@
 // phrases, number phrases, soft separators, dictation splitting and the
 // brief's example. Expected values are written from the grammar text.
 
+import 'dart:math';
+
 import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/split.dart';
 import 'package:daybook/parser/tokens.dart';
@@ -272,7 +274,7 @@ void main() {
     group('rule 1: food words', () {
       _items('2.6.1 only filler words give no item', 'I had', []);
       _items('2.6.1 more filler words give no item', 'I had the', []);
-      _items('2.6.1 filler then food', 'I had coffee', ['I had coffee||']);
+      _items('2.6.1 filler then food', 'I had coffee', ['coffee||']);
       _items('2.6.1 filler before the amount is dropped', 'I had two eggs', [
         'eggs|2|',
       ]);
@@ -424,7 +426,7 @@ void main() {
         ['eggs|2|', 'almonds||'],
       );
       _items('2.6.5 an after the amount is filler', '2 slices an bread', [
-        'an bread|2|slice',
+        'bread|2|slice',
       ]);
     });
   });
@@ -529,6 +531,288 @@ void main() {
           'jam||',
         ],
       );
+    });
+  });
+
+  group('review fixes', () {
+    // R4: a period after a unit word is not a sentence end only when the word
+    // is read as a unit there.
+    _items(
+      'R4 candy bar is a sentence end',
+      'I ate a candy bar. Coffee with milk.',
+      ['candy bar|1|', 'Coffee||', 'milk||'],
+    );
+    _items(
+      'R4 fillets is a sentence end',
+      'I had two fish fillets. Then rice.',
+      ['fish fillets|2|', 'rice||'],
+    );
+    _items('R4 granola bar', 'a granola bar. coffee', [
+      'granola bar|1|',
+      'coffee||',
+    ]);
+    _items(
+      'R4 a unit after a size word keeps its period',
+      '2 large cups. milk',
+      ['milk|2|cup'],
+    );
+
+    // R10: tokens with no letter or digit are ignored.
+    for (final s in ['-', '/', '%', '×', '- - -', 'x /']) {
+      _items('R10 symbol only "$s"', s, s == 'x /' ? ['x||'] : []);
+    }
+    _items('R10 hyphen between items', '2 eggs - coffee', ['eggs coffee|2|']);
+    _items('R10 trailing hyphen', 'coffee - black', ['coffee black||']);
+    _items('R10 a range with spaces still works', '2 - 3 eggs', ['eggs|2.5|']);
+
+    // R13: never infinite.
+    test('R13 400 digits before eggs is not a quantity', () {
+      for (final s in [
+        '${'9' * 400} eggs',
+        'x${'9' * 400} eggs',
+        '${'9' * 308} dozen eggs',
+        '${'9' * 300} x ${'9' * 300} eggs',
+        '1/${'9' * 400} eggs',
+      ]) {
+        for (final d in splitItems(s)) {
+          expect(
+            d.quantity == null || d.quantity!.isFinite,
+            isTrue,
+            reason: 'R13: "${s.substring(0, 12)}..." gave $d',
+          );
+          expect(d.multiplier == null || d.multiplier!.isFinite, isTrue);
+        }
+      }
+      expect(splitItems('${'9' * 400} eggs').single.quantity, isNull);
+      expect(splitItems('${'9' * 308} dozen eggs').single.quantity, isNull);
+    });
+
+    test('R12 5,000 digits parse quickly', () {
+      final watch = Stopwatch()..start();
+      splitItems('${'1' * 5000} eggs');
+      splitItems('${'1' * 5000} percent milk');
+      expect(watch.elapsedMilliseconds, lessThan(2000));
+    });
+
+    // R3: leading filler is dropped with or without an amount.
+    _items('R3 filler without an amount', 'I had coffee', ['coffee||']);
+    _items('R3 filler with an amount', 'I had 1 coffee', ['coffee|1|']);
+    _items('R3 filler after the amount', '2 my oatmeal', ['oatmeal|2|']);
+    _items('R3 only filler', 'I had the', []);
+    _items('R3 filler after food stays', 'oatmeal made', ['oatmeal made||']);
+
+    // R11: items with no food.
+    _items('R11 vitamin a', 'vitamin a', ['vitamin||']);
+    _items('R11 a alone', 'a', []);
+    _items('R11 an alone', 'an', []);
+    _items('R11 some alone', 'some', []);
+    _items('R11 a bare amount stays (example 61)', '200 g', ['|200|g']);
+    _items('R11 a unit alone stays', 'a cup', ['|1|cup']);
+    _items('R11 a number alone stays', '3', ['|3|']);
+
+    // R14, R15, R7.
+    _items(
+      'R14 size word between number and unit',
+      '2 large cups and a half milk',
+      ['milk|2.5|cup'],
+    );
+    _items('R15 eggs 2x', 'eggs 2x', ['eggs|2|']);
+    _items('R15 eggs 2 x', 'eggs 2 x', ['eggs|2|']);
+    _items('R15 2 eggs 2x', '2 eggs 2x', ['eggs|4|']);
+    _items('R15 sign', 'eggs 2×', ['eggs|2|']);
+    _items('R7 the es plural is for whole words only', '2 pcses food', [
+      'pcses food|2|',
+    ]);
+    _items('R7 svges', '2 svges food', ['svges food|2|']);
+    _items('R7 pcs', '2 pcs food', ['food|2|piece']);
+    _items('R7 pkgs', '2 pkgs food', ['food|2|package']);
+    _items('R7 pkts', '2 pkts food', ['food|2|packet']);
+    _items('R7 svgs', '2 svgs food', ['food|2|serving']);
+    _items('R7 pc', '2 pc food', ['food|2|piece']);
+    _items('R7 boxes', '2 boxes food', ['food|2|box']);
+
+    // R9: compound amounts take plain number tokens only.
+    _items('R9 word numbers do not add', 'one cup two tablespoons milk', [
+      'two tablespoons milk|1|cup',
+    ]);
+    _items('R9 chain', '1 cup 2 tbsp 1 tsp milk', [
+      'milk|${1 + 2 * 14.78676478125 / 236.5882365 + 4.92892159375 / 236.5882365}|cup',
+    ]);
+  });
+
+  group('prepared user names', () {
+    List<String> readWith(String text, List<String> names) => [
+      for (final d in splitItems(text, names: UserNames.from(names))) _show(d),
+    ];
+
+    test('R5 a digit word inside a product name does not stop a quantity', () {
+      expect(readWith('330ml milk', ['Coca-Cola 330ml']), ['milk|330|ml']);
+      expect(readWith('100g chicken', ['Chicken 100g pack']), [
+        'chicken|100|g',
+      ]);
+    });
+
+    test('R5 names are cleaned like typed text', () {
+      expect(readWith('eggs & toast', ['Eggs & toast']), ['eggs and toast||']);
+      expect(readWith('eggs and toast', ['Eggs & toast']), [
+        'eggs and toast||',
+      ]);
+      expect(readWith('coffee with milk', ['Coffee w/ milk']), [
+        'coffee with milk||',
+      ]);
+      expect(readWith('1/2 sandwich lunch', ['1/2 sandwich lunch']), [
+        '1/2 sandwich lunch||',
+      ]);
+      expect(readWith('coca cola 330ml', ['Coca-Cola 330ml']), [
+        'coca cola 330 ml||',
+      ]);
+    });
+
+    test('R5 a one word digit name stays whole', () {
+      expect(readWith('7up', ['7up']), ['7up||']);
+      expect(readWith('2 5guys', ['5guys']), ['5guys|2|']);
+    });
+
+    test('R3 protected names are never filler', () {
+      expect(readWith('I had my oatmeal', ['my oatmeal']), ['my oatmeal||']);
+      expect(readWith('I had 1 my oatmeal', ['my oatmeal']), ['my oatmeal|1|']);
+      expect(readWith('2 my oatmeal', ['my oatmeal']), ['my oatmeal|2|']);
+      expect(readWith('I had usual breakfast', ['usual breakfast']), [
+        'usual breakfast||',
+      ]);
+      expect(readWith('I had coffee', []), ['coffee||']);
+      expect(readWith('my oatmeal', []), ['oatmeal||']);
+    });
+
+    test('the prepared object and the plain strings agree', () {
+      const names = ['Eggs and toast', 'my oatmeal', '7up'];
+      const text = 'eggs and toast, 2 my oatmeal and 7up';
+      expect([
+        for (final d in splitItems(text, userNames: names)) _show(d),
+      ], readWith(text, names));
+    });
+
+    test('the empty set only protects the built-in phrases', () {
+      expect(
+        [
+          for (final d in splitItems('half and half', names: UserNames.empty))
+            _show(d),
+        ],
+        ['half and half||'],
+      );
+    });
+
+    test('R2 splitting with 1,000 prepared names stays fast', () {
+      final names = UserNames.from([
+        for (var i = 0; i < 1000; i++) 'Food $i and thing',
+        'my oatmeal',
+      ]);
+      const brief =
+          '2 eggs, 2 slices sourdough toast, 1 tbsp butter, coffee with 2 tbsp half and half';
+      splitItems(brief, names: names); // warm up
+      final watch = Stopwatch()..start();
+      const runs = 100;
+      late List<ItemDraft> items;
+      for (var i = 0; i < runs; i++) {
+        items = splitItems(brief, names: names);
+      }
+      final perRun = watch.elapsedMicroseconds / runs / 1000;
+      expect(items, hasLength(5));
+      // Generous limit so a slow machine cannot make this flaky.
+      expect(perRun, lessThan(8), reason: '$perRun ms per split');
+    });
+  });
+
+  group('spans', () {
+    test('R1 a digit glued to a word before a unicode fraction', () {
+      final items = splitItems('to1½ couple');
+      for (var k = 1; k < items.length; k++) {
+        expect(
+          items[k].span.start,
+          greaterThanOrEqualTo(items[k - 1].span.end),
+          reason: 'overlap in $items',
+        );
+      }
+    });
+
+    test('item spans never overlap, stay in bounds, keep surrogate pairs', () {
+      final rnd = Random(7);
+      const bits = [
+        'to',
+        '1',
+        '2',
+        '½',
+        '¾',
+        ' ',
+        ' ',
+        ',',
+        ';',
+        '.',
+        '+',
+        '\n',
+        '-',
+        '/',
+        '%',
+        '&',
+        'w/',
+        'and',
+        'with',
+        'eggs',
+        'toast',
+        'x',
+        '×',
+        'cup',
+        'g',
+        '😀',
+        'é',
+        'a',
+        'half',
+        'dozen',
+        "'",
+        '⁄',
+        'oz',
+        'plus',
+        'of',
+        '~',
+        '12',
+        '3.5',
+        'T',
+        'I had ',
+        'percent',
+        '\t',
+        '\u{1D400}',
+        '7up',
+        'x3',
+        '2x',
+      ];
+      for (var n = 0; n < 400; n++) {
+        final text = [
+          for (var k = 0, len = 1 + rnd.nextInt(14); k < len; k++)
+            bits[rnd.nextInt(bits.length)],
+        ].join();
+        final items = splitItems(text);
+        var prevEnd = 0;
+        for (final d in items) {
+          final reason = 'text ${text.runes.toList()} item $d';
+          expect(d.span.start, greaterThanOrEqualTo(prevEnd), reason: reason);
+          expect(d.span.end, greaterThanOrEqualTo(d.span.start));
+          expect(d.span.end, lessThanOrEqualTo(text.length), reason: reason);
+          bool lowAt(int i) =>
+              i >= 0 &&
+              i < text.length &&
+              text.codeUnitAt(i) >= 0xDC00 &&
+              text.codeUnitAt(i) <= 0xDFFF;
+          expect(lowAt(d.span.start), isFalse, reason: reason);
+          expect(lowAt(d.span.end), isFalse, reason: reason);
+          for (final s in d.amountSpans) {
+            expect(s.start, greaterThanOrEqualTo(d.span.start));
+            expect(s.end, lessThanOrEqualTo(d.span.end), reason: reason);
+            expect(lowAt(s.start), isFalse, reason: reason);
+            expect(lowAt(s.end), isFalse, reason: reason);
+          }
+          prevEnd = d.span.end;
+        }
+      }
     });
   });
 

@@ -60,7 +60,7 @@ class Measure {
   final int end;
 }
 
-// ---------------------------------------------------------------- lookups
+// Lookups.
 
 final Map<String, UnitDef> _unitByWord = {};
 final Map<String, UnitDef> _multiWordUnits = {};
@@ -90,10 +90,11 @@ void _build() {
   }
   for (final (label, extras) in householdUnits) {
     final def = UnitDef(label, UnitKind.count, 0);
+    // Whole words take "s" and "es". Abbreviations take "s" only (R7).
     for (final s in [label, ...extras]) {
       _unitByWord[s] = def;
       _unitByWord['${s}s'] = def;
-      _unitByWord['${s}es'] = def;
+      if (!householdAbbreviations.contains(s)) _unitByWord['${s}es'] = def;
     }
     final irregular = householdIrregularPlurals[label];
     if (irregular != null) _unitByWord[irregular] = def;
@@ -120,16 +121,19 @@ final _fractionRe = RegExp(r'^(\d+)/(\d+)$');
 /// A whole number, a decimal or a fraction with a non-zero denominator, as one
 /// word. Null for anything else.
 double? parseNumber(String s) {
+  double? v;
   if (_integerRe.hasMatch(s) || _decimalRe.hasMatch(s)) {
-    return double.parse(s);
+    v = double.parse(s);
+  } else {
+    final m = _fractionRe.firstMatch(s);
+    if (m != null) {
+      final d = double.parse(m[2]!);
+      if (d == 0) return null;
+      v = double.parse(m[1]!) / d;
+    }
   }
-  final m = _fractionRe.firstMatch(s);
-  if (m != null) {
-    final d = double.parse(m[2]!);
-    if (d == 0) return null;
-    return double.parse(m[1]!) / d;
-  }
-  return null;
+  // A number too large to hold is not a quantity (R13).
+  return (v != null && v.isFinite) ? v : null;
 }
 
 /// `1-1/2` is a mixed number, `2-3` and `1/2-3/4` are ranges (3.3).
@@ -145,7 +149,7 @@ double? parseNumber(String s) {
   return (value: (a + b) / 2, range: true);
 }
 
-// --------------------------------------------------------------- quantities
+// Quantities.
 
 int _skipOf(List<Tok> t, int j) => _w(t, j) == 'of' ? j + 1 : j;
 
@@ -220,6 +224,19 @@ bool _isWholeWord(String w) =>
     teensWords.containsKey(w) ||
     tensWords.containsKey(w);
 
+/// True when [lower] is a quantity word or a size word, so that a unit after
+/// it is read as a unit (R4): numbers, number words, `a`, `an`, fraction
+/// words, `dozen`, `couple` and size words.
+bool isQuantityOrSizeWord(String lower) =>
+    _isNumberLike(lower) ||
+    fractionWords.containsKey(lower) ||
+    countedFractionWords.containsKey(lower) ||
+    lower == 'dozen' ||
+    lower == 'dozens' ||
+    lower == 'couple' ||
+    lower == 'fl' ||
+    sizeWords.containsKey(lower);
+
 bool _isNumberLike(String w) =>
     w == 'a' ||
     w == 'an' ||
@@ -241,7 +258,14 @@ bool isJoinedAnd(List<Tok> t, int k) {
     for (final len in [1, 2]) {
       final u = readUnit(t, k - len, afterNumber: true);
       if (u != null && u.end == k) {
-        final before = _w(t, k - len - 1);
+        // A size word may sit between the number and the unit (R14).
+        var b = k - len - 1;
+        if (_w(t, b) == 'large' && _w(t, b - 1) == 'extra') {
+          b -= 2;
+        } else if (sizeWords.containsKey(_w(t, b))) {
+          b -= 1;
+        }
+        final before = _w(t, b);
         if (before != null && _isNumberLike(before)) return true;
       }
     }
@@ -352,7 +376,7 @@ QuantityRead? readQuantity(List<Tok> t, int i, {bool allowA = false}) {
   return (value: v, end: i + 2);
 }
 
-// -------------------------------------------------------------------- units
+// Units.
 
 /// A unit at [i] (4.1, 4.2): one word, or two for `fl oz`, `fl ounce`,
 /// `fluid ounce`. One-letter units (`t`, `T`, `c`, `C`, `g`, `G`, `l`, `L`)
@@ -404,7 +428,7 @@ int? _readVague(List<Tok> t, int i) {
   return null;
 }
 
-// ----------------------------------------------------------------- measures
+// Measures.
 
 /// Reads `quantity [size] [unit [and a half | number unit]] [of]`, or
 /// `size [unit] [of]`, or `unit of`, or a vague word (grammar 10.1 `measure`).

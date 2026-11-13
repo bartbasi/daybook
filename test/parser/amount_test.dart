@@ -320,7 +320,7 @@ void main() {
     _read('3.4 a little', 'a little milk', null, food: 'milk');
     _read('3.4 a bit', 'a bit butter', null, food: 'butter');
     _read('3.4 a bit of', 'a bit of butter', null, food: 'butter');
-    _read('3.4 some of', 'some of the pizza', null, food: 'the pizza');
+    _read('3.4 some of', 'some of the pizza', null, food: 'pizza');
     _read('3.4 about', 'about 2 cups milk', 2, unit: 'cup', food: 'milk');
     _read('3.4 around', 'around 2 cups milk', 2, unit: 'cup');
     _read('3.4 approximately', 'approximately 2 cups milk', 2, unit: 'cup');
@@ -511,7 +511,12 @@ void main() {
       };
       for (final e in units.entries) {
         for (final s in e.value) {
-          for (final form in [s, '${s}s', '${s}es']) {
+          // R7: abbreviations take "s" only; whole words take "s" and "es".
+          const abbreviations = {'pc', 'pcs', 'svg', 'pkt', 'pkg'};
+          final forms = abbreviations.contains(s)
+              ? [s, if (s != 'pcs') '${s}s']
+              : [s, '${s}s', '${s}es'];
+          for (final form in forms) {
             _read(
               '4.1 "$form" is ${e.key}',
               '2 $form food',
@@ -638,7 +643,7 @@ void main() {
       'big': 'large',
       'extra large': 'extra large',
       'extra-large': 'extra large',
-      'xl': 'xl',
+      'xl': 'extra large',
       'jumbo': 'jumbo',
       'mini': 'mini',
       'miniature': 'miniature',
@@ -715,7 +720,7 @@ void main() {
       size: 'large',
       food: 'eggs',
     );
-    _read('4.3 of after a plain number', '2 of the eggs', 2, food: 'the eggs');
+    _read('4.3 of after a plain number', '2 of the eggs', 2, food: 'eggs');
     test('4.3 the amount spans leave "of" out', () {
       const text = '2 slices of toast';
       final d = _one(text, '4.3');
