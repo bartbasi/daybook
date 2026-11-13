@@ -8,7 +8,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 |---|---|
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
-| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, and the food and recipe editors are done, reviewed and pushed. Still to do: the food and recipe editors, the speed tests |
+| 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, and the food and recipe editors are done, reviewed and pushed. Still to do: removing the temporary Data check screen, and the food speed tests |
 | 3 Goals and daily budget | Not started |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
