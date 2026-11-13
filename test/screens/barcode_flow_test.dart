@@ -21,9 +21,11 @@ import 'package:daybook/screens/food/barcode_scan_screen.dart';
 import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
+import 'package:daybook/strings.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -913,6 +915,70 @@ void main() {
     });
   });
 
+  group('typed numbers of 8 and 14 digits', () {
+    Finder numberField() => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Barcode number',
+    );
+
+    Future<void> lookUpTyped(WidgetTester tester, String code) async {
+      await tester.enterText(numberField(), code);
+      await tester.tap(find.text('Look up'));
+      await tester.pump();
+    }
+
+    Future<void> openTyping(WidgetTester tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await openScan(tester);
+      await tester.tap(find.text('Type the number instead'));
+      await settle(tester);
+    }
+
+    appTest('a UPC-E number typed by hand is sent once, as its 13 digit '
+        'form', (tester) async {
+      await openTyping(tester);
+      await lookUpTyped(tester, '04252614');
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      expect(requests.single.url.path, '/api/v2/product/0042100005264.json');
+      expect(find.text(S.scanNumberCheck), findsNothing);
+    });
+
+    appTest('a valid EAN-8 typed is sent unchanged', (tester) async {
+      await openTyping(tester);
+      await lookUpTyped(tester, '96385074');
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      expect(requests.single.url.path, '/api/v2/product/96385074.json');
+    });
+
+    appTest('an 8 digit number that is neither EAN-8 nor UPC-E is refused '
+        'and nothing is sent', (tester) async {
+      await openTyping(tester);
+      // Starts with 0 but its UPC-A form fails too; and one starting with 5.
+      for (final bad in ['04252615', '55555556']) {
+        await lookUpTyped(tester, bad);
+        expect(find.text(S.scanNumberCheck), findsOneWidget, reason: bad);
+      }
+      expect(requests, isEmpty);
+    });
+
+    appTest('a 14 digit number typed with a leading 0 and the same UPC-A '
+        'scanned are one product and one row', (tester) async {
+      await openTyping(tester);
+      await lookUpTyped(tester, '00049000028911');
+      await settleMore(tester);
+      expect(requests, hasLength(1));
+      expect(requests.single.url.path, '/api/v2/product/0049000028911.json');
+      await scan(tester, '049000028911');
+      expect(requests, hasLength(1));
+      expect(tiles(), findsNWidgets(2));
+      final foods = await foodRows(tester);
+      expect(foods, hasLength(1));
+      expect(foods.single.barcode, '0049000028911');
+    });
+  });
+
   group('layout', () {
     for (final (width, scale) in [(344.0, 1.0), (673.0, 1.0), (344.0, 2.0)]) {
       appTest('the scan button and the scan screen at ${width.toInt()} dp '
@@ -1010,6 +1076,51 @@ void main() {
             .height,
         greaterThanOrEqualTo(48),
       );
+    });
+
+    // Last in the file: it loads the real Roboto, because the test font has
+    // letters as wide as tall and would make any message look too long. Every
+    // test before it runs with the test font.
+    appTest('both number errors are shown in full at 344 dp and text scale 2 '
+        'with the keyboard up', (tester) async {
+      final roboto = File(
+        '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/'
+        'material_fonts/roboto-regular.ttf',
+      ).readAsBytesSync();
+      await (FontLoader(
+        'Roboto',
+      )..addFont(Future.value(ByteData.sublistView(roboto)))).load();
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      await openScan(tester);
+      final typeButton = find.text('Type the number instead');
+      await tester.ensureVisible(typeButton);
+      await tester.pump();
+      await tester.tap(typeButton);
+      await settle(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pump();
+      final field = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Barcode number',
+      );
+      for (final (typed, message) in [
+        ('12ab', S.scanNumberBad),
+        ('96385075', S.scanNumberCheck),
+      ]) {
+        await tester.enterText(field, typed);
+        await tester.tap(find.text('Look up'));
+        await tester.pump();
+        expect(find.text(message), findsOneWidget);
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.text(message),
+        );
+        expect(paragraph.didExceedMaxLines, isFalse, reason: message);
+        expect(tester.takeException(), isNull);
+      }
+      tester.view.resetViewInsets();
+      await tester.pump();
     });
   });
 }

@@ -153,14 +153,16 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   void _lookUpTyped() {
     final code = _number.text.trim();
     final shape = RegExp(r'^(\d{8}|\d{12,14})$').hasMatch(code);
-    if (!shape || !barcodeCheckOk(code)) {
+    // An 8 digit number that is not a valid EAN-8 may be a UPC-E.
+    final upcE = shape && isUpcE(code);
+    if (!shape || !(barcodeCheckOk(code) || upcE)) {
       setState(
         () => _numberError = shape ? S.scanNumberCheck : S.scanNumberBad,
       );
       return;
     }
     setState(() => _numberError = null);
-    _submit(code, false);
+    _submit(code, upcE);
   }
 
   @override
@@ -239,6 +241,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           decoration: InputDecoration(
             labelText: S.scanNumberLabel,
             errorText: _numberError,
+            errorMaxLines: 5,
             border: const OutlineInputBorder(),
           ),
         ),

@@ -244,6 +244,14 @@ void main() {
       expect(barcodeForm('04252614'), '04252614');
     });
 
+    test(
+      'a 14 digit code that starts with 0 loses that 0, others are kept',
+      () {
+        expect(barcodeForm('00049000028911'), '0049000028911');
+        expect(barcodeForm('10012345678902'), '10012345678902');
+      },
+    );
+
     test('a UPC-E code expands to its UPC-A, in all four zero rules', () {
       // The published example: UPC-E 04252614 is UPC-A 042100005264.
       expect(barcodeCheckOk('042100005264'), isTrue);
@@ -333,6 +341,40 @@ void main() {
       expect(
         (await look({'energy_100g': 418.4}))!.nutrients[Nutrients.energy],
         closeTo(100, 1e-9),
+      );
+    });
+  });
+
+  group('the limit of 100 on every nutrient but energy', () {
+    Future<OffProduct?> look(Map<String, Object?> nutriments) {
+      final body = jsonEncode({
+        'status': 1,
+        'product': {'product_name': 'Odd', 'nutriments': nutriments},
+      });
+      return _client(MockClient((_) async => http.Response(body, 200)))
+          .lookup(_code);
+    }
+
+    test(
+      'sodium 400 (milligrams in a grams field) is absent, 0.5 is 500 mg',
+      () async {
+        final p = (await look({'sodium_100g': 400, 'proteins_100g': 150}))!;
+        expect(p.nutrients.containsKey(Nutrients.sodium), isFalse);
+        expect(p.nutrients.containsKey(Nutrients.protein), isFalse);
+        final ok = (await look({'sodium_100g': 0.5}))!;
+        expect(ok.nutrients[Nutrients.sodium], closeTo(500, 1e-9));
+      },
+    );
+
+    test('energy keeps its own limit', () async {
+      expect(
+        (await look({'energy-kcal_100g': 884}))!.nutrients[Nutrients.energy],
+        884,
+      );
+      expect(
+        (await look({'energy-kcal_100g': 2500}))!.nutrients
+            .containsKey(Nutrients.energy),
+        isFalse,
       );
     });
   });

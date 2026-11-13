@@ -22,7 +22,18 @@ String barcodeForm(String code, {bool upcE = false}) {
   var c = code;
   if (upcE && c.length == 8) c = _upcEToUpcA(c);
   if (c.length == 12) c = '0$c';
+  if (c.length == 14 && c.startsWith('0')) c = c.substring(1);
   return c;
+}
+
+/// True when [code] is an 8 digit number that is not a valid EAN-8 but is a
+/// valid UPC-E: it starts with 0 or 1 and its UPC-A expansion has a good check
+/// digit. Submit such a number with `upcE: true`.
+bool isUpcE(String code) {
+  if (!RegExp(r'^[01]\d{7}$').hasMatch(code) || barcodeCheckOk(code)) {
+    return false;
+  }
+  return barcodeCheckOk(barcodeForm(code, upcE: true).substring(1));
 }
 
 // The zero suppression rules of UPC-E: the last of the six digits says where
@@ -147,13 +158,17 @@ class OffClient {
   OffProduct _parse(String barcode, Map<String, dynamic> p) {
     final raw = (p['nutriments'] as Map?)?.cast<String, dynamic>() ?? {};
     final nutrients = <int, double>{};
-    // A value that is not a number, is negative, or is more than 100 g in 100
-    // g (900 kcal for energy) is wrong data: it is left out, as if absent.
+    // A value that is not a number, is negative, or is more than 100 (grams in
+    // 100 g, checked before any conversion; 900 kcal for energy) is wrong
+    // data: it is left out, as if absent.
     for (final n in Nutrients.tracked) {
       final v = _num(raw['${n.offKey}_100g']);
       if (v == null) continue;
-      if (n.unit == 'g' && v > 100) continue;
-      if (n.id == Nutrients.energy && v > _maxKcal) continue;
+      if (n.id == Nutrients.energy) {
+        if (v > _maxKcal) continue;
+      } else if (v > 100) {
+        continue;
+      }
       nutrients[n.id] = v * _scale(n.unit);
     }
     // OFF stores every nutrient except energy in grams per 100 g.
