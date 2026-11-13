@@ -494,6 +494,15 @@ void main() {
       );
       // Without the food the cut still applies.
       expect(_parse('no sugar cola'), isEmpty);
+      // The cut still applies outside the name.
+      final w = _one('no sugar cola without ice', data: d);
+      expect(w.foodRef, 'local:1');
+      expect(w.state, LineState.amountAssumed);
+      final x = _parse('2 cans no sugar cola with no ice', data: d);
+      expect(x, hasLength(1));
+      expect(x.single.foodRef, 'local:1');
+      expect(_one('coffee without sugar', data: d).foodRef, 'usda:4');
+      expect(_one('no sugar cola', data: d).foodRef, 'local:1');
     });
 
     test('an amount with only negated words is not found (R36, 8.1)', () {

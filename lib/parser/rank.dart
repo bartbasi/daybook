@@ -12,8 +12,6 @@ import 'line.dart';
 import 'normalize.dart';
 import 'search_index.dart';
 
-// Kept here for callers that already import it from this file.
-
 /// A candidate food for a query, with the numbers the ranking keys use.
 class Candidate {
   const Candidate({

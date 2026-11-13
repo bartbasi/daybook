@@ -165,11 +165,13 @@ class Parser {
       }
     }
     if (food == null) {
-      final m = _rankerOf(s).match(d.foodText, negation: !d.negationProtected);
+      final m = _rankerOf(s).match(d.matchText, negation: !d.negationProtected);
       if (m.state == LineState.notFound || m.top == null) {
         // Every word was removed by the negation cut ("no sugar"): with an
         // amount it is not found (8.1), without one it gives no line (R36).
-        if (m.allNegated && !d.hasAmount) return null;
+        final negated =
+            m.allNegated || (d.negationProtected && d.matchText.isEmpty);
+        if (negated && !d.hasAmount) return null;
         return notFound();
       }
       ref = m.top!.ref;

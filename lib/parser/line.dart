@@ -36,7 +36,8 @@ class ItemDraft {
     this.size,
     this.amountSpans = const [],
     this.negationProtected = false,
-  });
+    String? matchText,
+  }) : matchText = matchText ?? foodText;
 
   /// Where the whole item came from in the typed text.
   final Span span;
@@ -75,9 +76,16 @@ class ItemDraft {
   final List<Span> amountSpans;
 
   /// True when the item's food words include "no" or "without" inside one of
-  /// the user's protected names ("No sugar cola"). The matcher then does not
-  /// cut the words at the negation (5.2 step 3).
+  /// the user's protected names ("No sugar cola"). The matcher then must not
+  /// cut the words itself (5.2 step 3, ruling R39): give it [matchText] with
+  /// `negation: false`.
   final bool negationProtected;
+
+  /// The food words to match. Same as [foodText], except when
+  /// [negationProtected]: then the words are already cut at the first "no" or
+  /// "without" that is not inside a protected name, so "no sugar cola without
+  /// ice" is "no sugar cola".
+  final String matchText;
 
   /// Whether an amount was typed at all.
   bool get hasAmount => quantity != null;

@@ -456,6 +456,13 @@ ItemDraft? _build(_Item it, int end, List<Tok> t, CleanText clean) {
     return null;
   }
 
+  // R39: a "no" or "without" inside a protected name is not a negation. The
+  // matcher is then given the words cut at the first one outside any name.
+  bool isNeg(Tok w) =>
+      w.text.toLowerCase() == 'no' || w.text.toLowerCase() == 'without';
+  final protectedNegation = food.any((w) => w.prot && isNeg(w));
+  final cut = food.indexWhere((w) => !w.prot && isNeg(w));
+
   // Merge adjacent amount parts into spans of the original text.
   final ranges = it.parts.where((p) => p.$1 < end).toList()
     ..sort((a, b) => a.$1.compareTo(b.$1));
@@ -482,10 +489,12 @@ ItemDraft? _build(_Item it, int end, List<Tok> t, CleanText clean) {
     unit: it.unit,
     size: it.size,
     amountSpans: amountSpans,
-    negationProtected: food.any(
-      (w) =>
-          w.prot &&
-          (w.text.toLowerCase() == 'no' || w.text.toLowerCase() == 'without'),
-    ),
+    negationProtected: protectedNegation,
+    matchText: protectedNegation
+        ? food
+              .sublist(0, cut < 0 ? food.length : cut)
+              .map((w) => w.text)
+              .join(' ')
+        : null,
   );
 }

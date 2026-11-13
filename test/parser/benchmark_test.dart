@@ -141,8 +141,11 @@ String _stats(List<double> sorted) =>
 
 void main() {
   late Database db;
-  late List<IndexFood> foods;
-  late SearchIndex index;
+  List<IndexFood>? foodsOrNull;
+  SearchIndex? indexOrNull;
+  // Each test gets what it needs, so any one can be run by name.
+  List<IndexFood> getFoods() => foodsOrNull ??= readUsdaFoods(db);
+  SearchIndex getIndex() => indexOrNull ??= SearchIndex.build(getFoods());
 
   setUpAll(() {
     final dir = Directory.systemTemp.createTempSync('daybook_bench');
@@ -161,18 +164,20 @@ void main() {
     // of 3 builds, reading the foods from the database included.
     SearchIndex.build(readUsdaFoods(db));
     var best = 1 << 30;
+    var count = 0;
     final runs = <String>[];
     for (var i = 0; i < 3; i++) {
       final sw = Stopwatch()..start();
-      foods = readUsdaFoods(db);
+      final foods = readUsdaFoods(db);
+      count = foods.length;
       final read = sw.elapsedMilliseconds;
-      index = SearchIndex.build(foods);
+      SearchIndex.build(foods);
       final total = sw.elapsedMilliseconds;
       runs.add('read $read ms + build ${total - read} ms = $total ms');
       if (total < best) best = total;
     }
     final msg =
-        'index of ${foods.length} foods: fastest of 3 $best ms '
+        'index of $count foods: fastest of 3 $best ms '
         '(budget $_indexBudgetMs ms); ${runs.join(' | ')}';
     printOnFailure(msg);
     expect(best, lessThan(_indexBudgetMs), reason: msg);
@@ -181,7 +186,7 @@ void main() {
   test('re-parsing after a keystroke, p95 under $_keystrokeP95Ms ms', () {
     final loader = SqliteUsdaFoods(db);
     addTearDown(loader.dispose);
-    final parser = Parser(index, loader.call);
+    final parser = Parser(getIndex(), loader.call);
     final snapshot = UserSnapshot.from(_plausibleData());
     for (var pass = 0; pass < 3; pass++) {
       _typeOnce(parser, snapshot, _brief);
@@ -204,7 +209,7 @@ void main() {
     // correction is remembered from an earlier pass.
     final snapshot = UserSnapshot.from(_plausibleData());
     List<double> pass() {
-      final ix = SearchIndex.build(foods);
+      final ix = SearchIndex.build(getFoods());
       final loader = SqliteUsdaFoods(db);
       try {
         return _typeOnce(Parser(ix, loader.call), snapshot, _typos);
@@ -234,7 +239,7 @@ void main() {
       final times = <double>[];
       for (var i = 0; i < n; i++) {
         final loader = SqliteUsdaFoods(db);
-        final parser = Parser(index, loader.call);
+        final parser = Parser(getIndex(), loader.call);
         final sw = Stopwatch()..start();
         final lines = parser.parseMeal(_tenItems, -1, snapshot);
         times.add(sw.elapsedMicroseconds / 1000);
