@@ -193,6 +193,7 @@ class FoodDraft {
     required this.picks,
     required this.added,
     this.editingMealId,
+    this.editingDate,
   });
 
   final String date;
@@ -204,6 +205,10 @@ class FoodDraft {
 
   /// Set when the screen was editing a logged meal.
   final int? editingMealId;
+
+  /// The day that logged meal is stored on, which can differ from [date] when
+  /// the day was changed on the screen.
+  final String? editingDate;
 }
 
 /// What the screen hands back when it closes.
@@ -444,11 +449,10 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     super.dispose();
   }
 
-  /// The day the meal being edited is stored on, or null for a new meal. For
-  /// a draft of an edit this is the draft's date.
+  /// The day the meal being edited is stored on, or null for a new meal. A
+  /// draft of an edit carries it, because the date shown may have changed.
   String? get _storedDate =>
-      widget.editing?.meal.localDate ??
-      (widget.draft?.editingMealId != null ? widget.draft!.date : null);
+      widget.editing?.meal.localDate ?? widget.draft?.editingDate;
 
   /// True when the screen shows the day the edited meal is stored on, so that
   /// meal is already in the day's food.
@@ -1664,6 +1668,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       picks: _picksNow(),
       added: _added,
       editingMealId: _editingMealId,
+      editingDate: _storedDate,
     );
   }
 
@@ -1905,9 +1910,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// No arithmetic here: [DayBudget.withFood] and its shown numbers.
   ///
   /// With [hide] nothing is drawn. That is for large text with the keyboard up
-  /// and an item still to fix, where the bar has no room for one more line
-  /// (and the figure is not final while an item is not counted). It is back
-  /// when the keyboard goes or the item is fixed.
+  /// and an item still to fix: on the cover screen the bar has no room for one
+  /// more line then. It is back when the keyboard goes or the item is fixed.
   Widget _leftToday(double kcal, bool counted, {bool hide = false}) {
     final b = _dayBudget;
     if (b == null || hide) return const SizedBox.shrink();

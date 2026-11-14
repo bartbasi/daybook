@@ -2570,6 +2570,43 @@ void main() {
       expect(left('1,648 left today after this meal'), findsOneWidget);
     });
 
+    appTest('a reopened edit still leaves the stored meal out: Breakfast of '
+        '490 on Nov 12, edited on Nov 11 and reopened with Undo, then back '
+        'on Nov 12', (tester) async {
+      await goals(tester, 2138);
+      await logBrief(tester);
+      await openApp(tester);
+      await openBreakfast(tester);
+      expect(left('1,648 left today with this meal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Previous day'));
+      await settle(tester);
+      await type(tester, brief);
+      await tester.tap(find.byTooltip('Close'));
+      await settle(tester);
+      await tester.tap(find.text('Undo'));
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      // Nov 11 has no food: 2,138 less the meal on screen and the same text typed, 981 shown (the brief is a little over 490).
+      expect(left('1,157 left that day after this meal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Next day'));
+      await settle(tester);
+      // Nov 12: the stored 490 is left out, so 2,138 less 981.
+      expect(left('1,157 left today with this meal'), findsOneWidget);
+    });
+
+    appTest('in the Fix state at 344 dp, text x1 and the keyboard up, the '
+        'line is shown and nothing overflows', (tester) async {
+      await goals(tester, 2138);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await type(tester, '$brief, 1 zorbo, 1 apple');
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Fix 1 item'), findsOneWidget);
+      expect(find.textContaining('left today after this meal'), findsOneWidget);
+    });
+
     appTest('in the Fix state (an item not found) at 344 dp, text x2 and the '
         'keyboard up, nothing overflows and the box stays at least 48 dp; the '
         'line is back with the keyboard down', (tester) async {

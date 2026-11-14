@@ -1112,6 +1112,93 @@ void main() {
     });
   });
 
+  group('macro goals that would be removed, and long stored grams', () {
+    Future<void> saveWithMacros(WidgetTester tester, MacroMode mode) =>
+        real(tester, () async {
+          await db.saveWeight(181.8, UnitSystem.imperial, nov8);
+          await db.saveGoals(
+            GoalInput(
+              sex: Sex.male,
+              birthDate: '1982-05-14',
+              heightCm: inToCm(71),
+              activity: ActivityLevel.lightlyActive,
+              rate: const WeeklyRate(Target.lose, 0.5, UnitSystem.imperial),
+              macroMode: mode,
+              protein: mode == MacroMode.grams ? 150 : 30,
+              carbs: mode == MacroMode.grams ? 227 : 40,
+              fat: mode == MacroMode.grams ? 70 : 30,
+            ),
+            nov8,
+          );
+        });
+
+    appTest('saved in grams, Percent shown and empty: one sentence says Save '
+        'removes them, and after Save the row has none', (tester) async {
+      await saveWithMacros(tester, MacroMode.grams);
+      await openGoals(tester);
+      expect(find.text(S.goalsMacrosWillClear(false)), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      await tap(tester, find.text('Percent'));
+      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+      await enter(tester, 'Protein', '30');
+      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      await enter(tester, 'Protein', '');
+      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+      await tap(tester, saveButton());
+      final g = (await goalRows(tester)).last;
+      expect(g.effectiveFrom, '2026-11-12');
+      expect([g.proteinTarget, g.carbsTarget, g.fatTarget], [null, null, null]);
+    });
+
+    appTest('saved in percent, Grams shown and empty: the sentence is there '
+        'too', (tester) async {
+      await saveWithMacros(tester, MacroMode.percent);
+      await openGoals(tester);
+      await tap(tester, find.text('Grams'));
+      expect(find.text(S.goalsMacrosWillClear(false)), findsOneWidget);
+      await tap(tester, find.text('Percent'));
+      expect(find.text(S.goalsMacrosWillClear(false)), findsNothing);
+      await tap(tester, find.text('Grams'));
+      await tap(tester, saveButton());
+      final g = (await goalRows(tester)).last;
+      expect(g.effectiveFrom, '2026-11-12');
+      expect([g.proteinTarget, g.carbsTarget, g.fatTarget], [null, null, null]);
+    });
+
+    appTest('typed and not saved counts too, and nothing typed or saved '
+        'shows no sentence', (tester) async {
+      await seedWeight(tester, 181.8);
+      await openGoals(tester);
+      await tap(tester, find.text('Percent'));
+      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      await tap(tester, find.text('Grams'));
+      await enter(tester, 'Protein', '150');
+      await tap(tester, find.text('Percent'));
+      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+    });
+
+    appTest('a stored gram goal with five decimals does not hide Recalculate '
+        'when nothing is edited', (tester) async {
+      await saveSampleOnNov8(tester);
+      await real(
+        tester,
+        () => db
+            .update(db.goals)
+            .write(
+              const GoalsCompanion(
+                proteinTarget: Value(150.12345),
+                carbsTarget: Value(227),
+                fatTarget: Value(70),
+              ),
+            ),
+      );
+      await seedWeight(tester, 190.0, at: at('2026-11-10', 7, 0));
+      await openGoals(tester);
+      expect(find.text(S.goalsDrifted), findsOneWidget);
+      expect(find.text('Recalculate'), findsOneWidget);
+    });
+  });
+
   group('a failed load, a goal that cannot be used, and an old birth date', () {
     appTest('a failed load says so with Try again and shows no form', (
       tester,
