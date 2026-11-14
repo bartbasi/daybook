@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens are next |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens are built and committed on this computer only (3a16ba5), reviewed by reading, with changes needed. See "Workout screens: where they stand" below |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -111,7 +111,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 79. **128 exercises are under CC BY-SA 3.0, whose wording on "technological measures" sits badly with App Store copy protection.** Version 4.0 (777 entries) softens this. It is a known grey area that many apps on the App Store live with, wger's own among them. The choice is to accept it or to leave those 128 descriptions out of the iPhone build. Recommended: accept. This is not legal advice.
 80. **Weekly volume counts sets in ten muscle groups**: chest, shoulders, triceps, back, biceps, quads, hamstrings, glutes, calves and abs. The wireframe shows eight; glutes and abs are added so those sets are counted. The grouping is Daybook's own: lats and trapezius count as back, brachialis as biceps, soleus as calves, the obliques as abs, serratus anterior as chest. An exercise with no muscles on record uses its wger category when that names one group; 94 exercises have neither (their category is Legs, Arms or Cardio) and their sets count toward no group.
 81. **A workout still running adds nothing to the day's budget**, also when you have typed your own calorie number on it. It counts once it is finished.
-82. **Starting a workout while one from an earlier day is still running finishes the old one first.** Its time still ends at its last logged set, so a forgotten Finish costs nothing. Without this, Thursday's sets would be logged into Monday's workout and Monday would get days of calories. A workout from earlier today still blocks a new start; "Return to workout" continues it. One edge: someone training across midnight who taps Start by mistake finds the earlier workout finished; Resume on it brings it back. Say if you would rather be asked first.
+82. **Starting a workout while one from an earlier day is still running finishes the old one first.** Its time still ends at its last logged set, so a forgotten Finish costs nothing. Without this, Thursday's sets would be logged into Monday's workout and Monday would get days of calories. A workout from earlier today still blocks a new start; "Return to workout" continues it. One edge: someone training across midnight who taps Start by mistake finds the earlier workout finished. Its logged sets are kept, but its planned sets that were not logged are dropped, and there is no way to continue it. An earlier version of this note said Resume brings it back; the reviewer showed that is wrong. Say if you would rather be asked first, or want a way to take the start back.
 
 ## Open questions from the plan: answered
 
@@ -197,6 +197,18 @@ Two more behaviors to know about:
 - **Editing a meal inside the 10 seconds after saving it replaces the Undo for the first save.** The edit has no Undo of its own; to remove the meal, open it and delete it (which does have Undo).
 
 - **A workout continued days after it started counts the whole span.** Time and calories run from the start to the last logged set, and the database has no place for breaks. Resume is offered only right after Finish, so this takes leaving a workout open for days and then logging another set. Typing your own calorie number, or deleting the workout, fixes it.
+
+## Workout screens: where they stand
+
+The workout screens (the Workouts tab, the running workout, the set sheet, the rest timer, the finish summary and Home's way back to a workout) are in commit 3a16ba5 on this computer. They are not pushed.
+
+- **Not checked by the lead's own test run.** The implementer reported 3,253 tests passing. The lead's run was stopped by the computer for lack of memory before the tests finished, and was not started again.
+- **Reviewed by reading only.** The reviewer ran nothing, for the same reason. Verdict: changes needed.
+- **Two findings block the merge.** Removing a set or an exercise from a running workout cannot be undone, which breaks the rule that deletes offer Undo. And the running workout screen ignores the phone's bottom bar, so the rest timer's buttons can sit under it.
+- **Smaller findings to fix.** The message after an old workout is finished by a new start says "Nothing was lost", which is not true of planned sets. Tapping Change then Save on the finish screen without typing turns the estimate into "your number". The rest timer of a workout that ended elsewhere keeps running and can buzz later. "Empty workout" starts a workout that cannot hold anything until the exercise picker exists.
+- **To check on the phone later.** Whether the buzz at the end of a rest is strong enough, and whether it works with touch vibration turned off.
+
+None of these is fixed yet. Each fix needs test runs.
 
 ## Not finished
 
