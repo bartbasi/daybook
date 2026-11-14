@@ -47,10 +47,10 @@ DESCRIPTION_LEFT_OUT = {
     204: "author field names ExRx",
     260: "author field names realsimple.com",
     580: "author field names bodybuilding.com",
-    655: "author field names carinatum.com",
-    688: "author field names Mens Fitness",
-    445: "author field names a commercial site",
-    599: "author field names a commercial magazine or site",
+    655: "author field names bodybuilding.com",
+    688: "author field names carinatum.com",
+    445: "author field names Mens Fitness",
+    599: "author field names Mens Fitness",
 }
 
 # Entries left out of the asset, by id, with the reason.
