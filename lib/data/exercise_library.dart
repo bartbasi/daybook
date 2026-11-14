@@ -24,6 +24,80 @@ import 'database.dart';
 //   detail screen shows. They are null for the user's own exercises. Credit
 //   text never holds an email address (the build tool replaced those).
 // - Descriptions are plain text, lines separated by '\n'.
+// - [ExerciseLibrary.groupsOf] is the `musclesOf` function for the weekly
+//   volume: the [VolumeGroup]s of an exercise's primary muscles, each once.
+//   Screens turn each group into a word from strings.dart; this file has no
+//   user-facing text. The enum order is the order of the weekly volume rows.
+//   The mapping from wger's muscle names to groups is Daybook's own choice,
+//   not wger's. A test fails if a refresh brings a muscle with no group.
+// - [ExerciseLibrary.search] takes the picker chip as `group`: Chest,
+//   Shoulders, Back, Abs, Calves, Arms or Legs (or a wger muscle name).
+
+/// The muscle groups of the weekly volume, in the order the frames list
+/// them. Glutes and abs are not in the frames; they are here so those sets
+/// are not lost.
+enum VolumeGroup {
+  chest,
+  shoulders,
+  triceps,
+  back,
+  biceps,
+  quads,
+  hamstrings,
+  glutes,
+  calves,
+  abs,
+}
+
+/// Daybook's own mapping from a wger primary muscle name to one group.
+const volumeGroupOfMuscle = <String, VolumeGroup>{
+  'Chest': VolumeGroup.chest,
+  'Serratus anterior': VolumeGroup.chest,
+  'Shoulders': VolumeGroup.shoulders,
+  'Triceps': VolumeGroup.triceps,
+  'Lats': VolumeGroup.back,
+  'Trapezius': VolumeGroup.back,
+  'Biceps': VolumeGroup.biceps,
+  'Brachialis': VolumeGroup.biceps,
+  'Quads': VolumeGroup.quads,
+  'Hamstrings': VolumeGroup.hamstrings,
+  'Glutes': VolumeGroup.glutes,
+  'Calves': VolumeGroup.calves,
+  'Soleus': VolumeGroup.calves,
+  'Abs': VolumeGroup.abs,
+  'Obliquus externus abdominis': VolumeGroup.abs,
+};
+
+// For an exercise with no primary muscle: the wger categories that name one
+// group. Arms, Legs and Cardio name none.
+const _groupOfCategory = <String, VolumeGroup>{
+  'chest': VolumeGroup.chest,
+  'shoulders': VolumeGroup.shoulders,
+  'back': VolumeGroup.back,
+  'abs': VolumeGroup.abs,
+  'calves': VolumeGroup.calves,
+};
+
+// Picker chips that cover several groups, used to place the user's own
+// exercises (which have no wger category).
+const _chipGroups = <String, Set<VolumeGroup>>{
+  'chest': {VolumeGroup.chest},
+  'shoulders': {VolumeGroup.shoulders},
+  'back': {VolumeGroup.back},
+  'abs': {VolumeGroup.abs},
+  'calves': {VolumeGroup.calves},
+  'arms': {VolumeGroup.biceps, VolumeGroup.triceps},
+  'legs': {
+    VolumeGroup.quads,
+    VolumeGroup.hamstrings,
+    VolumeGroup.glutes,
+    VolumeGroup.calves,
+  },
+};
+
+final _foldedMuscleGroups = {
+  for (final e in volumeGroupOfMuscle.entries) foldText(e.key): e.value,
+};
 
 const _assetPath = 'assets/exercises/wger_exercises.json';
 
@@ -96,6 +170,20 @@ class LibraryExercise {
 
   late final String _nameKey = foldText(name);
   late final List<String> _aliasKeys = [for (final a in aliases) foldText(a)];
+
+  /// The volume groups of the primary muscles, each once, in the order of
+  /// the muscles. With no primary muscle, the group the category names (Chest,
+  /// Shoulders, Back, Abs, Calves), else empty.
+  late final List<VolumeGroup> groups = () {
+    if (primaryMuscles.isEmpty) {
+      final g = _groupOfCategory[foldText(category ?? '')];
+      return g == null ? const <VolumeGroup>[] : [g];
+    }
+    return <VolumeGroup>{
+      for (final m in primaryMuscles) ?_foldedMuscleGroups[foldText(m)],
+    }.toList();
+  }();
+
   late final List<String> _groupKeys = [
     for (final m in primaryMuscles) foldText(m),
     if (category != null) foldText(category!),
@@ -233,6 +321,13 @@ class ExerciseLibrary {
   /// exercises included.
   ExerciseLookup lookup(String ref) => ExerciseLookup._(ref, _byRef[ref]);
 
+  /// The volume groups of the exercise for [ref], each once: the
+  /// `musclesOf` function for the workout data layer. Empty for an unknown
+  /// ref, an exercise whose muscles map to no group, and an exercise with no
+  /// muscle whose category names no single group (Arms, Legs, Cardio).
+  List<VolumeGroup> groupsOf(String ref) =>
+      _byRef[ref]?.groups ?? const <VolumeGroup>[];
+
   /// The listed exercises whose name or an alias holds every word of [query]
   /// (case and accents ignored), sorted by name. An empty query lists
   /// everything. [group] keeps one muscle or category at a time: it is
@@ -246,7 +341,12 @@ class ExerciseLibrary {
         : foldText(group.trim());
     return [
       for (final e in all)
-        if ((g == null || e._groupKeys.contains(g)) &&
+        if ((g == null ||
+                e._groupKeys.contains(g) ||
+                (e.isUser &&
+                    e.groups.any(
+                      (v) => _chipGroups[g]?.contains(v) ?? false,
+                    ))) &&
             words.every(
               (w) =>
                   e._nameKey.contains(w) ||

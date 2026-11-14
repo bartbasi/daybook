@@ -275,6 +275,125 @@ void main() {
     });
   });
 
+  group('volume groups', () {
+    LibraryExercise user(String muscles, {String? category}) => LibraryExercise(
+      ref: 'local:77',
+      name: 'Zorbulator',
+      category: category,
+      primaryMuscles: [muscles],
+    );
+
+    test('the groups are in the frames order, with glutes and abs added', () {
+      expect(VolumeGroup.values, [
+        VolumeGroup.chest,
+        VolumeGroup.shoulders,
+        VolumeGroup.triceps,
+        VolumeGroup.back,
+        VolumeGroup.biceps,
+        VolumeGroup.quads,
+        VolumeGroup.hamstrings,
+        VolumeGroup.glutes,
+        VolumeGroup.calves,
+        VolumeGroup.abs,
+      ]);
+    });
+
+    test('every primary muscle in the asset has a group', () {
+      final muscles = {for (final e in lib.all) ...e.primaryMuscles};
+      final missing = [
+        for (final m in muscles)
+          if (!volumeGroupOfMuscle.containsKey(m)) m,
+      ];
+      expect(missing, isEmpty, reason: 'unmapped muscles: $missing');
+      expect(volumeGroupOfMuscle['Lats'], VolumeGroup.back);
+      expect(volumeGroupOfMuscle['Trapezius'], VolumeGroup.back);
+      expect(volumeGroupOfMuscle['Brachialis'], VolumeGroup.biceps);
+      expect(volumeGroupOfMuscle['Soleus'], VolumeGroup.calves);
+      expect(
+        volumeGroupOfMuscle['Obliquus externus abdominis'],
+        VolumeGroup.abs,
+      );
+      expect(volumeGroupOfMuscle['Serratus anterior'], VolumeGroup.chest);
+    });
+
+    test('Lats and Trapezius count once, as back (wger:448)', () {
+      final e = lib.lookup('wger:448').exercise!;
+      expect(e.primaryMuscles, containsAll(['Lats', 'Trapezius']));
+      expect(lib.groupsOf('wger:448'), [VolumeGroup.back]);
+    });
+
+    test('no muscles falls back to a category that names a group', () {
+      // wger:132 (Burpees) has no muscles and the category Chest.
+      final e = lib.lookup('wger:132').exercise!;
+      expect(e.primaryMuscles, isEmpty);
+      expect(e.category, 'Chest');
+      expect(lib.groupsOf('wger:132'), [VolumeGroup.chest]);
+      final byCategory = lib.all.firstWhere(
+        (x) => x.primaryMuscles.isEmpty && x.category == 'Chest',
+      );
+      expect(lib.groupsOf(byCategory.ref), [VolumeGroup.chest]);
+      final abs = lib.all.firstWhere(
+        (x) => x.primaryMuscles.isEmpty && x.category == 'Abs',
+      );
+      expect(lib.groupsOf(abs.ref), [VolumeGroup.abs]);
+    });
+
+    test('Arms, Legs and Cardio with no muscles give an empty list', () {
+      // wger:31 is category Arms with no muscles.
+      final arms = lib.lookup('wger:31').exercise!;
+      expect(arms.category, 'Arms');
+      expect(arms.primaryMuscles, isEmpty);
+      expect(lib.groupsOf('wger:31'), isEmpty);
+      for (final c in ['Legs', 'Cardio']) {
+        final e = lib.all.firstWhere(
+          (x) => x.primaryMuscles.isEmpty && x.category == c,
+        );
+        expect(lib.groupsOf(e.ref), isEmpty, reason: c);
+      }
+    });
+
+    test('an unknown or missing ref gives an empty list', () {
+      expect(lib.groupsOf('wger:99999999'), isEmpty);
+      expect(lib.groupsOf('local:5'), isEmpty);
+      expect(lib.groupsOf('nonsense'), isEmpty);
+    });
+
+    test('a user exercise uses its own muscle through the same mapping', () {
+      final merged = lib.withUser([user('Lats')]);
+      expect(merged.groupsOf('local:77'), [VolumeGroup.back]);
+      expect(lib.withUser([user('lats')]).groupsOf('local:77'), [
+        VolumeGroup.back,
+      ]);
+      expect(lib.withUser([user('Forearms')]).groupsOf('local:77'), isEmpty);
+    });
+
+    test('a user exercise shows under the picker chip of its muscle group', () {
+      List<String> refs(ExerciseLibrary l, String chip) => [
+        for (final e in l.search('zorbulator', group: chip)) e.ref,
+      ];
+      final back = lib.withUser([user('Lats')]);
+      expect(refs(back, 'Back'), ['local:77']);
+      expect(refs(back, 'Legs'), isEmpty);
+      expect(refs(lib.withUser([user('Biceps')]), 'Arms'), ['local:77']);
+      expect(refs(lib.withUser([user('Triceps')]), 'Arms'), ['local:77']);
+      for (final m in ['Quads', 'Hamstrings', 'Glutes', 'Calves']) {
+        expect(refs(lib.withUser([user(m)]), 'Legs'), ['local:77'], reason: m);
+      }
+      expect(refs(lib.withUser([user('Chest')]), 'chest'), ['local:77']);
+      expect(refs(lib.withUser([user('Chest')]), 'Arms'), isEmpty);
+    });
+
+    test('wger entries keep their picker behavior', () {
+      final back = lib.search('', group: 'Back');
+      expect(
+        back.every(
+          (e) => e.primaryMuscles.contains('Back') || e.category == 'Back',
+        ),
+        isTrue,
+      );
+    });
+  });
+
   group('search', () {
     test('by name', () {
       final r = lib.search('bench press');
