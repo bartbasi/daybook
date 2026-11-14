@@ -9,8 +9,8 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
-| 3 Goals and daily budget | Built: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests. In final review |
-| 4 Resistance training | Not started |
+| 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are being built |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
