@@ -807,6 +807,198 @@ class S {
   static const undoDeleteMealFailed =
       'Could not undo. The meal is still deleted.';
 
+  // More: the Goals row (settings frame 1).
+  static const moreGoals = 'Goals';
+  static const moreGoalsSub = 'Calories, macros, other nutrients';
+
+  // Home: the budget card and the macro meters (home frames 1 and 2).
+  static const homeSetGoals = 'Set your goals';
+  static const homeSetGoalsSub = 'Work out how much you can eat each day.';
+  static const homeKcalLeft = 'kcal left';
+  static const homeKcalOver = 'kcal over';
+
+  /// 'Goal 2,138 + exercise 383 - food 1,266': the shown parts, so it adds up.
+  static String homeBudgetSum(int goal, int exercise, int food) =>
+      'Goal ${count(goal)} + exercise ${count(exercise)} - food ${count(food)}';
+  static String homeBudgetSpoken(int left, int goal, int exercise, int food) =>
+      '${count(left.abs())} kcal ${left < 0 ? 'over' : 'left'}. '
+      'Goal ${count(goal)} plus exercise ${count(exercise)} '
+      'minus food ${count(food)}.';
+
+  /// '86 of 150 g', with ', over' once the goal is passed.
+  static String homeMacroOf(int eaten, int goal, bool over) =>
+      '${count(eaten)} of ${count(goal)} g${over ? ', over' : ''}';
+  static String homeMacroSpoken(String name, int eaten, int goal, bool over) =>
+      '$name, ${count(eaten)} of ${count(goal)} grams${over ? ', over' : ''}';
+
+  // Food entry: the "left today" line in the totals bar (food-entry frames 1,
+  // 3 and 13). [today] is false for another date.
+  static String leftToday(int left, bool today, String after) =>
+      '${count(left.abs())} ${left < 0 ? 'over' : 'left'} '
+      '${today ? 'today' : 'that day'}$after';
+  static const leftAfterThisMeal = ' after this meal';
+  static const leftWithThisMeal = ' with this meal';
+
+  // Goals (goals.html).
+  static const goalsTitle = 'Goals';
+  static String goalsResting(int kcal) =>
+      'Resting rate (Mifflin-St Jeor): ${count(kcal)} kcal';
+  static String goalsActivityLine(String factor, String level, int kcal) =>
+      'x $factor ${level.toLowerCase()}: ${count(kcal)} kcal to stay the same';
+  static String goalsRateLose(int kcal, String amount, String unit) =>
+      '- ${count(kcal)} to lose $amount $unit a week';
+  static String goalsRateGain(int kcal, String amount, String unit) =>
+      '+ ${count(kcal)} to gain $amount $unit a week';
+  static const goalsRateStay = 'No change, to stay the same';
+  static const goalsKcalADay = 'kcal a day';
+  static String goalsCalculated(String when) => 'Calculated $when.';
+  static const goalsRecalculate = 'Recalculate';
+  static String goalsNewFromWeighIn(String weight, String unit, String when) =>
+      'New, from your latest weigh-in ($weight $unit, $when). '
+      'Kept when you tap Save.';
+  static const goalsDrifted =
+      'Your weight or details changed after this goal was calculated. The '
+      'steps above use them as they are now, so they do not add up to the '
+      'goal. Tap Recalculate to update it.';
+  static const goalsLowIntakeMen =
+      'This is under 1,500 kcal a day, which is very low.';
+  static const goalsLowIntakeWomen =
+      'This is under 1,200 kcal a day, which is very low.';
+  static const goalsNeedProfile =
+      'Fill in About you below to see your calorie goal.';
+  static const goalsNeedWeight =
+      'Your calorie goal is worked out from your weight, and you have no '
+      'weigh-in yet. Log your weight on Today, then come back. Or use your '
+      'own calorie goal below.';
+  static const goalsAbout = 'About you';
+  static const goalsProfileMissing =
+      'Fill in your sex, birth date and height to work out a calorie goal.';
+  static const goalsSex = 'Sex (for the formula)';
+  static const goalsMale = 'Male';
+  static const goalsFemale = 'Female';
+  static const goalsSexMissing = 'Pick male or female.';
+  static const goalsBorn = 'Born';
+  static const goalsBornMissing = 'Pick your birth date.';
+  static const goalsBornFuture = 'Pick a birth date in the past.';
+  static const goalsHeight = 'Height';
+  static const goalsFeet = 'Feet';
+  static const goalsInches = 'Inches';
+  static const goalsCentimeters = 'Centimeters';
+  static const unitFt = 'ft';
+  static const unitIn = 'in';
+  static const unitCm = 'cm';
+  static const goalsHeightBad = 'Enter your height.';
+  static const goalsHeightRange =
+      'That height looks wrong. Check the feet and inches.';
+  static const goalsHeightRangeMetric =
+      'That height looks wrong. Enter it in centimeters, from 50 to 275.';
+  static const goalsWeight = 'Weight';
+  static const goalsWeightNote =
+      'Comes from your weigh-ins. The calorie goal stays fixed until you tap '
+      'Recalculate or save new goals, which use your latest weigh-in.';
+  static String goalsLatestWeight(String weight, String unit, String when) =>
+      'Latest weigh-in: $weight $unit, $when';
+  static const goalsActivity = 'Activity, not counting logged workouts';
+  static const goalsSedentary = 'Sedentary';
+  static const goalsSedentaryNote = 'Desk job, little walking';
+  static const goalsLightly = 'Lightly active';
+  static const goalsLightlyNote = 'On your feet some of the day';
+  static const goalsModerately = 'Moderately active';
+  static const goalsModeratelyNote = 'On your feet most of the day';
+  static const goalsVery = 'Very active';
+  static const goalsVeryNote = 'Physical job';
+  static const goalsExtra = 'Extra active';
+  static const goalsExtraNote = 'Hard physical job every day';
+  static String goalsFactor(String factor) => 'x $factor';
+  static const goalsTarget = 'Target';
+  static const goalsLose = 'Lose';
+  static const goalsStay = 'Stay the same';
+  static const goalsGain = 'Gain';
+  static const goalsPerWeek = 'Per week';
+  static String goalsRateChip(String amount, String unit) => '$amount $unit';
+  static String goalsRateChipSpoken(String amount, String unit) =>
+      '$amount $unit a week';
+  static String goalsRateKept(String amount, String unit, String target) =>
+      'Your saved rate is $amount $unit a week to $target. Pick one of these '
+      'to change it.';
+  static const goalsRateMissing = 'Pick how much you want to change a week.';
+  static const goalsOwnHeader = 'Your own number';
+  static const goalsOwnToggle = 'Use my own calorie goal instead';
+  static const goalsOwnField = 'Calories a day';
+  static const goalsOwnBad = 'Enter a whole number of calories above 0.';
+  static String goalsCalcAbove(int kcal) =>
+      'The calculated goal (${count(kcal)}) is above, grayed out.';
+  static String goalsOwnNotUsed(int kcal) =>
+      'The calculated ${count(kcal)} is not used while this is on.';
+  static const goalsAddBack = 'Exercise calories added to the day';
+  static String goalsAddBackExample(int run, int added) =>
+      "A ${count(run)} kcal run adds ${count(added)} to that day's budget.";
+  static const goalsAddBackBad = 'Pick 0%, 50% or 100%.';
+  static String percentOption(int p) => '$p%';
+  static const goalsMacros = 'Macros';
+  static const goalsGrams = 'Grams';
+  static const goalsPercent = 'Percent';
+  static const goalsTotal = 'Total';
+  static String goalsKcal(int kcal) => '${count(kcal)} kcal';
+  static String goalsGramsOut(int g) => '${count(g)} g';
+  static const goalsMatches = 'Matches your calorie goal.';
+  static String goalsMoreThanGoal(int kcal) =>
+      'That is ${count(kcal)} kcal more than your calorie goal.';
+  static String goalsLessThanGoal(int kcal) =>
+      'That is ${count(kcal)} kcal less than your calorie goal.';
+  static String goalsPercentAdds(int total, int left) => left >= 0
+      ? 'Adds to $total%. $left% left.'
+      : 'Adds to $total%. ${-left}% over.';
+  static String goalsPercentNote(int pct, int goal, int kcal, int grams) =>
+      'Grams follow the calorie goal: $pct% of ${count(goal)} kcal is '
+      '${count(kcal)} kcal, or ${count(grams)} g of protein.';
+  static const goalsMacrosIncomplete =
+      'Fill in all three, or leave all three empty.';
+  static const goalsPercentBad = 'Enter a whole number from 0 to 100.';
+  static String goalsPercentsDontAdd(int total) =>
+      'The percents must add to 100. They add to $total%.';
+  static const goalsOther = 'Other nutrients';
+  static const goalsOtherSub =
+      'Fiber, sodium, vitamins and more. Daily Values unless you change them.';
+  static const goalsApplies = 'Applies from today. Past days keep their goals.';
+  static String goalsSaved(int? kcal) => kcal == null
+      ? 'Saved. Your goals apply from today.'
+      : 'Saved. Your goal is ${count(kcal)} kcal a day, from today.';
+  static String goalsRecalculated(int? kcal) => kcal == null
+      ? 'Recalculated.'
+      : 'Recalculated. Your goal is ${count(kcal)} kcal a day, from today.';
+  static const goalsSaveFailed =
+      'Could not save. Nothing was changed. Tap Save to try again.';
+  static const goalsRecalcFailed =
+      'Could not recalculate. Nothing was changed. Tap Recalculate to try '
+      'again.';
+  static const goalsFix =
+      'Some fields need a look. Each one says what is wrong.';
+  static const goalsNoGoals = 'Save your goals first.';
+  static const goalsBadRate =
+      'The weekly rate saved with your goals is not one of the rates offered. '
+      'Pick one here and tap Save.';
+  static const goalsBadActivity =
+      'The activity level saved with your goals is not one of the five. Pick '
+      'one here and tap Save.';
+
+  // Other nutrients.
+  static const otherTitle = 'Other nutrients';
+  static const otherIntro =
+      'Daily Values unless you change them. Changes are kept when you tap '
+      'Save on Goals.';
+  static const otherDailyValue = 'Daily Value';
+  static const otherYourGoal = 'Your goal';
+  static const otherNoGoal = 'No goal';
+  static String otherRowSub(String amount, String unit, String source) =>
+      '$amount $unit. $source';
+  static String otherEditTitle(String name) => 'Goal for $name';
+  static const otherField = 'Goal';
+  static const otherBad = 'Enter a number above 0.';
+  static const otherUseDaily = 'Use the Daily Value';
+  static const otherClear = 'Remove my goal';
+  static const otherCancel = 'Cancel';
+
   // Used by the food editor and the barcode lines.
   static const notListed = 'not listed';
   static const offCredit = 'Data from Open Food Facts (ODbL)';

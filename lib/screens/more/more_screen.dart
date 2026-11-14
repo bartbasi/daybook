@@ -7,6 +7,7 @@ import '../../app.dart';
 import '../../app_scope.dart';
 import '../../data/food_library_data.dart';
 import '../../strings.dart';
+import '../goals/goals_screen.dart';
 import '../my_foods/my_foods_screen.dart';
 import '../saved_meals/saved_meals_screen.dart';
 
@@ -47,6 +48,15 @@ class _MoreScreenState extends State<MoreScreen> {
                 S.moreTitle,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
+            ),
+          ),
+          ListTile(
+            minTileHeight: 56,
+            title: const Text(S.moreGoals),
+            subtitle: const Text(S.moreGoalsSub),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const GoalsScreen()),
             ),
           ),
           StreamBuilder<List<SavedMealDetail>>(

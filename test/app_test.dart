@@ -12,6 +12,7 @@ import 'package:daybook/parser/parse_worker.dart';
 import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/util/units.dart';
 import 'package:daybook/screens/home/home_screen.dart';
+import 'package:daybook/screens/goals/goals_screen.dart';
 import 'package:daybook/screens/more/more_screen.dart';
 import 'package:daybook/screens/my_foods/my_foods_screen.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
@@ -207,6 +208,27 @@ void main() {
     expect(find.text('Friday, Nov 13'), findsOneWidget);
     expect(find.text('Thursday, Nov 12'), findsNothing);
     expect(find.text('Yesterday, 11:59 pm'), findsOneWidget);
+  });
+
+  appTest('More lists Goals first, with its words, and it opens the Goals '
+      'screen over the tab bar', (tester) async {
+    await openApp(tester);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'More'));
+    await tester.pumpAndSettle();
+    expect(find.text('Calories, macros, other nutrients'), findsOneWidget);
+    final goals = tester.getTopLeft(find.text('Goals'));
+    expect(
+      goals.dy,
+      lessThan(tester.getTopLeft(find.text('Saved meals and aliases')).dy),
+    );
+    await tester.tap(find.text('Goals'));
+    await tester.pumpAndSettle();
+    expect(find.byType(GoalsScreen), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(GoalsScreen), findsNothing);
+    expect(find.byType(MoreScreen), findsOneWidget);
   });
 
   appTest('More opens, keeps Home alive, and leads to the saved meals', (

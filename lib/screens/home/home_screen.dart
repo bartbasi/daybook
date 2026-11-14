@@ -4,20 +4,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../../app.dart';
 import '../../app_scope.dart';
 import '../../data/database.dart';
 import '../../data/food_data.dart';
+import '../../data/goal_data.dart';
 import '../../data/nutrients.dart';
 import '../../data/settings_data.dart';
 import '../../data/weight_data.dart';
+import '../../math/calorie_budget.dart';
 import '../../math/weight_trend.dart';
 import '../../strings.dart';
 import '../../util/dates.dart';
 import '../../util/units.dart';
 import '../food/confirm_bar.dart';
 import '../food/food_entry_screen.dart';
+import '../goals/goals_screen.dart';
 import '../weight/weight_sheet.dart';
 
 /// The Today tab: the date, the meals, the weight row and the bottom action
@@ -47,6 +51,9 @@ class HomeScreenState extends State<HomeScreen> {
   Stream<UnitSystem>? _units;
   Stream<List<MealSlot>>? _slots;
   Stream<DayLog>? _day;
+  Stream<DayLog>? _eaten; // the meters' own, a stream has one listener
+  Stream<DayBudget?>? _budget;
+  Stream<GoalsForDay?>? _goals;
   String? _dayFor;
 
   // The one message above the action bar, with its Undo. The Undo of a deleted
@@ -73,8 +80,15 @@ class HomeScreenState extends State<HomeScreen> {
     // The meals follow the day: a new stream when "today" changes.
     if (_dayFor != widget.today) {
       _dayFor = widget.today;
-      _day = db.watchDay(widget.today);
+      _followDay(db);
     }
+  }
+
+  void _followDay(AppDatabase db) {
+    _day = db.watchDay(widget.today);
+    _eaten = db.watchDay(widget.today);
+    _budget = db.watchBudgetForDay(widget.today);
+    _goals = db.watchGoalsForDay(widget.today);
   }
 
   @override
@@ -83,7 +97,7 @@ class HomeScreenState extends State<HomeScreen> {
     // A new day (the shell moved past midnight): read that day's meals.
     if (_dayFor != widget.today) {
       _dayFor = widget.today;
-      _day = AppScope.of(context).db.watchDay(widget.today);
+      _followDay(AppScope.of(context).db);
     }
   }
 
@@ -236,6 +250,13 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _openGoals() {
+    Navigator.of(
+      context,
+      rootNavigator: true,
+    ).push(MaterialPageRoute<void>(builder: (_) => const GoalsScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final today = widget.today;
@@ -246,6 +267,9 @@ class HomeScreenState extends State<HomeScreen> {
           child: ContentWidth(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
+              // Everything stays built: the streams below have one listener each,
+              // so a child scrolled out of the cache could not listen again.
+              scrollCacheExtent: const ScrollCacheExtent.viewport(100),
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
@@ -259,6 +283,12 @@ class HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
+                ),
+                _BudgetPart(
+                  budget: _budget!,
+                  goals: _goals!,
+                  day: _eaten!,
+                  onSetGoals: _openGoals,
                 ),
                 _Meals(slots: _slots!, day: _day!, onOpen: openFood),
                 const SizedBox(height: 12),
@@ -435,6 +465,213 @@ class _WeightRow extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// The budget card and the macro meters, or the "Set your goals" card until
+/// goals exist (home.html frames 1 and 2). Every number on the card is one of
+/// [DayBudget]'s shown numbers, so the line under the big one always adds up.
+class _BudgetPart extends StatelessWidget {
+  const _BudgetPart({
+    required this.budget,
+    required this.goals,
+    required this.day,
+    required this.onSetGoals,
+  });
+
+  final Stream<DayBudget?> budget;
+  final Stream<GoalsForDay?> goals;
+  final Stream<DayLog> day;
+  final VoidCallback onSetGoals;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DayBudget?>(
+      stream: budget,
+      builder: (context, snap) {
+        // A null value is "no goals yet", not "still loading".
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        final b = snap.data;
+        if (b == null) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onSetGoals,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 56),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          S.homeSetGoals,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Text(S.homeSetGoalsSub),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _BudgetCard(budget: b),
+              _Meters(goals: goals, day: day),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BudgetCard extends StatelessWidget {
+  const _BudgetCard({required this.budget});
+
+  final DayBudget budget;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final left = budget.shownLeft;
+    return Semantics(
+      container: true,
+      label: S.homeBudgetSpoken(
+        left,
+        budget.shownGoal,
+        budget.shownAddBack,
+        budget.shownFood,
+      ),
+      excludeSemantics: true,
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.end,
+                spacing: 8,
+                children: [
+                  Text(
+                    S.count(left.abs()),
+                    style: theme.textTheme.displaySmall,
+                  ),
+                  Text(left < 0 ? S.homeKcalOver : S.homeKcalLeft),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                S.homeBudgetSum(
+                  budget.shownGoal,
+                  budget.shownAddBack,
+                  budget.shownFood,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Protein, carbs and fat eaten so far against the goals, each with its
+/// number in words. The bar is only a picture of the same numbers.
+class _Meters extends StatelessWidget {
+  const _Meters({required this.goals, required this.day});
+
+  final Stream<GoalsForDay?> goals;
+  final Stream<DayLog> day;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<GoalsForDay?>(
+      stream: goals,
+      builder: (context, goalsSnap) => StreamBuilder<DayLog>(
+        stream: day,
+        builder: (context, daySnap) {
+          final macros = goalsSnap.data?.macros;
+          final log = daySnap.data;
+          if (macros == null || log == null) return const SizedBox.shrink();
+          final totals = log.totals;
+          final items = [
+            (
+              Nutrients.protein,
+              totals[Nutrients.protein] ?? 0,
+              macros.proteinG,
+            ),
+            (Nutrients.carbs, totals[Nutrients.carbs] ?? 0, macros.carbsG),
+            (Nutrients.fat, totals[Nutrients.fat] ?? 0, macros.fatG),
+          ];
+          return Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 12),
+                  Expanded(
+                    child: _Meter(
+                      id: items[i].$1,
+                      eaten: items[i].$2,
+                      goal: items[i].$3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Meter extends StatelessWidget {
+  const _Meter({required this.id, required this.eaten, required this.goal});
+
+  final int id;
+  final double eaten;
+  final double goal;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = S.nutrientName(id);
+    final shownEaten = roundForDisplay(eaten);
+    final shownGoal = roundForDisplay(goal);
+    final over = shownEaten > shownGoal;
+    return Semantics(
+      container: true,
+      label: S.homeMacroSpoken(name, shownEaten, shownGoal, over),
+      excludeSemantics: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(S.homeMacroOf(shownEaten, shownGoal, over)),
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: goal <= 0 ? 0 : (eaten / goal).clamp(0.0, 1.0),
+            minHeight: 8,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
+      ),
     );
   }
 }

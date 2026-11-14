@@ -12,8 +12,10 @@ import '../../clock.dart';
 import '../../data/database.dart';
 import '../../data/food_data.dart';
 import '../../data/food_library_data.dart';
+import '../../data/goal_data.dart';
 import '../../data/nutrients.dart';
 import '../../data/weight_data.dart';
+import '../../math/calorie_budget.dart';
 import '../../parser/line.dart';
 import '../../parser/parse_worker.dart';
 import '../../strings.dart';
@@ -50,7 +52,7 @@ import 'meal_chips.dart';
 //   2.12 "Create a food called ..." in the not found sheet and "Add it as your
 //        own food" after a barcode is not found open the custom food editor
 //        ([sheetCreate]); the new food is picked like any other.
-//   3.2  [_leftTodaySeam] in the totals bar: the "left today" line.
+//   3.2  [_leftToday] in the totals bar: the "left today" line.
 
 /// A line that is not typed: it holds its food and amount itself (grammar 9.3).
 /// Shown from [line]; written from [stored] while it is untouched, so an
@@ -344,6 +346,14 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   var _slots = <MealSlot>[];
   StreamSubscription<List<MealSlot>>? _slotsSub;
 
+  // The day's budget for [_date], for the "left today" line. [_editedKcal] is
+  // what the meal being edited holds in the database, which that budget
+  // already counts, so the line does not count it twice.
+  StreamSubscription<DayBudget?>? _budgetSub;
+  DayBudget? _dayBudget;
+  double _editedKcal = 0;
+  String? _editedDate;
+
   late List<AddedLine> _added;
   int? _editingMealId;
   String _editingSlotName = '';
@@ -417,6 +427,8 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     _slotsSub = _db.watchMealSlots().listen((s) {
       if (mounted) setState(() => _slots = s);
     }, onError: (Object _) {});
+    _followBudget();
+    _loadEdited();
     if (_slotId == null) _chooseDefaultSlot();
     _attach(picks: widget.draft?.picks ?? const []);
   }
@@ -426,12 +438,39 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     if (identical(active, this)) active = null;
     _noticeTimer?.cancel();
     _slotsSub?.cancel();
+    _budgetSub?.cancel();
     _changes.dispose();
     _handle?.close();
     _failWaiters(const _Moved());
     _controller.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  void _followBudget() {
+    _budgetSub?.cancel();
+    _dayBudget = null;
+    _budgetSub = _db.watchBudgetForDay(_date).listen((b) {
+      if (mounted) setState(() => _dayBudget = b);
+    }, onError: (Object _) {});
+  }
+
+  Future<void> _loadEdited() async {
+    final id = _editingMealId;
+    if (id == null) return;
+    try {
+      final m = await _db.loadMeal(id);
+      if (m == null || !mounted) return;
+      setState(() {
+        _editedKcal = m.totals[Nutrients.energy] ?? 0;
+        _editedDate = m.meal.localDate;
+      });
+    } catch (_) {}
+  }
+
+  void _setDate(String date) {
+    setState(() => _date = date);
+    _followBudget();
   }
 
   Future<void> _chooseDefaultSlot() async {
@@ -1864,8 +1903,28 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     ),
   );
 
-  /// A seam for task 3.2: the "left today" line goes under the totals.
-  static const _leftTodaySeam = SizedBox.shrink();
+  /// The "left today" line under the totals (food-entry frames 1, 6 and 13):
+  /// the day's budget with this meal in it, from the shown parts of
+  /// [DayBudget]. Nothing before goals exist. A meal being edited is already
+  /// in the day's food, so its stored kcal come out first.
+  Widget _leftToday(double kcal, bool counted) {
+    final b = _dayBudget;
+    if (b == null) return const SizedBox.shrink();
+    final editedHere = _editing && _editedDate == _date;
+    final food = b.foodKcal - (editedHere ? _editedKcal : 0) + kcal;
+    final left = DayBudget(
+      goal: b.goal,
+      exerciseKcal: b.exerciseKcal,
+      addBackPercent: b.addBackPercent,
+      foodKcal: food,
+    ).shownLeft;
+    final after = editedHere
+        ? S.leftWithThisMeal
+        : counted
+        ? S.leftAfterThisMeal
+        : '';
+    return Text(S.leftToday(left, _date == _clock().localDate, after));
+  }
 
   /// Tapping the date opens a calendar that ends today (frame 1).
   Future<void> _pickDate() async {
@@ -1882,11 +1941,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       lastDate: last,
     );
     if (picked == null || !mounted) return;
-    setState(
-      () => _date = formatDate(
-        DateTime.utc(picked.year, picked.month, picked.day),
-      ),
-    );
+    _setDate(formatDate(DateTime.utc(picked.year, picked.month, picked.day)));
   }
 
   Widget _topBar(BuildContext context) {
@@ -1920,9 +1975,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       IconButton(
         tooltip: S.foodPreviousDay,
         icon: const Icon(Icons.chevron_left),
-        onPressed: _busy
-            ? null
-            : () => setState(() => _date = addDays(_date, -1)),
+        onPressed: _busy ? null : () => _setDate(addDays(_date, -1)),
       ),
       if (stacked) const Spacer() else Expanded(child: date),
       IconButton(
@@ -1931,7 +1984,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
         // The date stops at today.
         onPressed: _busy || _date.compareTo(today) >= 0
             ? null
-            : () => setState(() => _date = addDays(_date, 1)),
+            : () => _setDate(addDays(_date, 1)),
       ),
       _scanButton(),
       PopupMenuButton<String>(
@@ -2195,7 +2248,7 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                   ),
                 ),
         ),
-        _leftTodaySeam,
+        _leftToday(kcal ?? 0, !none),
         if (fix > 0)
           ExcludeSemantics(child: Text(S.itemsNotCounted(fix), style: bold)),
       ],

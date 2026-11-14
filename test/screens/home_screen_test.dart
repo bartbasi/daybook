@@ -7,7 +7,11 @@ import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
+import 'package:daybook/data/goal_data.dart';
 import 'package:daybook/data/nutrients.dart';
+import 'package:daybook/math/calorie_budget.dart';
+import 'package:daybook/screens/goals/goals_screen.dart';
+import 'package:daybook/strings.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
@@ -421,7 +425,7 @@ void main() {
         barButton('Weight'),
         barButton('Cardio'),
         find.widgetWithText(TextButton, 'Undo'),
-        find.byType(Card),
+        find.byType(Card).last, // the weight row; the first is the goals card
       ]) {
         final s = tester.getSize(f);
         expect(s.height, greaterThanOrEqualTo(48));
@@ -584,7 +588,7 @@ void main() {
       ]);
       tester.platformDispatcher.textScaleFactorTestValue = 2.0;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      await openApp(tester, size: Size(width, 700));
+      await openApp(tester, size: Size(width, 1100));
       expect(tester.takeException(), isNull);
       final row = find.ancestor(
         of: find.text('Egg, Bread, Butter, Coffee, Cream'),
@@ -613,5 +617,298 @@ void main() {
     await settle(tester);
     expect(find.textContaining('Could not undo'), findsNothing);
     expect((await rows(tester)).single.deletedAtMs, isNotNull);
+  });
+
+  // The budget card and the macro meters (task 3.2).
+
+  final nov8 = at('2026-11-08', 8, 15, -360);
+
+  /// Own calorie goal [kcal] from [from], with the macros.
+  Future<void> seedGoals(
+    WidgetTester tester, {
+    int kcal = 2138,
+    int addBack = 100,
+    Now? from,
+    MacroMode mode = MacroMode.grams,
+    double p = 150,
+    double c = 227,
+    double f = 70,
+  }) => tester.runAsync(
+    () => db.saveGoals(
+      GoalInput(
+        activity: ActivityLevel.lightlyActive,
+        rate: WeeklyRate.stay,
+        ownCalories: kcal,
+        addBackPercent: addBack,
+        macroMode: mode,
+        protein: p,
+        carbs: c,
+        fat: f,
+      ),
+      from ?? nov8,
+    ),
+  );
+
+  Future<void> seedRun(WidgetTester tester, double kcal) => tester.runAsync(
+    () => db
+        .into(db.cardioSessions)
+        .insert(
+          CardioSessionsCompanion.insert(
+            localDate: '2026-11-12',
+            startedAtMs: nowFixed.utcMs,
+            tzOffsetMinutes: -360,
+            activityName: 'Running',
+            durationSeconds: 1800,
+            kcalEstimated: Value(kcal),
+          ),
+        ),
+  );
+
+  MealLineInput macroLine(double kcal, double p, double c, double f) =>
+      MealLineInput(
+        foodRef: 'usda:1',
+        foodName: 'Food',
+        quantity: 1,
+        unitLabel: '',
+        baseQuantity: 100,
+        baseUnit: 'g',
+        nutrients: {
+          Nutrients.energy: kcal,
+          Nutrients.protein: p,
+          Nutrients.carbs: c,
+          Nutrients.fat: f,
+        },
+      );
+
+  Future<void> sampleDay(WidgetTester tester) async {
+    await seedMeal(tester, '2026-11-12', 1, [macroLine(490, 20, 34, 30)]);
+    await seedMeal(tester, '2026-11-12', 2, [macroLine(775, 66, 86, 18.5)]);
+    await seedRun(tester, 383);
+  }
+
+  appTest('before goals exist Home shows the Set your goals card, no '
+      'budget, and the card opens Goals', (tester) async {
+    await openApp(tester);
+    expect(find.text('Set your goals'), findsOneWidget);
+    expect(
+      find.text('Work out how much you can eat each day.'),
+      findsOneWidget,
+    );
+    expect(find.text('kcal left'), findsNothing);
+    expect(find.text('Protein'), findsNothing);
+    await tester.tap(find.text('Set your goals'));
+    await settle(tester);
+    expect(find.byType(GoalsScreen), findsOneWidget);
+    // Saving there makes the card go away and the budget come up.
+    await tester.ensureVisible(find.text('Use my own calorie goal instead'));
+    await tester.pump();
+    await tester.tap(find.text('Use my own calorie goal instead'));
+    await tester.pump();
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Calories a day',
+      ),
+      '1800',
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    await tester.pageBack();
+    await settle(tester);
+    expect(find.text('Set your goals'), findsNothing);
+    expect(find.text('1,800'), findsOneWidget);
+    expect(find.text('Goal 1,800 + exercise 0 - food 0'), findsOneWidget);
+  });
+
+  appTest('morning with nothing eaten: the whole goal is left and the '
+      'meters are empty (frame 1)', (tester) async {
+    await seedGoals(tester);
+    await openApp(tester);
+    expect(find.text('2,138'), findsOneWidget);
+    expect(find.text('kcal left'), findsOneWidget);
+    expect(find.text('Goal 2,138 + exercise 0 - food 0'), findsOneWidget);
+    expect(find.text('Set your goals'), findsNothing);
+    expect(find.text('0 of 150 g'), findsOneWidget);
+    expect(find.text('0 of 227 g'), findsOneWidget);
+    expect(find.text('0 of 70 g'), findsOneWidget);
+  });
+
+  appTest('with two meals and a run the line is goal + exercise - food, '
+      'built from the shown parts (2,138 + 383 - 1,265 = 1,256)', (
+    tester,
+  ) async {
+    await seedGoals(tester);
+    await sampleDay(tester);
+    await openApp(tester);
+    expect(find.text('1,256'), findsOneWidget);
+    expect(find.text('kcal left'), findsOneWidget);
+    expect(find.text('Goal 2,138 + exercise 383 - food 1,265'), findsOneWidget);
+    // The meters: fat is 48.5, shown as 49.
+    expect(find.text('86 of 150 g'), findsOneWidget);
+    expect(find.text('120 of 227 g'), findsOneWidget);
+    expect(find.text('49 of 70 g'), findsOneWidget);
+    final meters = tester
+        .widgetList<LinearProgressIndicator>(
+          find.byType(LinearProgressIndicator),
+        )
+        .map((m) => m.value!)
+        .toList();
+    expect(meters[0], closeTo(86 / 150, 0.005));
+    expect(meters[1], closeTo(120 / 227, 0.005));
+    expect(meters[2], closeTo(48.5 / 70, 0.005));
+  });
+
+  appTest('the line always adds up even when the parts round: 191.5 and '
+      '1,265.4 show as 192 and 1,265, and left is 1,065', (tester) async {
+    await seedGoals(tester, addBack: 50);
+    await seedMeal(tester, '2026-11-12', 1, [macroLine(1265.4, 20, 34, 30)]);
+    await seedRun(tester, 383);
+    await openApp(tester);
+    expect(find.text('Goal 2,138 + exercise 192 - food 1,265'), findsOneWidget);
+    expect(find.text('1,065'), findsOneWidget);
+  });
+
+  for (final (percent, shown) in [(0, 0), (50, 192), (100, 383)]) {
+    appTest('add-back $percent% puts $shown in the line, and the left '
+        'number follows', (tester) async {
+      await seedGoals(tester, addBack: percent);
+      await seedMeal(tester, '2026-11-12', 1, [macroLine(1000, 20, 34, 30)]);
+      await seedRun(tester, 383);
+      await openApp(tester);
+      expect(
+        find.text('Goal 2,138 + exercise $shown - food 1,000'),
+        findsOneWidget,
+      );
+      expect(find.text(S.count(2138 + shown - 1000)), findsOneWidget);
+    });
+  }
+
+  appTest('over budget is said in words, with no minus sign', (tester) async {
+    await seedGoals(tester);
+    await seedMeal(tester, '2026-11-12', 1, [macroLine(2290, 120, 300, 90)]);
+    await openApp(tester);
+    expect(find.text('152'), findsOneWidget);
+    expect(find.text('kcal over'), findsOneWidget);
+    expect(find.text('kcal left'), findsNothing);
+    expect(find.text('Goal 2,138 + exercise 0 - food 2,290'), findsOneWidget);
+    expect(find.textContaining('-152'), findsNothing);
+    // A macro past its goal says so in words too.
+    expect(find.text('120 of 150 g'), findsOneWidget);
+    expect(find.text('300 of 227 g, over'), findsOneWidget);
+    expect(find.text('90 of 70 g, over'), findsOneWidget);
+  });
+
+  appTest('percent macros show the grams the goal gives', (tester) async {
+    await seedGoals(tester, mode: MacroMode.percent, p: 30, c: 40, f: 30);
+    await openApp(tester);
+    expect(find.text('0 of 160 g'), findsOneWidget);
+    expect(find.text('0 of 214 g'), findsOneWidget);
+    expect(find.text('0 of 71 g'), findsOneWidget);
+  });
+
+  appTest('goals with no macros show the budget and no meters', (tester) async {
+    await tester.runAsync(
+      () => db.saveGoals(
+        const GoalInput(
+          activity: ActivityLevel.lightlyActive,
+          rate: WeeklyRate.stay,
+          ownCalories: 2138,
+        ),
+        nov8,
+      ),
+    );
+    await openApp(tester);
+    expect(find.text('2,138'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  appTest("Home on an earlier day uses that day's goals", (tester) async {
+    await seedGoals(tester, kcal: 2000);
+    await seedGoals(tester, kcal: 2138, from: at('2026-11-12', 6, 0, -360));
+    clockNow = at('2026-11-10', 9, 0, -360);
+    await openApp(tester);
+    expect(find.text('2,000'), findsOneWidget);
+    expect(find.text('Goal 2,000 + exercise 0 - food 0'), findsOneWidget);
+  });
+
+  appTest("past midnight Home reads the new day's goals", (tester) async {
+    await seedGoals(tester, kcal: 2138);
+    await seedGoals(tester, kcal: 1900, from: at('2026-11-13', 0, 0, -360));
+    clockNow = at('2026-11-12', 23, 59, -360);
+    await openApp(tester);
+    expect(find.text('2,138'), findsOneWidget);
+    clockNow = at('2026-11-13', 1, 0, -360);
+    await tester.pump(const Duration(minutes: 2));
+    await settle(tester);
+    expect(find.text('1,900'), findsOneWidget);
+    expect(find.text('2,138'), findsNothing);
+  });
+
+  appTest('a new meal changes the card at once', (tester) async {
+    await seedGoals(tester);
+    await openApp(tester);
+    expect(find.text('2,138'), findsOneWidget);
+    await seedMeal(tester, '2026-11-12', 1, [macroLine(500, 20, 34, 30)]);
+    await settle(tester);
+    expect(find.text('1,638'), findsOneWidget);
+  });
+
+  for (final width in [344.0, 673.0]) {
+    appTest('the budget card and meters at ${width.toInt()} dp and text x2 '
+        'have no overflow', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await seedGoals(tester);
+      await sampleDay(tester);
+      await openApp(tester, size: Size(width, 800));
+      expect(tester.takeException(), isNull);
+      expect(find.text('1,256'), findsOneWidget);
+      for (final t in ['86 of 150 g', '120 of 227 g', '49 of 70 g']) {
+        expect(find.text(t), findsOneWidget);
+      }
+    });
+  }
+
+  appTest('the Set your goals card is a 48 dp target at 344 dp and text x2', (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await openApp(tester, size: const Size(344, 700));
+    expect(tester.takeException(), isNull);
+    final s = tester.getSize(
+      find
+          .ancestor(
+            of: find.text('Set your goals'),
+            matching: find.byType(InkWell),
+          )
+          .first,
+    );
+    expect(s.height, greaterThanOrEqualTo(48));
+  });
+
+  appTest('a screen reader gets the number and the meters in one order, '
+      'each meter in words', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await seedGoals(tester);
+    await sampleDay(tester);
+    await openApp(tester);
+    final card = find.bySemanticsLabel(
+      '1,256 kcal left. Goal 2,138 plus exercise 383 minus food 1,265.',
+    );
+    expect(card, findsOneWidget);
+    final protein = find.bySemanticsLabel('Protein, 86 of 150 grams');
+    final carbs = find.bySemanticsLabel('Carbs, 120 of 227 grams');
+    final fat = find.bySemanticsLabel('Fat, 49 of 70 grams');
+    expect(protein, findsOneWidget);
+    expect(carbs, findsOneWidget);
+    expect(fat, findsOneWidget);
+    // Top to bottom, then left to right: the card, then the three meters.
+    final c = tester.getRect(card);
+    final p = tester.getRect(protein);
+    expect(p.top, greaterThanOrEqualTo(c.bottom - 1));
+    expect(tester.getRect(carbs).left, greaterThan(p.left));
+    expect(tester.getRect(fat).left, greaterThan(tester.getRect(carbs).left));
+    semantics.dispose();
   });
 }

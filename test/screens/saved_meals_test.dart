@@ -123,6 +123,10 @@ void main() {
 
   Future<void> goToList(WidgetTester tester) async {
     await tap(tester, find.widgetWithText(NavigationDestination, 'More'));
+    // The Goals row is first now, so at large text this one may be below the fold.
+    await tester.scrollUntilVisible(find.text('Saved meals and aliases'), 100);
+    await tester.ensureVisible(find.text('Saved meals and aliases'));
+    await tester.pump();
     await tap(tester, find.text('Saved meals and aliases'));
     expect(find.byType(SavedMealsScreen), findsOneWidget);
   }

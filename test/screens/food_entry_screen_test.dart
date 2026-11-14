@@ -9,6 +9,8 @@ import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/food_library_data.dart';
+import 'package:daybook/data/goal_data.dart';
+import 'package:daybook/math/calorie_budget.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/parser/line.dart';
 import 'package:daybook/parser/parse_worker.dart';
@@ -18,6 +20,7 @@ import 'package:daybook/screens/food/correction_sheet.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/screens/food/food_line_tile.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
+import 'package:daybook/strings.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -1915,7 +1918,11 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       tester.view.physicalSize = const Size(344, 800);
       await tester.pump();
-      await tester.tap(find.text('Breakfast').last);
+      // The goals card is above the meals now, so they may be below the fold.
+      await tester.scrollUntilVisible(find.text('Breakfast'), 100);
+      await tester.ensureVisible(find.text('Breakfast'));
+      await tester.pump();
+      await tester.tap(find.text('Breakfast'));
       await settle(tester);
       expect(find.byType(FoodEntryScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -2366,5 +2373,190 @@ void main() {
       await expectNoOrphans(tester, mealCount: 0, entryCount: 0);
       expect(before.entries, hasLength(5));
     });
+  });
+
+  group('left today (task 3.2)', () {
+    Future<void> goals(
+      WidgetTester tester,
+      int kcal, {
+      String from = '2026-11-08',
+    }) => real(
+      tester,
+      () => db.saveGoals(
+        GoalInput(
+          activity: ActivityLevel.lightlyActive,
+          rate: WeeklyRate.stay,
+          ownCalories: kcal,
+        ),
+        at(from, 8, 0),
+      ),
+    );
+
+    Finder left(String text) => find.text(text);
+
+    Future<void> openBreakfast(WidgetTester tester) async {
+      await tester.tap(find.text('Breakfast').last);
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+    }
+
+    appTest('with no goals nothing is shown', (tester) async {
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, brief);
+      expect(find.textContaining('left today'), findsNothing);
+      expect(find.textContaining('over today'), findsNothing);
+    });
+
+    appTest('a new empty meal shows what is left today, and while typing '
+        'the line follows with "after this meal" (frames 1 and 6)', (
+      tester,
+    ) async {
+      await goals(tester, 2138);
+      await openApp(tester);
+      await openFood(tester);
+      expect(left('2,138 left today'), findsOneWidget);
+      await type(tester, brief);
+      expect(left('1,648 left today after this meal'), findsOneWidget);
+      expect(left('2,138 left today'), findsNothing);
+      await type(tester, '2 eggs');
+      expect(find.textContaining('left today after this meal'), findsOneWidget);
+      expect(left('1,648 left today after this meal'), findsNothing);
+    });
+
+    appTest('meals already logged today are counted', (tester) async {
+      await goals(tester, 2138);
+      final first = await logBrief(tester);
+      await openFood(tester);
+      expect(left('1,648 left today'), findsOneWidget);
+      await type(tester, brief);
+      // The same meal again: both are food, each added unrounded.
+      final both = 2138 - (2 * kcalOf(first)).round();
+      expect(
+        left('${S.count(both)} left today after this meal'),
+        findsOneWidget,
+      );
+    });
+
+    appTest('over today is said in words', (tester) async {
+      await goals(tester, 300);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, brief);
+      expect(left('190 over today after this meal'), findsOneWidget);
+      expect(find.textContaining('-190'), findsNothing);
+    });
+
+    appTest('editing a logged meal does not count it twice: with this '
+        'meal, and a change moves the figure by the change only', (
+      tester,
+    ) async {
+      await goals(tester, 2138);
+      await logBrief(tester);
+      await openBreakfast(tester);
+      expect(left('1,648 left today with this meal'), findsOneWidget);
+      await type(tester, '1 banana');
+      final shown = find.textContaining('left today with this meal');
+      expect(shown, findsOneWidget);
+      // The meal total in the bar is the whole new meal; left is the goal
+      // less that total, with the old meal not in it twice.
+      final semantics = tester.ensureSemantics();
+      await tester.pump();
+      final label = tester
+          .getSemantics(find.bySemanticsLabel(RegExp(r'^Meal total')))
+          .label;
+      semantics.dispose();
+      final total = RegExp(r'^Meal total: (\d[\d,]*) calories')
+          .firstMatch(label)!
+          .group(1)!
+          .replaceAll(',', '');
+      final expected = 2138 - int.parse(total);
+      expect(
+        find.text(
+          '${S.count(expected.abs())} ${expected < 0 ? 'over' : 'left'} '
+          'today with this meal',
+        ),
+        findsOneWidget,
+      );
+      expect(int.parse(total), greaterThan(490));
+    });
+
+    appTest('another date uses that day\'s goals and that day\'s food', (
+      tester,
+    ) async {
+      await goals(tester, 2000);
+      await goals(tester, 2138, from: '2026-11-12');
+      await real(
+        tester,
+        () => db.saveMeal(
+          now: nowFixed,
+          localDate: '2026-11-11',
+          slotId: 1,
+          lines: [
+            MealLineInput(
+              foodRef: 'usda:1',
+              foodName: 'Food',
+              quantity: 1,
+              unitLabel: '',
+              baseQuantity: 100,
+              baseUnit: 'g',
+              nutrients: {Nutrients.energy: 300},
+            ),
+          ],
+        ),
+      );
+      await openApp(tester);
+      await openFood(tester);
+      expect(left('2,138 left today'), findsOneWidget);
+      await tester.tap(find.byTooltip('Previous day'));
+      await settle(tester);
+      expect(left('1,700 left that day'), findsOneWidget);
+      await type(tester, brief);
+      expect(left('1,210 left that day after this meal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Next day'));
+      await settle(tester);
+      expect(left('1,648 left today after this meal'), findsOneWidget);
+    });
+
+    appTest('hidden with the totals while a notice shows with the keyboard '
+        'up, back when it goes', (tester) async {
+      await goals(tester, 2138);
+      await openApp(tester);
+      await openFood(tester);
+      await type(tester, brief);
+      expect(left('1,648 left today after this meal'), findsOneWidget);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      screen(tester).debugShowNotice('Done.');
+      await tester.pump();
+      expect(find.text('Done.'), findsOneWidget);
+      expect(find.textContaining('left today'), findsNothing);
+      tester.view.resetViewInsets();
+      await tester.pump();
+      expect(left('1,648 left today after this meal'), findsOneWidget);
+    });
+
+    for (final (width, scale) in [(344.0, 2.0), (673.0, 1.0)]) {
+      appTest('the line has no overflow and is read on its own at '
+          '${width.toInt()} dp, text x$scale', (tester) async {
+        final semantics = tester.ensureSemantics();
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await goals(tester, 2138);
+        await openApp(tester, size: Size(width, 800));
+        await openFood(tester);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await type(tester, brief);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(left('1,648 left today after this meal'), findsOneWidget);
+        expect(
+          find.bySemanticsLabel('1,648 left today after this meal'),
+          findsOneWidget,
+        );
+        final save = tester.getRect(saveButton());
+        expect(save.bottom, lessThanOrEqualTo(500));
+        semantics.dispose();
+      });
+    }
   });
 }
