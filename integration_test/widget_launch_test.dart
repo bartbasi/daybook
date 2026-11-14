@@ -100,7 +100,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       waited++;
     }
-    expect(find.textContaining('Weight saved: 181.8 lb'), findsOneWidget);
+    // The message follows the sheet by a frame or more on a slow simulator,
+    // so wait for it instead of looking once.
+    final saved = find.textContaining('Weight saved: 181.8 lb');
+    waited = 0;
+    while (saved.evaluate().isEmpty && waited < 100) {
+      await tester.pump(const Duration(milliseconds: 100));
+      waited++;
+    }
+    expect(find.byType(WeightSheet), findsNothing);
+    expect(saved, findsOneWidget);
 
     // The widget data now holds the saved weight, in the phone's storage.
     String? stored;
