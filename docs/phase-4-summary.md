@@ -9,7 +9,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 0 Changes to Phase 2 work | Done. Reviewed, pushed, CI green |
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
-| 3 Goals and daily budget | In progress. The budget math and goals data are done, reviewed and pushed. The Goals screen and Home's budget card are next |
+| 3 Goals and daily budget | Built: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests. In final review |
 | 4 Resistance training | Not started |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
@@ -92,6 +92,9 @@ Each is the recommended option from the plan's open questions, or a small call m
 60. **The working on the Goals screen shows each number, not an equation.** Each line is rounded on its own, so 1,736 times 1.375 can show as 2,388 while the rounded numbers multiply to 2,387. If the weight or profile behind a saved goal has changed since, the screen shows the saved goal, the working from today's numbers, and one sentence saying they differ and that Recalculate updates it.
 61. **With no weigh-in yet, the Goals screen says so in a sentence** and points to Today for logging one, or to using your own number. The wireframes show no weigh-in button on Goals.
 62. **Home's budget card says "kcal left" or "kcal over" in words**, with no minus sign, and each macro meter carries its numbers in words ("86 of 150 g"), so nothing depends on color.
+63. **The "left today" line on the food entry screen hides in one tight case**: text larger than 1.3 times normal, the keyboard up, and at least one item still to fix. On the cover screen there is no room for it then. It comes back when the keyboard goes down or the item is fixed. The rule goes by text size, not by measured room, so it also hides on the unfolded screen in that state, where it would have fitted.
+64. **Leaving the macro fields empty means no macro goals.** If you switch between grams and percent, leave the new fields empty and save, the macro goals you had are removed. The screen says so before you save: "Saving now removes your macro goals. Fill in the percents, or switch back to Grams."
+65. **In percent mode Save waits until the percents add to 100**, as the wireframe says. The line "Adds to 95%. 5% left." says why.
 
 ## Open questions from the plan: answered
 
