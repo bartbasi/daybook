@@ -86,6 +86,12 @@ Each is the recommended option from the plan's open questions, or a small call m
 54. **The calorie goal is stored as a whole number, and the numbers on Home always add up.** The goal, the exercise added back and the food are each rounded for display, and the "left" figure is worked out from those three rounded numbers, so the line under the big number is always a true sum.
 55. **The low intake notice with no sex on file uses the lower line, 1,200.** This can only happen when you type your own calorie number without filling in the profile. The wireframes did not cover it. With a profile it is under 1,500 for men and under 1,200 for women; a goal exactly on the line gets no notice.
 56. **The Daily Values were checked against the regulation text** (21 CFR 101.9(c)(8)(iv) and (c)(9), as current on 2026-11-12), all 22 values and their units. Total sugars and trans fat have no Daily Value and so no default goal.
+57. **The Goals screen stays open after Save and says what was saved**: "Saved. Your goal is N kcal a day, from today." The wireframes do not say whether it closes. Leaving the screen without Save drops every change with no question, as the saved meal editor does.
+58. **Goals for other nutrients are saved together with the rest of Goals.** Changing one under "Other nutrients" is kept on the screen, marked as not saved yet, and written when you tap Save on Goals. They belong to the same record as the calorie goal, which is saved as a whole.
+59. **If you switch between lb and kg after saving a weekly rate, the saved rate is shown as it was saved** ("0.5 lb a week") with none of the choices selected, until you pick one. Moving you to the nearest choice in the new unit would change your calorie goal without your asking.
+60. **The working on the Goals screen shows each number, not an equation.** Each line is rounded on its own, so 1,736 times 1.375 can show as 2,388 while the rounded numbers multiply to 2,387. If the weight or profile behind a saved goal has changed since, the screen shows the saved goal, the working from today's numbers, and one sentence saying they differ and that Recalculate updates it.
+61. **With no weigh-in yet, the Goals screen says so in a sentence** and points to Today for logging one, or to using your own number. The wireframes show no weigh-in button on Goals.
+62. **Home's budget card says "kcal left" or "kcal over" in words**, with no minus sign, and each macro meter carries its numbers in words ("86 of 150 g"), so nothing depends on color.
 
 ## Open questions from the plan: answered
 
