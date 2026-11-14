@@ -816,6 +816,8 @@ class S {
   static const homeSetGoalsSub = 'Work out how much you can eat each day.';
   static const homeKcalLeft = 'kcal left';
   static const homeKcalOver = 'kcal over';
+  static const homeBudgetFailed =
+      'Could not load your budget. It will try again when something changes.';
 
   /// 'Goal 2,138 + exercise 383 - food 1,266': the shown parts, so it adds up.
   static String homeBudgetSum(int goal, int exercise, int food) =>
@@ -926,8 +928,6 @@ class S {
   static const goalsOwnToggle = 'Use my own calorie goal instead';
   static const goalsOwnField = 'Calories a day';
   static const goalsOwnBad = 'Enter a whole number of calories above 0.';
-  static String goalsCalcAbove(int kcal) =>
-      'The calculated goal (${count(kcal)}) is above, grayed out.';
   static String goalsOwnNotUsed(int kcal) =>
       'The calculated ${count(kcal)} is not used while this is on.';
   static const goalsAddBack = 'Exercise calories added to the day';
@@ -958,6 +958,8 @@ class S {
   static String goalsPercentsDontAdd(int total) =>
       'The percents must add to 100. They add to $total%.';
   static const goalsOther = 'Other nutrients';
+  static const goalsOtherUnsaved =
+      'Not saved yet. Tap Save on Goals to keep these.';
   static const goalsOtherSub =
       'Fiber, sodium, vitamins and more. Daily Values unless you change them.';
   static const goalsApplies = 'Applies from today. Past days keep their goals.';
@@ -975,6 +977,12 @@ class S {
   static const goalsFix =
       'Some fields need a look. Each one says what is wrong.';
   static const goalsNoGoals = 'Save your goals first.';
+  static const goalsNotUsable =
+      'These numbers do not give a usable calorie goal. Check them, or use '
+      'your own number below.';
+  static const goalsLoadFailed =
+      'Could not load your goals. Nothing was changed.';
+  static const unitPercent = '%';
   static const goalsBadRate =
       'The weekly rate saved with your goals is not one of the rates offered. '
       'Pick one here and tap Save.';
@@ -998,6 +1006,7 @@ class S {
   static const otherUseDaily = 'Use the Daily Value';
   static const otherClear = 'Remove my goal';
   static const otherCancel = 'Cancel';
+  static const otherDone = 'Done';
 
   // Used by the food editor and the barcode lines.
   static const notListed = 'not listed';

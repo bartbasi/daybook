@@ -44,6 +44,9 @@ class Gate extends QueryInterceptor {
   Completer<void>? holdReads;
   Completer<void>? holdUnits;
 
+  /// While set, a read whose statement contains this text fails.
+  String? failReadsOf;
+
   @override
   Future<List<Map<String, Object?>>> runSelect(
     QueryExecutor executor,
@@ -51,6 +54,8 @@ class Gate extends QueryInterceptor {
     List<Object?> args,
   ) async {
     await holdReads?.future;
+    final bad = failReadsOf;
+    if (bad != null && statement.contains(bad)) throw StateError('read failed');
     if (statement.contains('settings')) await holdUnits?.future;
     return super.runSelect(executor, statement, args);
   }
@@ -588,13 +593,23 @@ void main() {
       ]);
       tester.platformDispatcher.textScaleFactorTestValue = 2.0;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      await openApp(tester, size: Size(width, 1100));
+      await openApp(tester, size: Size(width, 700));
       expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(
+        find.text('Egg, Bread, Butter, Coffee, Cream'),
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
       final row = find.ancestor(
         of: find.text('Egg, Bread, Butter, Coffee, Cream'),
         matching: find.byType(InkWell),
       );
       expect(tester.getSize(row).height, greaterThanOrEqualTo(48));
+      await tester.scrollUntilVisible(
+        find.text('Nothing yet. Tap to add.').first,
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
       final empty = find.ancestor(
         of: find.text('Nothing yet. Tap to add.').first,
         matching: find.byType(InkWell),
@@ -910,5 +925,117 @@ void main() {
     expect(tester.getRect(carbs).left, greaterThan(p.left));
     expect(tester.getRect(fat).left, greaterThan(tester.getRect(carbs).left));
     semantics.dispose();
+  });
+
+  // Streams and scrolling (review round for task 3.2).
+
+  Future<void> deleteAllGoals(WidgetTester tester) async {
+    await tester.runAsync(() => db.delete(db.goals).go());
+    await settle(tester);
+  }
+
+  appTest('goals saved, deleted in the database and saved again: the budget '
+      'and the meters come back and nothing is thrown', (tester) async {
+    await openApp(tester);
+    expect(find.text('Set your goals'), findsOneWidget);
+    await seedGoals(tester);
+    await settle(tester);
+    expect(find.text('0 of 150 g'), findsOneWidget);
+    expect(find.text('Set your goals'), findsNothing);
+
+    await deleteAllGoals(tester);
+    expect(find.text('Set your goals'), findsOneWidget);
+    expect(find.text('0 of 150 g'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await seedGoals(tester);
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Set your goals'), findsNothing);
+    expect(find.text('2,138'), findsOneWidget);
+    expect(find.text('0 of 150 g'), findsOneWidget);
+    expect(find.text('0 of 227 g'), findsOneWidget);
+    expect(find.text('0 of 70 g'), findsOneWidget);
+  });
+
+  appTest('the only weigh-in deleted and another logged: the weight row '
+      'comes back and nothing is thrown', (tester) async {
+    await seed(
+      tester,
+      182.4,
+      UnitSystem.imperial,
+      at('2026-11-11', 6, 55, -360),
+    );
+    await openApp(tester);
+    await settle(tester);
+    expect(find.text('182.4 lb'), findsOneWidget);
+    await tester.runAsync(() => db.delete(db.weightEntries).go());
+    await settle(tester);
+    expect(find.text('No weight yet.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await seed(tester, 181.8, UnitSystem.imperial, nowFixed);
+    await settle(tester);
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.text('181.8 lb'), findsOneWidget);
+    expect(find.textContaining('Trend'), findsOneWidget);
+  });
+
+  appTest('scrolled far down and back at 344 dp and text x2, every card is '
+      'there again and nothing is thrown', (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await seedGoals(tester);
+    await sampleDay(tester);
+    await seed(
+      tester,
+      182.4,
+      UnitSystem.imperial,
+      at('2026-11-11', 6, 55, -360),
+    );
+    await openApp(tester, size: const Size(344, 700));
+    await settle(tester);
+    final list = find.byType(Scrollable).first;
+    await tester.drag(list, const Offset(0, -3000));
+    await tester.pump();
+    await tester.drag(list, const Offset(0, -3000));
+    await tester.pump();
+    await tester.drag(list, const Offset(0, 5000));
+    await tester.pump();
+    await tester.drag(list, const Offset(0, 5000));
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.text('1,256'), findsOneWidget);
+    for (final t in ['86 of 150 g', '120 of 227 g', '49 of 70 g']) {
+      expect(find.text(t), findsOneWidget);
+    }
+    await tester.drag(list, const Offset(0, -3000));
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.text('182.4 lb'), findsOneWidget);
+    expect(find.text('Breakfast'), findsOneWidget);
+  });
+
+  appTest('a budget read that fails says so in plain words and never '
+      '"Set your goals"; the next good read brings the card back', (
+    tester,
+  ) async {
+    await seedGoals(tester);
+    await openApp(tester);
+    expect(find.text('2,138'), findsOneWidget);
+
+    gate.failReadsOf = 'goals';
+    await seedMeal(tester, '2026-11-12', 1, [macroLine(500, 20, 34, 30)]);
+    await settle(tester);
+    expect(find.text(S.homeBudgetFailed), findsOneWidget);
+    expect(find.text('Set your goals'), findsNothing);
+    expect(find.text('kcal left'), findsNothing);
+
+    gate.failReadsOf = null;
+    await seedMeal(tester, '2026-11-12', 2, [macroLine(100, 5, 5, 5)]);
+    await settle(tester);
+    expect(find.text(S.homeBudgetFailed), findsNothing);
+    expect(find.text('1,538'), findsOneWidget);
   });
 }

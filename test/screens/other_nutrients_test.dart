@@ -120,7 +120,7 @@ void main() {
     await tester.pump();
     await tap(
       tester,
-      find.descendant(of: find.byType(Dialog), matching: find.text('Save')),
+      find.descendant(of: find.byType(Dialog), matching: find.text('Done')),
     );
   }
 
@@ -175,6 +175,44 @@ void main() {
     expect(find.text('2,000 mg. Your goal'), findsOneWidget);
   });
 
+  appTest('the dialog says Done, not Save, and a change says it is not saved '
+      'yet, here and on Goals, until Goals is saved', (tester) async {
+    await openList(tester);
+    expect(find.text(S.goalsOtherUnsaved), findsNothing);
+    await tap(tester, row('Sodium'));
+    expect(
+      find.descendant(of: find.byType(Dialog), matching: find.text('Save')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: find.byType(Dialog), matching: find.text('Done')),
+      findsOneWidget,
+    );
+    await tap(tester, find.text('Cancel'));
+    expect(find.text(S.goalsOtherUnsaved), findsNothing);
+
+    await setGoal(tester, 'Sodium', '2000');
+    expect(find.text(S.goalsOtherUnsaved), findsOneWidget);
+    await tester.pageBack();
+    await settle(tester);
+    expect(find.text(S.goalsOtherUnsaved), findsOneWidget);
+    await tap(tester, find.widgetWithText(FilledButton, 'Save'));
+    expect(find.text(S.goalsOtherUnsaved), findsNothing);
+    await tap(tester, find.text('Other nutrients'));
+    expect(find.text(S.goalsOtherUnsaved), findsNothing);
+  });
+
+  appTest('putting a goal back to what is saved clears the note', (
+    tester,
+  ) async {
+    await openList(tester);
+    await setGoal(tester, 'Sodium', '2000');
+    expect(find.text(S.goalsOtherUnsaved), findsOneWidget);
+    await tap(tester, row('Sodium'));
+    await tap(tester, find.text('Use the Daily Value'));
+    expect(find.text(S.goalsOtherUnsaved), findsNothing);
+  });
+
   appTest('the Daily Value is one tap away again', (tester) async {
     await openList(tester);
     await setGoal(tester, 'Sodium', '2000');
@@ -213,7 +251,7 @@ void main() {
       await tester.pump();
       await tap(
         tester,
-        find.descendant(of: find.byType(Dialog), matching: find.text('Save')),
+        find.descendant(of: find.byType(Dialog), matching: find.text('Done')),
       );
       expect(find.byType(Dialog), findsOneWidget, reason: bad);
       expect(

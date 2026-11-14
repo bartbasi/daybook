@@ -346,13 +346,11 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   var _slots = <MealSlot>[];
   StreamSubscription<List<MealSlot>>? _slotsSub;
 
-  // The day's budget for [_date], for the "left today" line. [_editedKcal] is
-  // what the meal being edited holds in the database, which that budget
-  // already counts, so the line does not count it twice.
+  // The day's budget for [_date], for the "left today" line. When a logged
+  // meal is being edited on the day it is stored on, the data layer leaves
+  // that meal out of the day's food, and the line adds back what is typed.
   StreamSubscription<DayBudget?>? _budgetSub;
   DayBudget? _dayBudget;
-  double _editedKcal = 0;
-  String? _editedDate;
 
   late List<AddedLine> _added;
   int? _editingMealId;
@@ -428,7 +426,6 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
       if (mounted) setState(() => _slots = s);
     }, onError: (Object _) {});
     _followBudget();
-    _loadEdited();
     if (_slotId == null) _chooseDefaultSlot();
     _attach(picks: widget.draft?.picks ?? const []);
   }
@@ -447,25 +444,23 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
     super.dispose();
   }
 
+  /// The day the meal being edited is stored on, or null for a new meal. For
+  /// a draft of an edit this is the draft's date.
+  String? get _storedDate =>
+      widget.editing?.meal.localDate ??
+      (widget.draft?.editingMealId != null ? widget.draft!.date : null);
+
+  /// True when the screen shows the day the edited meal is stored on, so that
+  /// meal is already in the day's food.
+  bool get _editedHere => _editing && _storedDate == _date;
+
   void _followBudget() {
     _budgetSub?.cancel();
     _dayBudget = null;
-    _budgetSub = _db.watchBudgetForDay(_date).listen((b) {
+    final except = _editedHere ? _editingMealId : null;
+    _budgetSub = _db.watchBudgetForDay(_date, exceptMealId: except).listen((b) {
       if (mounted) setState(() => _dayBudget = b);
     }, onError: (Object _) {});
-  }
-
-  Future<void> _loadEdited() async {
-    final id = _editingMealId;
-    if (id == null) return;
-    try {
-      final m = await _db.loadMeal(id);
-      if (m == null || !mounted) return;
-      setState(() {
-        _editedKcal = m.totals[Nutrients.energy] ?? 0;
-        _editedDate = m.meal.localDate;
-      });
-    } catch (_) {}
   }
 
   void _setDate(String date) {
@@ -1906,19 +1901,18 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
   /// The "left today" line under the totals (food-entry frames 1, 6 and 13):
   /// the day's budget with this meal in it, from the shown parts of
   /// [DayBudget]. Nothing before goals exist. A meal being edited is already
-  /// in the day's food, so its stored kcal come out first.
-  Widget _leftToday(double kcal, bool counted) {
+  /// in the day's food, so the budget is read without it and [kcal] is added.
+  /// No arithmetic here: [DayBudget.withFood] and its shown numbers.
+  ///
+  /// With [hide] nothing is drawn. That is for large text with the keyboard up
+  /// and an item still to fix, where the bar has no room for one more line
+  /// (and the figure is not final while an item is not counted). It is back
+  /// when the keyboard goes or the item is fixed.
+  Widget _leftToday(double kcal, bool counted, {bool hide = false}) {
     final b = _dayBudget;
-    if (b == null) return const SizedBox.shrink();
-    final editedHere = _editing && _editedDate == _date;
-    final food = b.foodKcal - (editedHere ? _editedKcal : 0) + kcal;
-    final left = DayBudget(
-      goal: b.goal,
-      exerciseKcal: b.exerciseKcal,
-      addBackPercent: b.addBackPercent,
-      foodKcal: food,
-    ).shownLeft;
-    final after = editedHere
+    if (b == null || hide) return const SizedBox.shrink();
+    final left = b.withFood(kcal).shownLeft;
+    final after = _editedHere
         ? S.leftWithThisMeal
         : counted
         ? S.leftAfterThisMeal
@@ -2248,7 +2242,12 @@ class FoodEntryScreenState extends State<FoodEntryScreen>
                   ),
                 ),
         ),
-        _leftToday(kcal ?? 0, !none),
+        _leftToday(
+          kcal ?? 0,
+          !none,
+          hide:
+              stacked && MediaQuery.viewInsetsOf(context).bottom > 0 && fix > 0,
+        ),
         if (fix > 0)
           ExcludeSemantics(child: Text(S.itemsNotCounted(fix), style: bold)),
       ],

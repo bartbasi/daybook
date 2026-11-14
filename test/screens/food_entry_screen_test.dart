@@ -2481,6 +2481,41 @@ void main() {
       expect(int.parse(total), greaterThan(490));
     });
 
+    appTest('editing one of three meals shows the same left as Home, from the '
+        'documents numbers: 2,138 less 300, 400.4 and 500.3 is 937', (
+      tester,
+    ) async {
+      await goals(tester, 2138);
+      for (final (slot, kcal) in [(1, 300.0), (2, 400.4), (3, 500.3)]) {
+        await real(
+          tester,
+          () => db.saveMeal(
+            now: nowFixed,
+            localDate: '2026-11-12',
+            slotId: slot,
+            lines: [
+              MealLineInput(
+                foodRef: 'usda:1',
+                foodName: 'Food',
+                quantity: 1,
+                unitLabel: '',
+                baseQuantity: 100,
+                baseUnit: 'g',
+                nutrients: {Nutrients.energy: kcal},
+              ),
+            ],
+          ),
+        );
+      }
+      await openApp(tester);
+      // Home: 300 + 400.4 + 500.3 = 1,200.7, shown as 1,201.
+      expect(find.text('937'), findsOneWidget);
+      await tester.tap(find.text('Lunch'));
+      await settle(tester);
+      expect(find.byType(FoodEntryScreen), findsOneWidget);
+      expect(left('937 left today with this meal'), findsOneWidget);
+    });
+
     appTest('another date uses that day\'s goals and that day\'s food', (
       tester,
     ) async {
@@ -2533,6 +2568,33 @@ void main() {
       tester.view.resetViewInsets();
       await tester.pump();
       expect(left('1,648 left today after this meal'), findsOneWidget);
+    });
+
+    appTest('in the Fix state (an item not found) at 344 dp, text x2 and the '
+        'keyboard up, nothing overflows and the box stays at least 48 dp; the '
+        'line is back with the keyboard down', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await goals(tester, 2138);
+      await openApp(tester, size: const Size(344, 800));
+      await openFood(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await type(tester, '$brief, 1 zorbo, 1 apple');
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Fix 1 item'), findsOneWidget);
+      expect(find.text('1 item not counted'), findsOneWidget);
+      expect(tester.getSize(box()).height, greaterThanOrEqualTo(48));
+      expect(tester.getRect(find.byType(FilledButton)).bottom, lessThan(500));
+      // No room for one more line then, so the line waits.
+      expect(find.textContaining('left today'), findsNothing);
+
+      tester.view.resetViewInsets();
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final shown = find.textContaining('left today after this meal');
+      expect(shown, findsOneWidget);
+      expect(tester.getRect(shown).right, lessThanOrEqualTo(344));
     });
 
     for (final (width, scale) in [(344.0, 2.0), (673.0, 1.0)]) {

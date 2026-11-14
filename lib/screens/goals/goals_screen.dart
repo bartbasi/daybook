@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
@@ -8,6 +9,7 @@ import '../../app_scope.dart';
 import '../../clock.dart';
 import '../../data/database.dart';
 import '../../data/goal_data.dart';
+import '../../data/nutrients.dart';
 import '../../data/settings_data.dart';
 import '../../math/calorie_budget.dart';
 import '../../strings.dart';
@@ -43,6 +45,7 @@ String goalProblemText(GoalProblem p) => switch (p) {
   GoalProblem.badRate => S.goalsBadRate,
   GoalProblem.badActivity => S.goalsBadActivity,
   GoalProblem.noGoals => S.goalsNoGoals,
+  GoalProblem.calculatedNotPositive => S.goalsNotUsable,
 };
 
 /// Where a refusal is shown: beside what caused it.
@@ -55,6 +58,7 @@ String _problemPlace(GoalProblem p) => switch (p) {
   GoalProblem.badRate => 'rate',
   GoalProblem.badActivity => 'activity',
   GoalProblem.noGoals => 'card',
+  GoalProblem.calculatedNotPositive => 'card',
 };
 
 String _activityName(ActivityLevel a) => switch (a) {
@@ -103,6 +107,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
   late Clock _clock;
   var _started = false;
   var _loaded = false;
+  var _loadFailed = false;
   var _units = UnitSystem.imperial;
   late String _today;
 
@@ -161,6 +166,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
   GlobalKey _key(String key) => _keys.putIfAbsent(key, GlobalKey.new);
 
   Future<void> _load() async {
+    if (_loadFailed) setState(() => _loadFailed = false);
     try {
       final units = await _db.getUnits();
       final profile = await _db.getProfile();
@@ -184,7 +190,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
         _loaded = true;
       });
     } catch (_) {
-      if (mounted) setState(() => _loaded = true);
+      // No form on a failed load: Save from a default form would overwrite
+      // what is stored.
+      if (mounted) setState(() => _loadFailed = true);
     }
   }
 
@@ -276,6 +284,47 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   bool get _dirty => _inputs() != _baseline;
 
+  /// Whether the other nutrient goals differ from the saved ones.
+  bool get _overridesChanged => !mapEquals(
+    _overrides,
+    _saved?.nutrientOverrides ?? const <int, double>{},
+  );
+
+  /// Whether the macros as typed (or their mode) differ from the saved ones.
+  bool get _macrosChanged {
+    final s = _saved;
+    if (s == null) {
+      return _grams.any((c) => c.text.trim().isNotEmpty) ||
+          _percents.any((c) => c.text.trim().isNotEmpty);
+    }
+    if (_mode != s.macroMode) return true;
+    final stored = [s.row.proteinTarget, s.row.carbsTarget, s.row.fatTarget];
+    final set = _mode == MacroMode.grams ? _grams : _percents;
+    final values = _macroValues();
+    for (var i = 0; i < 3; i++) {
+      final empty = set[i].text.trim().isEmpty;
+      if (stored[i] == null) {
+        if (!empty) return true;
+      } else if (empty || values[i] != stored[i]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// True when the whole form is what is saved: the calorie inputs, the own
+  /// number, the add-back, the macros and the other nutrient goals.
+  bool get _formIsSaved {
+    final s = _saved;
+    return s != null &&
+        !_dirty &&
+        _own == s.isOwnNumber &&
+        (!_own || _ownValue() == s.calories) &&
+        _addBack == s.addBackPercent &&
+        !_macrosChanged &&
+        !_overridesChanged;
+  }
+
   int? _ownValue() {
     final v = int.tryParse(_ownText.text.trim());
     return v != null && v > 0 ? v : null;
@@ -324,7 +373,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
     if (_own) return _ownValue();
     if (_clean) return _saved!.calories;
     final w = _working();
-    return w == null ? null : roundForDisplay(w.goal);
+    if (w == null) return null;
+    final goal = roundForDisplay(w.goal);
+    return goal > 0 ? goal : null;
   }
 
   /// The macros as the form has them, whatever is valid so far.
@@ -336,6 +387,25 @@ class _GoalsScreenState extends State<GoalsScreen> {
             ? parseFoodNumber(c.text)
             : _wholePercent(c.text)?.toDouble(),
     ];
+  }
+
+  /// 100 less the percents as typed (a field that is not a whole percent
+  /// counts as 0): what is left to give out, negative when over.
+  int get _percentsLeft {
+    final v = _macroValues();
+    return percentLeft(
+      v[0]?.round() ?? 0,
+      v[1]?.round() ?? 0,
+      v[2]?.round() ?? 0,
+    );
+  }
+
+  /// Percent mode with something typed that cannot be saved yet: a field that
+  /// is not a whole percent, or percents that do not add to 100.
+  bool get _percentsBlockSave {
+    if (_mode != MacroMode.percent) return false;
+    if (_percents.every((c) => c.text.trim().isEmpty)) return false;
+    return _macroValues().any((v) => v == null) || _percentsLeft != 0;
   }
 
   int? _wholePercent(String text) {
@@ -400,7 +470,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
         errors['macros'] = S.goalsMacrosIncomplete;
       } else if (!errors.keys.any((k) => k.startsWith('m')) &&
           _mode == MacroMode.percent) {
-        final sum = values.fold<double>(0, (a, b) => a + b!).round();
+        final sum = 100 - _percentsLeft;
         if (sum != 100) errors['macros'] = S.goalsPercentsDontAdd(sum);
       }
     }
@@ -551,11 +621,17 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   Future<void> _pickBorn() async {
     final today = parseToday();
-    final initial = _birth == null ? DateTime(1990) : DateTime.parse(_birth!);
+    // A stored birth date before 1900 (an import can bring one) would make
+    // the picker assert, so it opens on a date it can show.
+    final first = DateTime(1900);
+    final stored = _birth == null ? null : DateTime.tryParse(_birth!);
+    final initial = stored == null || stored.isBefore(first)
+        ? DateTime(1990)
+        : stored;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial.isAfter(today) ? today : initial,
-      firstDate: DateTime(1900),
+      firstDate: first,
       lastDate: today,
       initialEntryMode: DatePickerEntryMode.input,
     );
@@ -587,10 +663,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
             children: [
               Expanded(
                 child: ContentWidth(
-                  child: _loaded ? _form(context) : const SizedBox.shrink(),
+                  child: _loadFailed
+                      ? _failed(context)
+                      : _loaded
+                      ? _form(context)
+                      : const SizedBox.shrink(),
                 ),
               ),
-              _bar(context),
+              if (!_loadFailed) _bar(context),
             ],
           ),
         ),
@@ -599,6 +679,24 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   Widget _gap([double h = 16]) => SizedBox(height: h);
+
+  /// A failed load: the words and a way to try again, and no form.
+  Widget _failed(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(S.goalsLoadFailed),
+        const SizedBox(height: 8),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
+          onPressed: _load,
+          child: const Text(S.tryAgain),
+        ),
+      ],
+    ),
+  );
 
   Widget _label(BuildContext context, String text) => Padding(
     padding: const EdgeInsets.only(top: 20, bottom: 4),
@@ -650,12 +748,6 @@ class _GoalsScreenState extends State<GoalsScreen> {
         children: [
           const SizedBox(height: 8),
           _card(context, calc),
-          if (_own && calc != null)
-            _small(
-              context,
-              S.goalsCalcAbove(roundForDisplay(calc.goal)),
-              muted: true,
-            ),
           _label(context, S.goalsAbout),
           _err(context, 'profile'),
           Text(S.goalsSex, style: theme.textTheme.labelLarge),
@@ -741,12 +833,19 @@ class _GoalsScreenState extends State<GoalsScreen> {
             minTileHeight: 56,
             contentPadding: EdgeInsets.zero,
             title: const Text(S.goalsOther),
-            subtitle: const Text(S.goalsOtherSub),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(S.goalsOtherSub),
+                if (_overridesChanged) const Text(S.goalsOtherUnsaved),
+              ],
+            ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => OtherNutrientsScreen(
                   overrides: Map.of(_overrides),
+                  saved: Map.of(_saved?.nutrientOverrides ?? const {}),
                   onChanged: (m) => setState(() => _overrides = m),
                 ),
               ),
@@ -1060,6 +1159,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
       children.add(const Text(S.goalsNeedProfile));
     } else if (clean || calc != null) {
       final shown = clean ? saved!.calories! : roundForDisplay(calc!.goal);
+      final usable = shown > 0;
       if (calc != null) {
         final rate = _rate!;
         final kcal = roundForDisplay(calc.adjustment).abs();
@@ -1087,32 +1187,45 @@ class _GoalsScreenState extends State<GoalsScreen> {
           }),
         ]);
       }
-      children.add(
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: MergeSemantics(
-            child: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.end,
-              spacing: 8,
-              children: [
-                Text(S.count(shown), style: theme.textTheme.displaySmall),
-                const Text(S.goalsKcalADay),
-              ],
+      if (usable) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: MergeSemantics(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.end,
+                spacing: 8,
+                children: [
+                  Text(S.count(shown), style: theme.textTheme.displaySmall),
+                  const Text(S.goalsKcalADay),
+                ],
+              ),
             ),
           ),
-        ),
-      );
+        );
+      } else if (!_own && _errors['card'] == null) {
+        // Said once: a refused Save puts the same words in the error slot.
+        children.add(
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(S.goalsNotUsable),
+          ),
+        );
+      }
       if (clean) {
         children.add(
           Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(S.goalsCalculated(S.monthDay(saved!.effectiveFrom, _today))),
-              TextButton(
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                onPressed: _busy ? null : _recalculate,
-                child: const Text(S.goalsRecalculate),
-              ),
+              // Only when nothing is unsaved: Recalculate writes the stored
+              // values, so an unsaved edit would be lost.
+              if (_formIsSaved)
+                TextButton(
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: _busy ? null : _recalculate,
+                  child: const Text(S.goalsRecalculate),
+                ),
             ],
           ),
         );
@@ -1133,7 +1246,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
           ),
         );
       }
-      final notice = _own ? null : _lowNotice(shown);
+      final notice = _own || !usable ? null : _lowNotice(shown);
       if (notice != null) children.add(notice);
     }
     children.add(_err(context, 'card'));
@@ -1156,7 +1269,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
   // Macros.
 
   List<Widget> _macros(BuildContext context, bool big) {
-    const ids = [1003, 1005, 1004];
+    const ids = [Nutrients.protein, Nutrients.carbs, Nutrients.fat];
     final set = _mode == MacroMode.grams ? _grams : _percents;
     final values = _macroValues();
     final goal = _goalInUse;
@@ -1171,7 +1284,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
         fatG: values[2] ?? 0,
       );
     } else {
-      percentSum = values.fold<double>(0, (a, b) => a + (b ?? 0)).round();
+      percentSum = 100 - _percentsLeft;
       if (allValid && goal != null && percentSum == 100) {
         breakdown = macrosFromPercent(
           calories: goal.toDouble(),
@@ -1185,8 +1298,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
       final b = breakdown;
       if (b == null || values[i] == null) return null;
       if (_mode == MacroMode.grams) {
-        final kcal = [b.proteinKcal, b.carbsKcal, b.fatKcal][i];
-        return S.goalsKcal(roundForDisplay(kcal));
+        final kcal = [b.shownProteinKcal, b.shownCarbsKcal, b.shownFatKcal][i];
+        return S.goalsKcal(kcal);
       }
       final g = [b.proteinG, b.carbsG, b.fatG][i];
       return S.goalsGramsOut(roundForDisplay(g));
@@ -1203,8 +1316,16 @@ class _GoalsScreenState extends State<GoalsScreen> {
         onChanged: (_) => _changed(),
         decoration: _decoration(
           S.nutrientName(ids[i]),
-          suffix: _mode == MacroMode.grams ? S.unitG : '%',
-          error: _errors['m$i'],
+          suffix: _mode == MacroMode.grams ? S.unitG : S.unitPercent,
+          // In percent mode Save is off while a field cannot be read, so the
+          // field says why as it is typed.
+          error:
+              _errors['m$i'] ??
+              (_mode == MacroMode.percent &&
+                      set[i].text.trim().isNotEmpty &&
+                      values[i] == null
+                  ? S.goalsPercentBad
+                  : null),
         ),
       );
       final out = result(i);
@@ -1247,7 +1368,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
           ),
           if (_mode == MacroMode.grams && allValid)
             Text(
-              S.goalsKcal(roundForDisplay(breakdown!.totalKcal)),
+              S.goalsKcal(breakdown!.shownTotalKcal),
               style: const TextStyle(fontWeight: FontWeight.bold),
             )
           else if (_mode == MacroMode.percent && allValid)
@@ -1261,7 +1382,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
     final notes = <Widget>[];
     if (_mode == MacroMode.grams && allValid && goal != null) {
-      final diff = roundForDisplay(breakdown!.differenceFrom(goal));
+      final diff = breakdown!.shownDifferenceFrom(goal);
       notes.add(
         _small(
           context,
@@ -1275,17 +1396,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
     if (_mode == MacroMode.percent && anyText) {
       notes.add(
-        _small(
-          context,
-          S.goalsPercentAdds(
-            percentSum!,
-            percentLeft(
-              values[0]?.round() ?? 0,
-              values[1]?.round() ?? 0,
-              values[2]?.round() ?? 0,
-            ),
-          ),
-        ),
+        _small(context, S.goalsPercentAdds(percentSum!, _percentsLeft)),
       );
       if (breakdown != null && goal != null) {
         final p = values[0]!.round();
@@ -1295,7 +1406,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
             S.goalsPercentNote(
               p,
               goal,
-              roundForDisplay(breakdown.proteinKcal),
+              breakdown.shownProteinKcal,
               roundForDisplay(breakdown.proteinG),
             ),
           ),
@@ -1312,7 +1423,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
     final stacked = _big(context);
     final button = FilledButton(
       style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
-      onPressed: _busy ? null : _save,
+      onPressed: _busy || _percentsBlockSave ? null : _save,
       child: const Text(S.save),
     );
     return Material(

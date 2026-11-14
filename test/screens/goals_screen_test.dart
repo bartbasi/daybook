@@ -45,6 +45,20 @@ class Gate extends QueryInterceptor {
   var failWrites = false;
   var goalsInserts = 0;
 
+  /// While set, a read whose statement contains this text fails.
+  String? failReadsOf;
+
+  @override
+  Future<List<Map<String, Object?>>> runSelect(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    final bad = failReadsOf;
+    if (bad != null && statement.contains(bad)) throw StateError('read failed');
+    return super.runSelect(executor, statement, args);
+  }
+
   Future<void> _check(String statement) async {
     if (failWrites) throw StateError('disk full');
   }
@@ -578,6 +592,34 @@ void main() {
       expect(g.calorieMode, 'fixed');
     });
 
+    appTest(
+      'the sentence under a calculated goal has no color and no icon, and '
+      'Save still works',
+      (tester) async {
+        await seedWeight(tester, 181.8);
+        await openGoals(tester);
+        await fillSample(tester);
+        await tap(tester, find.widgetWithText(ChoiceChip, '2 lb'));
+        final notice = find.byKey(const ValueKey('low-intake'));
+        expect(notice, findsOneWidget);
+        expect(low(true), findsOneWidget);
+        expect(
+          find.descendant(of: notice, matching: find.byType(Icon)),
+          findsNothing,
+        );
+        final text = tester.widget<Text>(
+          find.descendant(of: notice, matching: find.byType(Text)),
+        );
+        expect(text.style?.color, isNull);
+        expect(find.byType(Chip), findsNothing);
+        expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
+        await tap(tester, saveButton());
+        final g = await theGoal(tester);
+        expect(g.calories, 1388);
+        expect(g.calorieMode, 'calculated');
+      },
+    );
+
     appTest('a calculated goal is checked by the number shown: 1,499.7 '
         'shows as 1,500 and has no notice', (tester) async {
       // Male, 52.1 kg, 151 cm, sedentary, stay the same, age 44: 1,499.7.
@@ -617,10 +659,7 @@ void main() {
 
       await tap(tester, find.text('Use my own calorie goal instead'));
       await enter(tester, 'Calories a day', '1800');
-      expect(
-        find.text('The calculated goal (2,138) is above, grayed out.'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('grayed out'), findsNothing);
       expect(
         find.text('The calculated 2,138 is not used while this is on.'),
         findsOneWidget,
@@ -787,19 +826,38 @@ void main() {
       await enter(tester, 'Protein', '30');
       await enter(tester, 'Carbs', '40');
       await enter(tester, 'Fat', '25');
+      // The words say why, and Save stays off until they add to 100.
       expect(find.text('Adds to 95%. 5% left.'), findsOneWidget);
-      await tap(tester, saveButton());
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNull);
+      await tester.tap(saveButton(), warnIfMissed: false);
+      await settle(tester);
       expect(await goalRows(tester), isEmpty);
-      final error = find.text('The percents must add to 100. They add to 95%.');
-      expect(error, findsOneWidget);
-      // Right under the three fields.
-      final fat = tester.getRect(field('Fat'));
-      final at = tester.getRect(error);
-      expect(at.top, greaterThanOrEqualTo(fat.bottom - 1));
-      expect(at.top - fat.bottom, lessThan(160));
-      // Over 100 says so too.
+      // Over 100 says so too, and Save is still off.
       await enter(tester, 'Fat', '35');
       expect(find.text('Adds to 105%. 5% over.'), findsOneWidget);
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNull);
+      // At 100 it is on again.
+      await enter(tester, 'Fat', '30');
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
+    });
+
+    appTest('percent mode: a field that is not a whole percent says so and '
+        'keeps Save off; all three empty leaves Save on', (tester) async {
+      await seedWeight(tester, 181.8);
+      await openGoals(tester);
+      await fillSample(tester);
+      await tap(tester, find.text('Percent'));
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
+      await enter(tester, 'Protein', 'abc');
+      expect(find.text(S.goalsPercentBad), findsOneWidget);
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNull);
+      await enter(tester, 'Protein', '');
+      expect(find.text(S.goalsPercentBad), findsNothing);
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
+      // Grams mode never blocks Save this way.
+      await tap(tester, find.text('Grams'));
+      await enter(tester, 'Protein', '150');
+      expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
     });
 
     appTest('some macros filled and some not is refused beside them', (
@@ -997,6 +1055,186 @@ void main() {
     appTest('the bar says goals apply from today', (tester) async {
       await openGoals(tester);
       expect(find.text(S.goalsApplies), findsOneWidget);
+    });
+  });
+
+  group('Recalculate is offered only when nothing is unsaved', () {
+    appTest('an unsaved macro, add-back, other nutrient or own number takes it '
+        'away, and putting it back brings it back', (tester) async {
+      await saveSampleOnNov8(tester);
+      await openGoals(tester);
+      expect(find.text('Recalculate'), findsOneWidget);
+
+      await enter(tester, 'Protein', '150');
+      await enter(tester, 'Carbs', '227');
+      await enter(tester, 'Fat', '70');
+      expect(find.text('Recalculate'), findsNothing);
+      await enter(tester, 'Protein', '');
+      await enter(tester, 'Carbs', '');
+      await enter(tester, 'Fat', '');
+      expect(find.text('Recalculate'), findsOneWidget);
+
+      await tap(tester, find.text('50%'));
+      expect(find.text('Recalculate'), findsNothing);
+      await tap(tester, find.text('100%'));
+      expect(find.text('Recalculate'), findsOneWidget);
+
+      await tap(tester, find.text('Percent'));
+      expect(find.text('Recalculate'), findsNothing);
+      await tap(tester, find.text('Grams'));
+      expect(find.text('Recalculate'), findsOneWidget);
+
+      await tap(tester, find.text('Use my own calorie goal instead'));
+      expect(find.text('Recalculate'), findsNothing);
+    });
+
+    appTest('an unsaved other nutrient goal takes it away', (tester) async {
+      await saveSampleOnNov8(tester);
+      await openGoals(tester);
+      await tap(tester, find.text('Other nutrients'));
+      await tap(tester, find.widgetWithText(ListTile, 'Sodium'));
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.byType(TextField),
+        ),
+        '2000',
+      );
+      await tester.pump();
+      await tap(
+        tester,
+        find.descendant(of: find.byType(Dialog), matching: find.text('Done')),
+      );
+      await tester.pageBack();
+      await settle(tester);
+      expect(find.text('Recalculate'), findsNothing);
+      expect(find.text(S.goalsOtherUnsaved), findsOneWidget);
+    });
+  });
+
+  group('a failed load, a goal that cannot be used, and an old birth date', () {
+    appTest('a failed load says so with Try again and shows no form', (
+      tester,
+    ) async {
+      await saveSampleOnNov8(tester);
+      gate.failReadsOf = '"profile"';
+      await openGoals(tester);
+      expect(find.text(S.goalsLoadFailed), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
+      expect(find.text('Male'), findsNothing);
+      expect(saveButton(), findsNothing);
+      expect(find.text('Lightly active'), findsNothing);
+      expect(await goalRows(tester), hasLength(1));
+
+      gate.failReadsOf = null;
+      await tap(tester, find.text('Try again'));
+      expect(find.text(S.goalsLoadFailed), findsNothing);
+      expect(find.text('Male'), findsOneWidget);
+      expect(find.text('2,138'), findsOneWidget);
+      expect(saveButton(), findsOneWidget);
+    });
+
+    appTest('numbers that give a calculated goal of zero or less say so in '
+        'words and write nothing', (tester) async {
+      // Born 1900, 5 ft, 100 lb, sedentary, losing 2 lb a week.
+      await seedWeight(tester, 100);
+      await openGoals(tester);
+      await tap(tester, find.text('Female'));
+      await enterBorn(tester, '01/01/1900');
+      await enter(tester, 'Feet', '5');
+      await enter(tester, 'Inches', '0');
+      await tap(tester, find.text('Sedentary'));
+      await tap(tester, find.widgetWithText(ChoiceChip, '2 lb'));
+      expect(find.text(S.goalsNotUsable), findsOneWidget);
+      await tap(tester, saveButton());
+      expect(find.text(S.goalsNotUsable), findsOneWidget);
+      expect(await goalRows(tester), isEmpty);
+      // Their own number is the way out.
+      await tap(tester, find.text('Use my own calorie goal instead'));
+      await enter(tester, 'Calories a day', '1500');
+      await tap(tester, saveButton());
+      expect((await theGoal(tester)).calories, 1500);
+    });
+
+    appTest('a birth date before 1900 does not break the date picker', (
+      tester,
+    ) async {
+      await real(
+        tester,
+        () => db
+            .into(db.profile)
+            .insert(
+              ProfileCompanion(
+                id: const Value(1),
+                sex: const Value('male'),
+                birthDate: const Value('1850-03-01'),
+                heightCm: const Value(180),
+              ),
+            ),
+      );
+      await openGoals(tester);
+      await tap(tester, find.text('Born'));
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Dialog), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await settle(tester);
+    });
+  });
+
+  group('height and birth date as typed', () {
+    Future<void> sampleThen(WidgetTester tester) async {
+      await seedWeight(tester, 181.8);
+      await openGoals(tester);
+      await fillSample(tester);
+    }
+
+    appTest('5 ft 12 in is refused', (tester) async {
+      await sampleThen(tester);
+      await enter(tester, 'Inches', '12');
+      await tap(tester, saveButton());
+      expect(find.text(S.goalsHeightRange), findsOneWidget);
+      expect(await goalRows(tester), isEmpty);
+    });
+
+    appTest('empty inches are read as 0', (tester) async {
+      await sampleThen(tester);
+      await enter(tester, 'Feet', '6');
+      await enter(tester, 'Inches', '');
+      await tap(tester, saveButton());
+      final p = (await real(tester, () => db.getProfile()))!;
+      expect(p.heightCm, closeTo(inToCm(72), 1e-9));
+    });
+
+    appTest('11,5 inches is read as 11.5', (tester) async {
+      await sampleThen(tester);
+      await enter(tester, 'Inches', '11,5');
+      await tap(tester, saveButton());
+      final p = (await real(tester, () => db.getProfile()))!;
+      expect(p.heightCm, closeTo(inToCm(71.5), 1e-9));
+    });
+
+    appTest('1,000 inches is refused', (tester) async {
+      await sampleThen(tester);
+      await enter(tester, 'Inches', '1,000');
+      await tap(tester, saveButton());
+      expect(find.text(S.goalsHeightRange), findsOneWidget);
+      expect(await goalRows(tester), isEmpty);
+    });
+
+    appTest('a decimal in the feet field is refused', (tester) async {
+      await sampleThen(tester);
+      await enter(tester, 'Feet', '5.5');
+      await tap(tester, saveButton());
+      expect(find.text(S.goalsHeightRange), findsOneWidget);
+      expect(await goalRows(tester), isEmpty);
+    });
+
+    appTest('a birth date of today is refused', (tester) async {
+      await sampleThen(tester);
+      await enterBorn(tester, '11/12/2026');
+      await tap(tester, saveButton());
+      expect(find.text(S.goalsBornFuture), findsOneWidget);
+      expect(await goalRows(tester), isEmpty);
     });
   });
 

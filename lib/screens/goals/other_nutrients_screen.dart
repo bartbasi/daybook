@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
@@ -20,11 +21,15 @@ class OtherNutrientsScreen extends StatefulWidget {
   const OtherNutrientsScreen({
     super.key,
     required this.overrides,
+    required this.saved,
     required this.onChanged,
   });
 
   /// The user's own goals so far, by nutrient id.
   final Map<int, double> overrides;
+
+  /// What is saved now. A difference from it is "not saved yet".
+  final Map<int, double> saved;
   final ValueChanged<Map<int, double>> onChanged;
 
   @override
@@ -91,28 +96,43 @@ class _OtherNutrientsScreenState extends State<OtherNutrientsScreen> {
       appBar: AppBar(title: const Text(S.otherTitle)),
       body: SafeArea(
         child: ContentWidth(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text(S.otherIntro),
-              ),
-              for (final n in _listed)
-                Semantics(
-                  container: true,
-                  label: '${S.nutrientName(n.id)}. ${_sub(n)}',
-                  excludeSemantics: true,
-                  button: true,
-                  child: ListTile(
-                    minTileHeight: 56,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(S.nutrientName(n.id)),
-                    subtitle: Text(_sub(n)),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _edit(n),
-                  ),
+              // Above the list, so it is seen wherever the list is scrolled.
+              if (!mapEquals(_own, widget.saved))
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(S.goalsOtherUnsaved),
                 ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text(S.otherIntro),
+                    ),
+                    for (final n in _listed)
+                      Semantics(
+                        container: true,
+                        label: '${S.nutrientName(n.id)}. ${_sub(n)}',
+                        excludeSemantics: true,
+                        button: true,
+                        child: ListTile(
+                          minTileHeight: 56,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(S.nutrientName(n.id)),
+                          subtitle: Text(_sub(n)),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _edit(n),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -199,7 +219,7 @@ class _EditDialogState extends State<_EditDialog> {
         FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
           onPressed: _save,
-          child: const Text(S.save),
+          child: const Text(S.otherDone),
         ),
       ],
     );

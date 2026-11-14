@@ -258,6 +258,28 @@ void main() {
   });
 
   group('macros', () {
+    test('grams mode with decimal grams: the shown kcal add up to the shown '
+        'total (602 + 910 + 630 = 2,142)', () {
+      const m = MacroBreakdown(proteinG: 150.4, carbsG: 227.4, fatG: 70);
+      expect(m.shownProteinKcal, 602);
+      expect(m.shownCarbsKcal, 910);
+      expect(m.shownFatKcal, 630);
+      expect(m.shownTotalKcal, 2142);
+      expect(
+        m.shownTotalKcal,
+        m.shownProteinKcal + m.shownCarbsKcal + m.shownFatKcal,
+      );
+      // The unrounded total, 2,141.4, would have shown 2,141.
+      expect(roundForDisplay(m.totalKcal), 2141);
+    });
+
+    test('the shown difference is built from the shown total', () {
+      const m = MacroBreakdown(proteinG: 150.4, carbsG: 227.4, fatG: 70);
+      expect(m.shownDifferenceFrom(2138), 4);
+      expect(m.shownDifferenceFrom(2142), 0);
+      expect(m.shownDifferenceFrom(2200), -58);
+    });
+
     test('percent mode on 2,138: 160 g, 214 g, 71 g', () {
       final m = macrosFromPercent(
         calories: 2138,
@@ -415,6 +437,18 @@ void main() {
       );
     });
 
+    test('withFood adds that many kcal of food and keeps the rest', () {
+      final b = day(50).withFood(100.4);
+      expect(b.foodKcal, 1366.4);
+      expect(b.goal, 2138);
+      expect(b.exerciseKcal, 383);
+      expect(b.addBackPercent, 50);
+      expect(b.shownFood, 1366);
+      expect(b.shownLeft, 2138 + 192 - 1366);
+      // The original is not changed.
+      expect(day(50).foodKcal, 1266);
+    });
+
     test('a bad add-back percent is refused', () {
       expect(
         () => DayBudget(
@@ -434,6 +468,27 @@ void main() {
       expect(roundForDisplay(2137.5), 2138);
       expect(roundForDisplay(-250.5), -251);
       expect(roundForDisplay(2137.49), 2137);
+    });
+
+    test('the order of adding does not change what is shown', () {
+      // 270.7 + 34.84 + 85.96 is 391.49999999999994 one way and 391.5 the
+      // other. Both show 392.
+      final forward = 270.7 + 34.84 + 85.96;
+      final backward = 85.96 + 34.84 + 270.7;
+      expect(roundForDisplay(forward), 392);
+      expect(roundForDisplay(backward), 392);
+      expect(roundForDisplay(-forward), -392);
+    });
+
+    test('a number that is really below a half still rounds down', () {
+      expect(roundForDisplay(0.4999999), 0);
+      expect(roundForDisplay(2137.4999999), 2137);
+    });
+
+    test('the sample numbers are unchanged', () {
+      expect(roundForDisplay(sample().resting), 1737);
+      expect(roundForDisplay(sample().maintenance), 2388);
+      expect(roundForDisplay(sample().goal), 2138);
     });
   });
 }

@@ -313,6 +313,49 @@ void main() {
     });
   });
 
+  group('a calculated goal that is not usable', () {
+    // A very old woman, 150 cm, 100 lb, losing 2 lb a week: below zero.
+    GoalInput extreme() => sampleInput(
+      sex: Sex.female,
+      birthDate: '1900-01-01',
+      heightCm: 150,
+      activity: ActivityLevel.sedentary,
+      rate: const WeeklyRate(Target.lose, 2, imp),
+      protein: null,
+      carbs: null,
+      fat: null,
+    );
+
+    test('is refused and nothing is written', () async {
+      await weigh(100, '2026-11-12');
+      await expectLater(
+        db.saveGoals(extreme(), nov12),
+        throwsA(
+          isA<GoalRefused>().having(
+            (e) => e.problem,
+            'problem',
+            GoalProblem.calculatedNotPositive,
+          ),
+        ),
+      );
+      expect(await goalRows(), 0);
+    });
+
+    test('an own number still works for the same person', () async {
+      await weigh(100, '2026-11-12');
+      final g = await db.saveGoals(
+        sampleInput(
+          sex: Sex.female,
+          birthDate: '1900-01-01',
+          heightCm: 150,
+          ownCalories: 1500,
+        ),
+        nov12,
+      );
+      expect(g.calories, 1500);
+    });
+  });
+
   group('own number', () {
     test(
       'is stored as typed, bypasses the formula and keeps the inputs',
@@ -881,6 +924,58 @@ void main() {
       expect(b.foodKcal, 0);
       expect((await db.budgetForDay('2026-11-13'))!.foodKcal, 800);
     });
+
+    test(
+      'exceptMealId leaves that meal out of the food, and only that one',
+      () async {
+        await sampleGoals();
+        await eat('2026-11-12', 490);
+        await eat('2026-11-12', 776);
+        await eat('2026-11-12', 130);
+        final ids = [for (final m in await db.select(db.meals).get()) m.id];
+        final b = (await db.budgetForDay('2026-11-12', exceptMealId: ids[1]))!;
+        expect(b.foodKcal, 620);
+        expect(b.left, 2138 - 620);
+        expect((await db.budgetForDay('2026-11-12'))!.foodKcal, 1396);
+        final first = await db.budgetForDay('2026-11-12', exceptMealId: ids[0]);
+        expect(first!.foodKcal, 906);
+      },
+    );
+
+    test('exceptMealId for a meal on another day changes nothing', () async {
+      await sampleGoals();
+      await eat('2026-11-12', 490);
+      await eat('2026-11-11', 300);
+      final other = (await db.select(db.meals).get())
+          .firstWhere((m) => m.localDate == '2026-11-11')
+          .id;
+      final b = await db.budgetForDay('2026-11-12', exceptMealId: other);
+      expect(b!.foodKcal, 490);
+      expect(
+        (await db.budgetForDay('2026-11-12', exceptMealId: 9999))!.foodKcal,
+        490,
+      );
+    });
+
+    test(
+      'watchBudgetForDay with exceptMealId follows the other meals',
+      () async {
+        await sampleGoals();
+        await eat('2026-11-12', 490);
+        await eat('2026-11-12', 776);
+        final id = (await db.select(db.meals).get()).first.id;
+        final seen = <double>[];
+        final sub = db
+            .watchBudgetForDay('2026-11-12', exceptMealId: id)
+            .listen((b) => seen.add(b!.foodKcal));
+        await pumpEventQueue();
+        await eat('2026-11-12', 100);
+        await pumpEventQueue();
+        await sub.cancel();
+        expect(seen.first, 776);
+        expect(seen.last, 876);
+      },
+    );
 
     test('a day uses its own goal', () async {
       await sampleGoals();

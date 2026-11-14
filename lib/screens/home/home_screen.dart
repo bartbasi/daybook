@@ -4,7 +4,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../../app.dart';
 import '../../app_scope.dart';
@@ -51,7 +50,6 @@ class HomeScreenState extends State<HomeScreen> {
   Stream<UnitSystem>? _units;
   Stream<List<MealSlot>>? _slots;
   Stream<DayLog>? _day;
-  Stream<DayLog>? _eaten; // the meters' own, a stream has one listener
   Stream<DayBudget?>? _budget;
   Stream<GoalsForDay?>? _goals;
   String? _dayFor;
@@ -86,7 +84,6 @@ class HomeScreenState extends State<HomeScreen> {
 
   void _followDay(AppDatabase db) {
     _day = db.watchDay(widget.today);
-    _eaten = db.watchDay(widget.today);
     _budget = db.watchBudgetForDay(widget.today);
     _goals = db.watchGoalsForDay(widget.today);
   }
@@ -257,49 +254,52 @@ class HomeScreenState extends State<HomeScreen> {
     ).push(MaterialPageRoute<void>(builder: (_) => const GoalsScreen()));
   }
 
+  /// Listens to one stream and hands the plain snapshot down. Each stream
+  /// has one listener, so each is read by one builder that stays above the
+  /// list and is never disposed while Home lives. The cards below get plain
+  /// values and never listen.
+  Widget _watch<T>(
+    Stream<T>? stream,
+    Widget Function(AsyncSnapshot<T> snap) build,
+  ) => StreamBuilder<T>(stream: stream, builder: (_, snap) => build(snap));
+
   @override
   Widget build(BuildContext context) {
-    final today = widget.today;
     final theme = Theme.of(context);
     return Column(
       children: [
         Expanded(
           child: ContentWidth(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              // Everything stays built: the streams below have one listener each,
-              // so a child scrolled out of the cache could not listen again.
-              scrollCacheExtent: const ScrollCacheExtent.viewport(100),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Semantics(
-                    header: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(S.homeToday, style: theme.textTheme.headlineSmall),
-                        Text(S.dateLong(today)),
-                      ],
+            child: _watch<UnitSystem>(
+              _units,
+              (units) => _watch<List<WeightEntry>>(
+                _weights,
+                (weights) => _watch<List<TrendPoint>>(
+                  _trend,
+                  (trend) => _watch<List<MealSlot>>(
+                    _slots,
+                    (slots) => _watch<DayLog>(
+                      _day,
+                      (day) => _watch<DayBudget?>(
+                        _budget,
+                        (budget) => _watch<GoalsForDay?>(
+                          _goals,
+                          (goals) => _list(
+                            theme,
+                            units: units.data,
+                            weights: weights.data,
+                            trend: trend.data,
+                            slots: slots.data,
+                            day: day.data,
+                            budget: budget,
+                            goals: goals.data,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                _BudgetPart(
-                  budget: _budget!,
-                  goals: _goals!,
-                  day: _eaten!,
-                  onSetGoals: _openGoals,
-                ),
-                _Meals(slots: _slots!, day: _day!, onOpen: openFood),
-                const SizedBox(height: 12),
-                _WeightRow(
-                  weights: _weights!,
-                  trend: _trend!,
-                  units: _units!,
-                  today: today,
-                  onTap: widget.onOpenWeightTab,
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -348,6 +348,54 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _list(
+    ThemeData theme, {
+    required UnitSystem? units,
+    required List<WeightEntry>? weights,
+    required List<TrendPoint>? trend,
+    required List<MealSlot>? slots,
+    required DayLog? day,
+    required AsyncSnapshot<DayBudget?> budget,
+    required GoalsForDay? goals,
+  }) {
+    final today = widget.today;
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Semantics(
+            header: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(S.homeToday, style: theme.textTheme.headlineSmall),
+                Text(S.dateLong(today)),
+              ],
+            ),
+          ),
+        ),
+        _BudgetPart(
+          budget: budget.data,
+          loading: budget.connectionState == ConnectionState.waiting,
+          failed: budget.hasError,
+          goals: goals,
+          day: day,
+          onSetGoals: _openGoals,
+        ),
+        _Meals(slots: slots, day: day, onOpen: openFood),
+        const SizedBox(height: 12),
+        _WeightRow(
+          units: units,
+          rows: weights,
+          trend: trend,
+          today: today,
+          onTap: widget.onOpenWeightTab,
+        ),
+      ],
+    );
+  }
+
   /// Built from the stored row that saveWeight returned, not from the text.
   /// [today] is read from the clock as the message is built.
   static String _weightMessage(SavedWeight s, String today) {
@@ -378,93 +426,72 @@ const _barButton = ButtonStyle(
 
 class _WeightRow extends StatelessWidget {
   const _WeightRow({
-    required this.weights,
-    required this.trend,
     required this.units,
+    required this.rows,
+    required this.trend,
     required this.today,
     required this.onTap,
   });
 
-  final Stream<List<WeightEntry>> weights;
-  final Stream<List<TrendPoint>> trend;
-  final Stream<UnitSystem> units;
+  final UnitSystem? units;
+  final List<WeightEntry>? rows;
+  final List<TrendPoint>? trend;
   final String today;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return StreamBuilder<UnitSystem>(
-      stream: units,
-      builder: (context, unitsSnap) {
-        // Draw nothing until the units are known, so a metric user never
-        // sees pounds for a frame.
-        if (!unitsSnap.hasData) return const SizedBox.shrink();
-        final u = unitsSnap.data!;
-        return StreamBuilder<List<WeightEntry>>(
-          stream: weights,
-          builder: (context, weightsSnap) {
-            if (!weightsSnap.hasData) return const SizedBox.shrink();
-            final rows = weightsSnap.data!;
-            return Card(
-              margin: EdgeInsets.zero,
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onTap,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 56),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          S.homeWeightLabel,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        if (rows.isEmpty)
-                          const Text(S.homeNoWeight)
-                        else ...[
-                          Text(
-                            '${formatWeight(rows.first.weightKg, u)} '
-                            '${S.unitWord(u)}',
-                            style: theme.textTheme.headlineSmall,
-                          ),
-                          StreamBuilder<List<TrendPoint>>(
-                            stream: trend,
-                            builder: (context, trendSnap) {
-                              final points = trendSnap.data;
-                              if (points == null || points.isEmpty) {
-                                return const SizedBox.shrink();
-                              }
-                              return Text(
-                                S.homeTrend(
-                                  formatWeight(points.last.trendKg, u),
-                                  S.unitWord(u),
-                                ),
-                              );
-                            },
-                          ),
-                          Text(
-                            S.whenAsLabel(
-                              rows.first.localDate,
-                              minuteOfDayOf(
-                                rows.first.measuredAtMs,
-                                rows.first.tzOffsetMinutes,
-                              ),
-                              today,
-                            ),
-                          ),
-                        ],
-                      ],
+    final u = units;
+    final rows = this.rows;
+    // Draw nothing until the units are known, so a metric user never sees
+    // pounds for a frame.
+    if (u == null || rows == null) return const SizedBox.shrink();
+    final points = trend;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(S.homeWeightLabel, style: theme.textTheme.titleMedium),
+                if (rows.isEmpty)
+                  const Text(S.homeNoWeight)
+                else ...[
+                  Text(
+                    '${formatWeight(rows.first.weightKg, u)} '
+                    '${S.unitWord(u)}',
+                    style: theme.textTheme.headlineSmall,
+                  ),
+                  if (points != null && points.isNotEmpty)
+                    Text(
+                      S.homeTrend(
+                        formatWeight(points.last.trendKg, u),
+                        S.unitWord(u),
+                      ),
+                    ),
+                  Text(
+                    S.whenAsLabel(
+                      rows.first.localDate,
+                      minuteOfDayOf(
+                        rows.first.measuredAtMs,
+                        rows.first.tzOffsetMinutes,
+                      ),
+                      today,
                     ),
                   ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -472,68 +499,74 @@ class _WeightRow extends StatelessWidget {
 /// The budget card and the macro meters, or the "Set your goals" card until
 /// goals exist (home.html frames 1 and 2). Every number on the card is one of
 /// [DayBudget]'s shown numbers, so the line under the big one always adds up.
+/// It gets plain values. [loading] is true before the first read, [failed]
+/// when the last read of the budget failed (then a plain line says so, and
+/// never "Set your goals", which would be untrue).
 class _BudgetPart extends StatelessWidget {
   const _BudgetPart({
     required this.budget,
+    required this.loading,
+    required this.failed,
     required this.goals,
     required this.day,
     required this.onSetGoals,
   });
 
-  final Stream<DayBudget?> budget;
-  final Stream<GoalsForDay?> goals;
-  final Stream<DayLog> day;
+  final DayBudget? budget;
+  final bool loading;
+  final bool failed;
+  final GoalsForDay? goals;
+  final DayLog? day;
   final VoidCallback onSetGoals;
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DayBudget?>(
-      stream: budget,
-      builder: (context, snap) {
-        // A null value is "no goals yet", not "still loading".
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const SizedBox.shrink();
-        }
-        final b = snap.data;
-        if (b == null) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              margin: EdgeInsets.zero,
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onSetGoals,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 56),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          S.homeSetGoals,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const Text(S.homeSetGoalsSub),
-                      ],
+    if (failed) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 12),
+        child: Text(S.homeBudgetFailed),
+      );
+    }
+    // A null value is "no goals yet", not "still loading".
+    if (loading) return const SizedBox.shrink();
+    final b = budget;
+    if (b == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onSetGoals,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 56),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      S.homeSetGoals,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                  ),
+                    const Text(S.homeSetGoalsSub),
+                  ],
                 ),
               ),
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _BudgetCard(budget: b),
-              _Meters(goals: goals, day: day),
-            ],
           ),
-        );
-      },
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _BudgetCard(budget: b),
+          _Meters(macros: goals?.macros, log: day),
+        ],
+      ),
     );
   }
 }
@@ -593,50 +626,38 @@ class _BudgetCard extends StatelessWidget {
 /// Protein, carbs and fat eaten so far against the goals, each with its
 /// number in words. The bar is only a picture of the same numbers.
 class _Meters extends StatelessWidget {
-  const _Meters({required this.goals, required this.day});
+  const _Meters({required this.macros, required this.log});
 
-  final Stream<GoalsForDay?> goals;
-  final Stream<DayLog> day;
+  final MacroBreakdown? macros;
+  final DayLog? log;
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<GoalsForDay?>(
-      stream: goals,
-      builder: (context, goalsSnap) => StreamBuilder<DayLog>(
-        stream: day,
-        builder: (context, daySnap) {
-          final macros = goalsSnap.data?.macros;
-          final log = daySnap.data;
-          if (macros == null || log == null) return const SizedBox.shrink();
-          final totals = log.totals;
-          final items = [
-            (
-              Nutrients.protein,
-              totals[Nutrients.protein] ?? 0,
-              macros.proteinG,
+    final macros = this.macros;
+    final log = this.log;
+    if (macros == null || log == null) return const SizedBox.shrink();
+    final totals = log.totals;
+    final items = [
+      (Nutrients.protein, totals[Nutrients.protein] ?? 0, macros.proteinG),
+      (Nutrients.carbs, totals[Nutrients.carbs] ?? 0, macros.carbsG),
+      (Nutrients.fat, totals[Nutrients.fat] ?? 0, macros.fatG),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(
+              child: _Meter(
+                id: items[i].$1,
+                eaten: items[i].$2,
+                goal: items[i].$3,
+              ),
             ),
-            (Nutrients.carbs, totals[Nutrients.carbs] ?? 0, macros.carbsG),
-            (Nutrients.fat, totals[Nutrients.fat] ?? 0, macros.fatG),
-          ];
-          return Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < items.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 12),
-                  Expanded(
-                    child: _Meter(
-                      id: items[i].$1,
-                      eaten: items[i].$2,
-                      goal: items[i].$3,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
+          ],
+        ],
       ),
     );
   }
@@ -687,8 +708,8 @@ typedef _OpenFood = Future<void> Function({
 class _Meals extends StatelessWidget {
   const _Meals({required this.slots, required this.day, required this.onOpen});
 
-  final Stream<List<MealSlot>> slots;
-  final Stream<DayLog> day;
+  final List<MealSlot>? slots;
+  final DayLog? day;
   final _OpenFood onOpen;
 
   /// The foods in brief: each name up to its first comma.
@@ -699,66 +720,58 @@ class _Meals extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return StreamBuilder<List<MealSlot>>(
-      stream: slots,
-      builder: (context, slotSnap) => StreamBuilder<DayLog>(
-        stream: day,
-        builder: (context, daySnap) {
-          if (!slotSnap.hasData || !daySnap.hasData) {
-            return const SizedBox.shrink();
-          }
-          final meals = daySnap.data!.meals;
-          final rows = <Widget>[];
-          for (final slot in slotSnap.data!) {
-            final here = [
-              for (final m in meals)
-                if (m.meal.slotId == slot.id) m,
-            ];
-            if (here.isEmpty) {
-              rows.add(
-                _MealRow(
-                  title: slot.name,
-                  detail: S.mealEmpty,
-                  onTap: () => onOpen(slotId: slot.id),
-                ),
-              );
-            }
-            for (final m in here) {
-              rows.add(
-                _MealRow(
-                  title: slot.name,
-                  kcal: S.kcal(m.totals[Nutrients.energy]),
-                  detail: _foods(m),
-                  onTap: () => onOpen(meal: m),
-                ),
-              );
-            }
-          }
-          // A meal in a slot that was archived since stays listed.
-          final listed = {for (final slot in slotSnap.data!) slot.id};
-          for (final m in meals) {
-            if (listed.contains(m.meal.slotId)) continue;
-            rows.add(
-              _MealRow(
-                title: m.slotName,
-                kcal: S.kcal(m.totals[Nutrients.energy]),
-                detail: _foods(m),
-                onTap: () => onOpen(meal: m),
-              ),
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Semantics(
-                header: true,
-                child: Text(S.homeMeals, style: theme.textTheme.titleMedium),
-              ),
-              ...rows,
-            ],
-          );
-        },
-      ),
+    final slots = this.slots;
+    final day = this.day;
+    if (slots == null || day == null) return const SizedBox.shrink();
+    final meals = day.meals;
+    final rows = <Widget>[];
+    for (final slot in slots) {
+      final here = [
+        for (final m in meals)
+          if (m.meal.slotId == slot.id) m,
+      ];
+      if (here.isEmpty) {
+        rows.add(
+          _MealRow(
+            title: slot.name,
+            detail: S.mealEmpty,
+            onTap: () => onOpen(slotId: slot.id),
+          ),
+        );
+      }
+      for (final m in here) {
+        rows.add(
+          _MealRow(
+            title: slot.name,
+            kcal: S.kcal(m.totals[Nutrients.energy]),
+            detail: _foods(m),
+            onTap: () => onOpen(meal: m),
+          ),
+        );
+      }
+    }
+    // A meal in a slot that was archived since stays listed.
+    final listed = {for (final slot in slots) slot.id};
+    for (final m in meals) {
+      if (listed.contains(m.meal.slotId)) continue;
+      rows.add(
+        _MealRow(
+          title: m.slotName,
+          kcal: S.kcal(m.totals[Nutrients.energy]),
+          detail: _foods(m),
+          onTap: () => onOpen(meal: m),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(S.homeMeals, style: theme.textTheme.titleMedium),
+        ),
+        ...rows,
+      ],
     );
   }
 }

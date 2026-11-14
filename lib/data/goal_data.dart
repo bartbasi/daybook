@@ -52,6 +52,9 @@ enum GoalProblem {
 
   /// Recalculate was asked for before any goals were saved.
   noGoals,
+
+  /// The calculated goal comes to zero or less, which is not a usable goal.
+  calculatedNotPositive,
 }
 
 class GoalRefused implements Exception {
@@ -300,6 +303,9 @@ extension GoalData on AppDatabase {
             rate: input.rate,
           ).goal,
         );
+        if (calories <= 0) {
+          throw const GoalRefused(GoalProblem.calculatedNotPositive);
+        }
       }
 
       await into(profile).insertOnConflictUpdate(
@@ -403,30 +409,41 @@ extension GoalData on AppDatabase {
   }
 
   /// The day's budget: the goal for that day, plus the add-back share of the
-  /// day's exercise, minus the day's food. Null before any goals exist.
-  Future<DayBudget?> budgetForDay(String localDate) => transaction(() async {
-    final g = await goalsForDay(localDate);
-    final goal = g?.calories;
-    if (g == null || goal == null) return null;
-    final food = (await loadDay(localDate)).totals[Nutrients.energy] ?? 0;
-    return DayBudget(
-      goal: goal.toDouble(),
-      exerciseKcal: await exerciseKcalForDay(localDate),
-      addBackPercent: g.addBackPercent,
-      foodKcal: food,
-    );
-  });
+  /// day's exercise, minus the day's food. Null before any goals exist. With
+  /// [exceptMealId] that meal's food is left out of the day (the meal being
+  /// edited, which the screen adds back as typed). A meal that is not on the
+  /// day leaves nothing out.
+  Future<DayBudget?> budgetForDay(String localDate, {int? exceptMealId}) =>
+      transaction(() async {
+        final g = await goalsForDay(localDate);
+        final goal = g?.calories;
+        if (g == null || goal == null) return null;
+        final log = await loadDay(localDate);
+        final food =
+            sumNutrients([
+              for (final m in log.meals)
+                if (m.meal.id != exceptMealId) m.totals,
+            ])[Nutrients.energy] ??
+            0;
+        return DayBudget(
+          goal: goal.toDouble(),
+          exerciseKcal: await exerciseKcalForDay(localDate),
+          addBackPercent: g.addBackPercent,
+          foodKcal: food,
+        );
+      });
 
   /// The day's budget, again after any change to goals, food or exercise.
-  Stream<DayBudget?> watchBudgetForDay(String localDate) => liveQuery(this, [
-    goals,
-    cardioSessions,
-    workouts,
-    meals,
-    mealEntries,
-    mealEntryNutrients,
-    mealSlots,
-  ], () => budgetForDay(localDate));
+  Stream<DayBudget?> watchBudgetForDay(String localDate, {int? exceptMealId}) =>
+      liveQuery(this, [
+        goals,
+        cardioSessions,
+        workouts,
+        meals,
+        mealEntries,
+        mealEntryNutrients,
+        mealSlots,
+      ], () => budgetForDay(localDate, exceptMealId: exceptMealId));
 
   Sex? _sexOf(String? name) => switch (name) {
     'male' => Sex.male,

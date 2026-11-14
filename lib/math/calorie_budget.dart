@@ -10,8 +10,12 @@ import '../util/units.dart';
 // intermediate can never leak into a later step.
 
 /// The one place a number is rounded for showing (and for storing the
-/// calculated goal, which is shown). Half rounds away from zero.
-int roundForDisplay(double value) => value.round();
+/// calculated goal, which is shown). Half rounds away from zero. The value is
+/// first rounded to 8 decimal places, so the noise that adding in a different
+/// order leaves (391.49999999999994 against 391.5) cannot change the result.
+/// A number that is really under a half, like 0.4999999, still rounds down.
+int roundForDisplay(double value) =>
+    ((value * 1e8).roundToDouble() / 1e8).round();
 
 enum Sex { male, female }
 
@@ -213,6 +217,16 @@ class MacroBreakdown {
   /// that is shown or stored (use [roundForDisplay] on a live goal), so a
   /// goal of 2,138.04 shown as 2,138 gives 0.
   double differenceFrom(int goalKcal) => totalKcal - goalKcal;
+
+  // What the screens show: each part rounded on its own, and the total and
+  // the difference built from the rounded parts, so the lines add up on screen.
+  int get shownProteinKcal => roundForDisplay(proteinKcal);
+  int get shownCarbsKcal => roundForDisplay(carbsKcal);
+  int get shownFatKcal => roundForDisplay(fatKcal);
+  int get shownTotalKcal => shownProteinKcal + shownCarbsKcal + shownFatKcal;
+
+  /// The shown total minus the whole-number [goalKcal].
+  int shownDifferenceFrom(int goalKcal) => shownTotalKcal - goalKcal;
 }
 
 /// Percent mode: whole percents of the calorie goal. They must add to 100 or
@@ -286,4 +300,13 @@ class DayBudget {
   int get shownAddBack => roundForDisplay(addBack);
   int get shownFood => roundForDisplay(foodKcal);
   int get shownLeft => shownGoal + shownAddBack - shownFood;
+
+  /// The same day with [kcal] more food (the meal being typed). Nothing else
+  /// changes, and the original is untouched.
+  DayBudget withFood(double kcal) => DayBudget(
+    goal: goal,
+    exerciseKcal: exerciseKcal,
+    addBackPercent: addBackPercent,
+    foodKcal: foodKcal + kcal,
+  );
 }
