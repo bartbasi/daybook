@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are being built |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens are next |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -110,6 +110,8 @@ Each is the recommended option from the plan's open questions, or a small call m
 78. **The About text for wger gains two things over what you approved**: "and CC0" in the license list, since 20 entries are CC0, and the sentence "Descriptions were changed from HTML to plain text.", because CC BY-SA asks us to say when we changed the material. docs/data-sources.md marks both for you.
 79. **128 exercises are under CC BY-SA 3.0, whose wording on "technological measures" sits badly with App Store copy protection.** Version 4.0 (777 entries) softens this. It is a known grey area that many apps on the App Store live with, wger's own among them. The choice is to accept it or to leave those 128 descriptions out of the iPhone build. Recommended: accept. This is not legal advice.
 80. **Weekly volume counts sets in ten muscle groups**: chest, shoulders, triceps, back, biceps, quads, hamstrings, glutes, calves and abs. The wireframe shows eight; glutes and abs are added so those sets are counted. The grouping is Daybook's own: lats and trapezius count as back, brachialis as biceps, soleus as calves, the obliques as abs, serratus anterior as chest. An exercise with no muscles on record uses its wger category when that names one group; 94 exercises have neither (their category is Legs, Arms or Cardio) and their sets count toward no group.
+81. **A workout still running adds nothing to the day's budget**, also when you have typed your own calorie number on it. It counts once it is finished.
+82. **Starting a workout while one from an earlier day is still running finishes the old one first.** Its time still ends at its last logged set, so a forgotten Finish costs nothing. Without this, Thursday's sets would be logged into Monday's workout and Monday would get days of calories. A workout from earlier today still blocks a new start; "Return to workout" continues it. One edge: someone training across midnight who taps Start by mistake finds the earlier workout finished; Resume on it brings it back. Say if you would rather be asked first.
 
 ## Open questions from the plan: answered
 
