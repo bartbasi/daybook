@@ -185,8 +185,16 @@ class StartAgainEntry {
 /// The answer to starting or resuming a workout. Exactly one of [workout]
 /// and [running] is set.
 class StartResult {
-  const StartResult.started(Workout this.workout) : running = null;
-  const StartResult.refused(WorkoutSummary this.running) : workout = null;
+  const StartResult.started(Workout this.workout, {this.finishedEarlier})
+    : running = null;
+  const StartResult.refused(WorkoutSummary this.running)
+    : workout = null,
+      finishedEarlier = null;
+
+  /// Set when a start found a workout still running from an earlier day and
+  /// finished it first (as Finish would have), so the screen can say so. Its
+  /// length and calories are as finished. Null otherwise.
+  final WorkoutSummary? finishedEarlier;
 
   /// The workout now running.
   final Workout? workout;
@@ -542,7 +550,10 @@ extension WorkoutData on AppDatabase {
   /// Starts a workout from a routine: its exercises in order, each with its
   /// target sets, every set stored at once, prefilled from the last time that
   /// exercise was done (empty the first time). If a workout is already running
-  /// nothing is started and the result names the running one.
+  /// nothing is started and the result names the running one, unless that
+  /// workout started on an earlier day: it is finished first, in the same
+  /// transaction ([StartResult.finishedEarlier]). The same holds for
+  /// [startAgain] and [startEmptyWorkout].
   Future<StartResult> startRoutine(int routineId, Now now) =>
       transaction(() async {
         final r = await getRoutine(routineId);
@@ -583,9 +594,17 @@ extension WorkoutData on AppDatabase {
       transaction(() => _begin(now, null, const []));
 
   Future<StartResult> _begin(Now now, int? routineId, List<_Plan> plans) async {
-    final running = await _runningRow();
+    var running = await _runningRow();
+    WorkoutSummary? finishedEarlier;
     if (running != null) {
-      return StartResult.refused((await _summaries([running])).single);
+      if (running.localDate.compareTo(now.localDate) >= 0) {
+        return StartResult.refused((await _summaries([running])).single);
+      }
+      // A workout belongs to the day it started. One left running from an
+      // earlier day was forgotten: finish it, in this same transaction.
+      await _finishRow(running, now);
+      running = await _workoutRow(running.id);
+      finishedEarlier = (await _summaries([running])).single;
     }
     final id = await into(workouts).insert(
       WorkoutsCompanion.insert(
@@ -602,7 +621,10 @@ extension WorkoutData on AppDatabase {
         await _insertSet(id, position++, p.ref, p.name, _prefill(last, i));
       }
     }
-    return StartResult.started(await _workoutRow(id));
+    return StartResult.started(
+      await _workoutRow(id),
+      finishedEarlier: finishedEarlier,
+    );
   }
 
   /// "Start again" rows: yesterday's workout first, the workout from the same
@@ -927,7 +949,13 @@ extension WorkoutData on AppDatabase {
   Future<Workout> finishWorkout(int id, Now now) => transaction(() async {
     final w = await _workoutRow(id);
     if (w.endedAtMs != null) return w;
-    final lastSet = await _lastSetAt(id);
+    await _finishRow(w, now);
+    return _workoutRow(id);
+  });
+
+  /// The writes of Finish. Call inside a transaction.
+  Future<void> _finishRow(Workout w, Now now) async {
+    final lastSet = await _lastSetAt(w.id);
     final end = now.utcMs < w.startedAtMs ? w.startedAtMs : now.utcMs;
     double? kcal;
     final length = workoutLength(w.startedAtMs, lastSet);
@@ -937,11 +965,10 @@ extension WorkoutData on AppDatabase {
         kcal = workoutKcal(bodyWeightKg: weight.weightKg, durationMs: length);
       }
     }
-    await (update(workouts)..where((x) => x.id.equals(id))).write(
+    await (update(workouts)..where((x) => x.id.equals(w.id))).write(
       WorkoutsCompanion(endedAtMs: Value(end), kcalEstimated: Value(kcal)),
     );
-    return _workoutRow(id);
-  });
+  }
 
   /// Runs a finished workout again: it has no end time, its unlogged planned
   /// sets are sets to do again, and the estimate is cleared until the next

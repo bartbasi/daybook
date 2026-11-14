@@ -178,6 +178,8 @@ void main() {
           localDate: at.localDate,
           startedAtMs: at.utcMs,
           tzOffsetMinutes: at.offsetMinutes,
+          // Finished: a workout still running adds nothing to the budget.
+          endedAtMs: Value(at.utcMs),
           kcalOverride: Value(override),
           kcalEstimated: Value(estimate),
         ),

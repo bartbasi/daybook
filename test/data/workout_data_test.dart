@@ -2085,4 +2085,130 @@ void main() {
       },
     );
   });
+
+  group('a workout left running from an earlier day', () {
+    final monday = at('2026-11-09', 17, 0);
+    final thursday = at('2026-11-12', 18, 0);
+
+    /// Monday's push workout, [logged] of 6 sets done, 30 minutes apart.
+    Future<int> forgotten(int logged) async {
+      final r = await pushRoutine();
+      final id = (await db.startRoutine(r.routine.id, monday)).workout!.id;
+      final all = [for (final e in (await view(id)).exercises) ...e.sets];
+      for (var i = 0; i < logged; i++) {
+        await db.adjustSet(all[i].row.id, weightKg: lbToKg(100), reps: 10);
+        await db.logSet(
+          all[i].row.id,
+          Now(utcMs: monday.utcMs + (i + 1) * 30 * 60000, offsetMinutes: -360),
+        );
+      }
+      return id;
+    }
+
+    Future<Workout> row(int id) =>
+        (db.select(db.workouts)..where((w) => w.id.equals(id))).getSingle();
+
+    test('Thursday\'s start finishes Monday\'s with its Monday length and calories', () async {
+      await db.saveWeight(181.8, imp, at('2026-11-08', 7, 0));
+      final id = await forgotten(2);
+      final res = await db.startEmptyWorkout(thursday);
+      expect(res.started, isTrue);
+      expect(res.finishedEarlier!.workout.id, id);
+      expect(res.finishedEarlier!.setCount, 2);
+      expect(res.finishedEarlier!.durationMs, 60 * 60000);
+      final m = await row(id);
+      expect(m.endedAtMs, thursday.utcMs, reason: 'Finish happened now');
+      expect(m.localDate, '2026-11-09');
+      expect(m.kcalEstimated, closeTo(3.5 * lbToKg(181.8) * 1.0, 1e-9));
+      expect((await db.workoutResult(id)).durationMs, 60 * 60000);
+      expect((await db.workoutResult(id)).removedPlannedSets, 4);
+      final running = await db.select(db.workouts).get();
+      expect(running.where((w) => w.endedAtMs == null), hasLength(1));
+      expect(res.workout!.id, isNot(id));
+      expect(await db.exerciseKcalForDay('2026-11-09'), m.kcalEstimated);
+      expect(await db.exerciseKcalForDay('2026-11-12'), 0);
+    });
+
+    test(
+      'with nothing logged on Monday it has no length and no estimate',
+      () async {
+        await db.saveWeight(181.8, imp, at('2026-11-08', 7, 0));
+        final id = await forgotten(0);
+        final res = await db.startEmptyWorkout(thursday);
+        expect(res.finishedEarlier!.workout.id, id);
+        expect(res.finishedEarlier!.durationMs, isNull);
+        final m = await row(id);
+        expect(m.endedAtMs, isNotNull);
+        expect(m.kcalEstimated, isNull);
+      },
+    );
+
+    test('startRoutine and startAgain do the same', () async {
+      final id = await forgotten(1);
+      final r = (await db.listRoutines()).single;
+      final a = await db.startRoutine(r.routine.id, thursday);
+      expect(a.finishedEarlier!.workout.id, id);
+      await db.finishWorkout(a.workout!.id, at('2026-11-12', 19, 0));
+      final id2 = (await db.startEmptyWorkout(at('2026-11-13', 9, 0)))
+          .workout!
+          .id;
+      final b = await db.startAgain(id, at('2026-11-15', 9, 0));
+      expect(b.started, isTrue);
+      expect(b.finishedEarlier!.workout.id, id2);
+    });
+
+    test(
+      'a workout that started earlier today still refuses the start',
+      () async {
+        final r = await pushRoutine();
+        final running = (await db.startRoutine(
+          r.routine.id,
+          at('2026-11-12', 9, 0),
+        )).workout!;
+        final res = await db.startEmptyWorkout(at('2026-11-12', 17, 0));
+        expect(res.started, isFalse);
+        expect(res.running!.workout.id, running.id);
+        expect(res.finishedEarlier, isNull);
+        expect((await row(running.id)).endedAtMs, isNull);
+      },
+    );
+
+    test(
+      'started at 23:50, a start at 00:10 the next day finishes it',
+      () async {
+        final late = at('2026-11-12', 23, 50);
+        final id = (await db.startEmptyWorkout(late)).workout!.id;
+        final res = await db.startEmptyWorkout(at('2026-11-13', 0, 10));
+        expect(res.started, isTrue);
+        expect(res.finishedEarlier!.workout.id, id);
+        expect((await row(id)).endedAtMs, at('2026-11-13', 0, 10).utcMs);
+      },
+    );
+
+    test(
+      'a failing write in the middle leaves Monday running and nothing new',
+      () async {
+        await db.saveWeight(181.8, imp, at('2026-11-08', 7, 0));
+        final id = await forgotten(2);
+        final r = (await db.listRoutines()).single;
+        final before =
+            '${await db.select(db.workouts).get()}'
+            '${await db.select(db.workoutSets).get()}';
+        await db.customStatement(
+          'CREATE TRIGGER stop BEFORE INSERT ON workout_sets '
+          "WHEN NEW.position = 3 BEGIN SELECT RAISE(ABORT, 'stop'); END",
+        );
+        await expectLater(
+          db.startRoutine(r.routine.id, thursday),
+          throwsA(anything),
+        );
+        expect(
+          '${await db.select(db.workouts).get()}'
+          '${await db.select(db.workoutSets).get()}',
+          before,
+        );
+        expect((await row(id)).endedAtMs, isNull);
+      },
+    );
+  });
 }

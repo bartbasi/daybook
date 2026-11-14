@@ -6,6 +6,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/goal_data.dart';
 import 'package:daybook/data/nutrients.dart';
 import 'package:daybook/data/weight_data.dart';
+import 'package:daybook/data/workout_data.dart';
 import 'package:daybook/math/calorie_budget.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' show Value;
@@ -871,6 +872,7 @@ void main() {
               localDate: '2026-11-12',
               startedAtMs: 0,
               tzOffsetMinutes: -360,
+              endedAtMs: const Value(1),
               kcalEstimated: const Value(200),
               kcalOverride: const Value(250),
             ),
@@ -882,6 +884,7 @@ void main() {
               localDate: '2026-11-12',
               startedAtMs: 0,
               tzOffsetMinutes: -360,
+              endedAtMs: const Value(1),
             ),
           );
       expect((await db.budgetForDay('2026-11-12'))!.exerciseKcal, 250);
@@ -1034,6 +1037,7 @@ void main() {
               localDate: '2026-11-12',
               startedAtMs: 0,
               tzOffsetMinutes: -360,
+              endedAtMs: const Value(1),
               kcalEstimated: const Value(150),
             ),
           );
@@ -1058,6 +1062,7 @@ void main() {
               localDate: '2026-11-12',
               startedAtMs: 0,
               tzOffsetMinutes: -360,
+              endedAtMs: const Value(1),
               kcalOverride: const Value(250),
             ),
           );
@@ -1098,6 +1103,93 @@ void main() {
       await sub.cancel();
       expect(seen.first, isNull);
       expect(seen.last, 2138);
+    });
+  });
+
+  group('a running workout adds nothing to the day', () {
+    Future<void> sampleGoals() async {
+      await weigh(181.8, '2026-11-08');
+      await db.saveGoals(sampleInput(), at('2026-11-08', 8, 0, -6));
+    }
+
+    /// A workout on Nov 12 with one set logged 52 minutes in, not finished.
+    Future<int> runningWorkout() async {
+      final start = at('2026-11-12', 17, 30, -6);
+      final id = (await db.startEmptyWorkout(start)).workout!.id;
+      final s = (await db.addExercise(
+        id,
+        'wger:192',
+        'Bench press',
+        sets: 1,
+      )).single;
+      await db.adjustSet(s.id, weightKg: 80, reps: 8);
+      await db.logSet(
+        s.id,
+        Now(
+          utcMs: start.utcMs + 52 * 60000,
+          offsetMinutes: start.offsetMinutes,
+        ),
+      );
+      return id;
+    }
+
+    Now finishAt() => at('2026-11-12', 18, 22, -6);
+
+    test(
+      'a resumed workout with its own number counts 0 until Finish',
+      () async {
+        await sampleGoals();
+        final id = await runningWorkout();
+        await db.finishWorkout(id, finishAt());
+        final est = await db.exerciseKcalForDay('2026-11-12');
+        expect(est, closeTo(3.5 * lbToKg(181.8) * 52 / 60, 1e-9));
+        await db.setWorkoutKcal(id, 500);
+        expect(await db.exerciseKcalForDay('2026-11-12'), 500);
+        await db.resumeWorkout(id);
+        expect(await db.exerciseKcalForDay('2026-11-12'), 0);
+        expect((await db.budgetForDay('2026-11-12'))!.exerciseKcal, 0);
+        await db.finishWorkout(id, finishAt());
+        expect(await db.exerciseKcalForDay('2026-11-12'), 500);
+      },
+    );
+
+    test(
+      'a new running workout with a typed number counts 0, then the number',
+      () async {
+        await sampleGoals();
+        final id = await runningWorkout();
+        await db.setWorkoutKcal(id, 450);
+        expect(await db.exerciseKcalForDay('2026-11-12'), 0);
+        await db.finishWorkout(id, finishAt());
+        expect(await db.exerciseKcalForDay('2026-11-12'), 450);
+      },
+    );
+
+    test('cardio is unaffected by a running workout', () async {
+      await sampleGoals();
+      await run('2026-11-12', estimate: 383);
+      final id = await runningWorkout();
+      await db.setWorkoutKcal(id, 450);
+      expect(await db.exerciseKcalForDay('2026-11-12'), 383);
+    });
+
+    test('the budget stream re-emits on Finish and on Resume', () async {
+      await sampleGoals();
+      final id = await runningWorkout();
+      await db.setWorkoutKcal(id, 500);
+      final seen = <double>[];
+      final sub = db
+          .watchBudgetForDay('2026-11-12')
+          .listen((b) => seen.add(b!.exerciseKcal));
+      await pumpEventQueue();
+      expect(seen.last, 0);
+      await db.finishWorkout(id, finishAt());
+      await pumpEventQueue();
+      expect(seen.last, 500);
+      await db.resumeWorkout(id);
+      await pumpEventQueue();
+      expect(seen.last, 0);
+      await sub.cancel();
     });
   });
 }

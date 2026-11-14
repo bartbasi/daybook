@@ -388,16 +388,19 @@ extension GoalData on AppDatabase {
 
   /// The day's exercise in kcal: for each cardio session and each workout on
   /// the day, the user's number if there is one, else the estimate, else 0.
-  /// Deleted cardio is left out.
+  /// Deleted cardio is left out. A workout still running counts nothing, even
+  /// with a number of the user's own, until it is finished.
   Future<double> exerciseKcalForDay(String localDate) async {
     final cardio =
         await (select(cardioSessions)..where(
               (c) => c.localDate.equals(localDate) & c.deletedAtMs.isNull(),
             ))
             .get();
-    final lifting = await (select(
-      workouts,
-    )..where((w) => w.localDate.equals(localDate))).get();
+    final lifting =
+        await (select(workouts)..where(
+              (w) => w.localDate.equals(localDate) & w.endedAtMs.isNotNull(),
+            ))
+            .get();
     var total = 0.0;
     for (final c in cardio) {
       total += c.kcalOverride ?? c.kcalEstimated ?? 0;
