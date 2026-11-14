@@ -67,4 +67,9 @@ available under the Open Database License (ODbL) v1.0
 (https://opendatacommons.org/licenses/odbl/1-0/). Individual contents under
 the Database Contents License (DbCL) v1.0.
 
+Exercise data from the wger project (https://wger.de), by wger.de
+contributors, under the Creative Commons license set for each exercise
+(CC BY-SA 4.0, CC BY-SA 3.0 or CC0 1.0). It is in assets/exercises/, and the
+README.txt there lists the changes made.
+
 Details and full attribution are in docs/data-sources.md.

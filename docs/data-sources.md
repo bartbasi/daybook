@@ -112,6 +112,50 @@ Daybook uses only the data, so the AGPL code license does not apply. The data li
 What it has: about 950 exercises in the live database, about 380 images. Fields include category, primary and secondary muscles, equipment, a description, aliases, variations, and license author per entry. Not every exercise has an image.
 
 What was fetched (task 4.1, 2026-11-13, by `tools/build_exercise_data.py`, from https://wger.de/api/v2/exerciseinfo/ and /license/):
+- 967 exercises, all with English text, a name and a license. 42 were left out (see below), so 925 are in the asset.
+- License of the English text, as wger names them, in the asset: CC-BY-SA 4: 777, CC-BY-SA 3: 128, CC0: 20. No other license appeared. wger lists CC0 as "Creative Commons Public Domain 1.0"; it is CC0 1.0 Universal, the Public Domain Dedication.
+- 767 have primary muscles, 716 have equipment, 88 have aliases, 33 have an empty description.
+- Credits: 862 name an author as wger gives it. 20 entries had an email address as author and are shown as "wger.de contributor" (40 author strings, because wger lists each one twice). 43 have no author at either level (the English text or the exercise) and are also credited to "wger.de contributor". When the English text has no author, the exercise's own author is used.
+- Left out, each by a named rule or id list in the tool: 38 entries whose name ends with "(Custom)" (ids 2699 to 2724 and 2749 to 2760, template copies of existing exercises); 2645 (made by a routine importer), 1949 ("Limber 11" is a routine), 2452 and 1702 (Spanish names).
+- Descriptions left empty: 202, 204, 260, 445, 580, 599, 655, 688 and 1925, because wger's own record says the text came from a commercial site or magazine (nothing is copied from commercial sources); and 205, which was only a full stop. The name, muscles, equipment, license and credit of these stay.
+- The build prints any description that says "taken from" or "copied from". On this fetch only 1925 matched.
+- The result is `assets/exercises/wger_exercises.json`, about 670 KB, no images or videos. Its README lists the licenses and the changes made (HTML turned into plain text, English only).
+
+Compatibility with GPL-3.0:** ODbL 2.3(a) says it does not apply to the programs that use the database, and ODbL 4.5(a) treats the app plus data as a collective work. The data stays ODbL and in separate files, and the code stays GPL-3.0. No conflict.
+- **App store DRM:** ODbL 4.7 allows store distribution with technical restrictions only if an unrestricted copy is also available. This only matters if we bundle OFF data, and publishing it on GitHub covers it.
+
+Decisions (Bart, 2026-11-08):
+- User-Agent: `Daybook/<version> (bartbasi@gmail.com)`.
+- Do not fetch or show product images. They are CC BY-SA, may show trademarked packaging, and skipping them keeps network use to the minimum.
+- Do not use the OFF logo, Nutri-Score, or NOVA badges. Text attribution only. (I found no published logo policy, so this is the cautious choice.)
+
+Usable: yes, with the conditions above.
+
+About screen text:
+> Barcode product data from Open Food Facts (https://openfoodfacts.org), made available under the Open Database License (ODbL) v1.0 (https://opendatacommons.org/licenses/odbl/1-0/). Individual contents under the Database Contents License (DbCL) v1.0.
+
+Short line on a scanned product:
+> Data from Open Food Facts (ODbL)
+
+---
+
+## Exercise library: wger (recommended)
+
+Primary sources:
+- https://github.com/wger-project/wger (README license section)
+- https://wger.de/api/v2/license/
+- https://wger.de/api/v2/exerciseinfo/
+
+Terms, quoted from the wger README:
+- "Application Code: AGPL-3.0-or-later"
+- "Exercise/Ingredient Data: Creative Commons (see individual entries)"
+- "Documentation: CC-BY-SA-4.0"
+
+Daybook uses only the data, so the AGPL code license does not apply. The data license is set on each entry. The license table lists CC BY-SA 3.0, CC BY 4.0, CC BY-SA 4.0, CC0 and ODbL. Entries sampled were CC BY-SA 4.0 with a named author. Images sampled were CC BY-SA 3.0, many by Everkinetic.
+
+What it has: about 950 exercises in the live database, about 380 images. Fields include category, primary and secondary muscles, equipment, a description, aliases, variations, and license author per entry. Not every exercise has an image.
+
+What was fetched (task 4.1, 2026-11-13, by `tools/build_exercise_data.py`, from https://wger.de/api/v2/exerciseinfo/ and /license/):
 - 967 exercises, all with English text and a name. None were dropped.
 - License of the English text, as wger names them: CC-BY-SA 4: 819, CC-BY-SA 3: 128, CC0: 20. No other license appeared.
 - 807 have primary muscles, 739 have equipment, 88 have aliases, 23 have an empty description.
@@ -131,10 +175,12 @@ Decision (Bart, 2026-11-08): when a wger `license_author` value is an email addr
 
 Usable: yes, with conditions.
 
-About screen text (no images are shipped, so the Everkinetic sentence is dropped, Bart's answer to open question 7):
+Changed in Phase 4, for the owner to confirm at the gate: the approved text below has two additions, "and CC0" in the license list and the sentence "Descriptions were changed from HTML to plain text." (CC BY-SA asks us to say we changed the material). The Everkinetic sentence is dropped (open question 7). Also, the exercise list leaves out some entries and descriptions, as listed under "What was fetched" above: template copies named "(Custom)", four entries that are not real English exercises, and nine descriptions wger says came from commercial sources.
+
+About screen text:
 > Exercise data from the wger project (https://wger.de), by wger.de contributors, licensed under Creative Commons (CC BY-SA 4.0, CC BY-SA 3.0 and CC0; see each exercise for author and license). Descriptions were changed from HTML to plain text.
 
-Each exercise detail screen also shows its own author and license, for example "Text by wger.de contributor, CC BY-SA 4.0" with a link to the exercise on wger.de. The data file keeps wger's own license names ("CC-BY-SA 4", "CC-BY-SA 3", "CC0") and the license URL; the screen may show the license by its usual name, linked to that URL.
+Each exercise detail screen also shows its own author and license, for example "Text by wger.de contributor, CC BY-SA 4.0" with a link to the exercise on wger.de. The data file keeps wger's own license names ("CC-BY-SA 4", "CC-BY-SA 3", "CC0") and the license URL; the screen shows the license by its usual name ("CC BY-SA 4.0", "CC BY-SA 3.0", "CC0 1.0"), linked to that URL. Two authors read "A and B"; three or more read "A, B, and C".
 
 ### Other exercise lists checked
 

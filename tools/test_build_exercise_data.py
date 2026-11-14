@@ -10,7 +10,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_exercise_data import (  # noqa: E402
-    build_entries, credit, dump, fetch, plain_text)
+    API, DESCRIPTION_LEFT_OUT, ENTRY_LEFT_OUT, MAX_PAGES, FetchError,
+    build_entries, credit, dump, fetch, https_url, plain_text)
 
 LICENSES = [
     {"id": 2, "full_name": "Creative Commons Attribution Share Alike 4",
@@ -207,6 +208,199 @@ class CacheTests(unittest.TestCase):
             exercises, licenses, fetched = fetch(d)
         self.assertEqual(fetched, "2026-11-13")
         self.assertEqual(build_entries(exercises, licenses)[0][0]["id"], 3)
+
+
+class ExerciseLevelAuthorTests(unittest.TestCase):
+    def test_exercise_authors_are_used_when_the_text_has_none(self):
+        entries, stats = build(exercise(
+            1, [translation(author="")], license_author="ruochenma",
+            author_history=["ruochenma"]))
+        self.assertEqual(entries[0]["authors"], ["ruochenma"])
+        self.assertEqual(stats["no_author"], 0)
+
+    def test_the_texts_own_authors_come_first(self):
+        entries, _ = build(exercise(
+            1, [translation(author="text author")], license_author="other"))
+        self.assertEqual(entries[0]["authors"], ["text author"])
+
+    def test_exercise_level_email_still_becomes_a_contributor(self):
+        entries, stats = build(exercise(
+            1, [translation(author="")], license_author="Me@Example.COM"))
+        self.assertEqual(entries[0]["authors"], ["wger.de contributor"])
+        self.assertEqual(stats["email_entries"], 1)
+        self.assertEqual(stats["no_author"], 0)
+
+    def test_other_languages_authors_are_not_used(self):
+        entries, stats = build(exercise(
+            1, [translation(author="")],
+            total_authors_history=["someone", "a@b.co"]))
+        self.assertEqual(entries[0]["authors"], ["wger.de contributor"])
+        self.assertEqual(stats["no_author"], 1)
+
+    def test_no_author_only_when_both_levels_are_empty(self):
+        entries, stats = build(exercise(
+            1, [translation(author="", history=[])], license_author="",
+            author_history=[]))
+        self.assertEqual(entries[0]["authors"], ["wger.de contributor"])
+        self.assertEqual(stats["no_author"], 1)
+
+
+class LeftOutTests(unittest.TestCase):
+    def test_descriptions_from_commercial_sources_are_emptied(self):
+        self.assertEqual(
+            sorted(DESCRIPTION_LEFT_OUT),
+            [202, 204, 260, 445, 580, 599, 655, 688, 1925])
+        for reason in DESCRIPTION_LEFT_OUT.values():
+            self.assertTrue(reason)
+        entries, stats = build(
+            exercise(1925, [translation(description="<p>Shrug.</p>")]),
+            exercise(202, [translation(name="Other", author="exrx.net")]),
+            exercise(3, [translation(name="Kept", description="<p>Fine.</p>")]))
+        by_id = {e["id"]: e for e in entries}
+        self.assertEqual(by_id[1925]["description"], "")
+        self.assertEqual(by_id[1925]["name"], "Bench Press")
+        self.assertEqual(by_id[1925]["authors"], ["someone"])
+        self.assertEqual(by_id[1925]["license"], "CC-BY-SA 4")
+        self.assertEqual(by_id[1925]["primary_muscles"], ["Chest"])
+        self.assertEqual(by_id[202]["authors"], ["exrx.net"])
+        self.assertEqual(by_id[3]["description"], "Fine.")
+        self.assertEqual(stats["emptied"], [1925, 202])
+
+    def test_taken_from_is_reported_but_not_dropped(self):
+        entries, stats = build(
+            exercise(5, [translation(
+                description="<p>Do it. Text taken from SomeSite.com</p>")]),
+            exercise(6, [translation(
+                description="<p>Copied from Acme Fitness app.</p>")]),
+            exercise(7, [translation(description="<p>Plain text.</p>")]))
+        self.assertEqual([i for i, _, _ in stats["taken_from"]], [5, 6])
+        self.assertIn("SomeSite.com", stats["taken_from"][0][1])
+        self.assertEqual(len(entries), 3)
+        self.assertIn("taken from", entries[0]["description"])
+
+    def test_names_ending_in_custom_are_left_out(self):
+        entries, stats = build(
+            exercise(1, [translation(name="Dumbbell Curl (Custom)")]),
+            exercise(2, [translation(name="Custom Dumbbell Curl")]))
+        self.assertEqual([e["id"] for e in entries], [2])
+        self.assertEqual(stats["custom"], [1])
+
+    def test_listed_entries_are_left_out(self):
+        self.assertEqual(sorted(ENTRY_LEFT_OUT), [1702, 1949, 2452, 2645])
+        for reason in ENTRY_LEFT_OUT.values():
+            self.assertTrue(reason)
+        entries, stats = build(
+            *[exercise(i, [translation(name="X%d" % i)]) for i in ENTRY_LEFT_OUT],
+            exercise(10, [translation(name="Kept")]))
+        self.assertEqual([e["id"] for e in entries], [10])
+        self.assertEqual(sorted(stats["left_out"]), sorted(ENTRY_LEFT_OUT))
+
+    def test_a_description_with_no_letters_or_digits_is_emptied(self):
+        entries, stats = build(
+            exercise(1, [translation(description="<p>.</p>\n")]),
+            exercise(2, [translation(name="B", description="<p>- ...</p>")]),
+            exercise(3, [translation(name="C", description="<p>5.</p>")]))
+        self.assertEqual([e["description"] for e in entries], ["", "", "5."])
+        self.assertEqual(stats["empty_text"], [1, 2])
+
+
+class LicenseUrlTests(unittest.TestCase):
+    def test_creativecommons_urls_use_https_and_names_are_unchanged(self):
+        self.assertEqual(
+            https_url("http://creativecommons.org/publicdomain/zero/1.0/"),
+            "https://creativecommons.org/publicdomain/zero/1.0/")
+        self.assertEqual(https_url("https://opendatacommons.org/licenses/odbl/"),
+                         "https://opendatacommons.org/licenses/odbl/")
+        self.assertEqual(https_url("http://example.org/x"), "http://example.org/x")
+        lics = LICENSES + [{
+            "id": 3, "full_name": "Creative Commons Public Domain 1.0",
+            "short_name": "CC0",
+            "url": "http://creativecommons.org/publicdomain/zero/1.0/"}]
+        entries, _ = build_entries([exercise(1, [translation(license=3)])], lics)
+        self.assertEqual(entries[0]["license"], "CC0")
+        self.assertEqual(entries[0]["license_full"],
+                         "Creative Commons Public Domain 1.0")
+        self.assertEqual(entries[0]["license_url"],
+                         "https://creativecommons.org/publicdomain/zero/1.0/")
+
+
+class ListMarkerTests(unittest.TestCase):
+    def test_numbered_item_with_a_paragraph_keeps_its_text(self):
+        self.assertEqual(plain_text("<ol><li><p>A</p></li></ol>"), "1. A")
+
+    def test_bullet_item_with_a_paragraph_keeps_its_text(self):
+        self.assertEqual(
+            plain_text("<ul>\n<li>\n<p>A</p>\n</li>\n<li><p>B</p></li></ul>"),
+            "- A\n- B")
+
+    def test_two_paragraphs_in_an_item_stay_on_separate_lines(self):
+        self.assertEqual(plain_text("<ol><li><p>A</p><p>B</p></li></ol>"),
+                         "1. A\nB")
+
+
+class ZeroWidthTests(unittest.TestCase):
+    def test_zero_width_characters_are_removed_everywhere(self):
+        z = "​‌‍﻿"
+        entries, _ = build(exercise(1, [translation(
+            name=z + "Bench" + z + " Press", aliases=[z + "Flat Bench"],
+            description="<p>" + z + "Lie" + z + " down.</p>", author=z + "Sam")]))
+        e = entries[0]
+        self.assertEqual(e["name"], "Bench Press")
+        self.assertEqual(e["aliases"], ["Flat Bench"])
+        self.assertEqual(e["description"], "Lie down.")
+        self.assertEqual(e["authors"], ["Sam"])
+        self.assertNotRegex(dump(entries), "[​-‍﻿]")
+
+
+class FetchLimitTests(unittest.TestCase):
+    def test_a_next_link_off_the_api_stops_the_fetch(self):
+        def get(url):
+            return {"results": [], "next": "https://evil.example/api/v2/x/"}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(FetchError) as ctx:
+                fetch(os.path.join(d, "c"), get=get, pause=0)
+        self.assertIn("not on the wger API", str(ctx.exception))
+
+    def test_a_look_alike_host_is_refused(self):
+        def get(url):
+            return {"results": [], "next": "https://wger.de.evil.example/api/v2/"}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(FetchError):
+                fetch(os.path.join(d, "c"), get=get, pause=0)
+
+    def test_more_than_the_page_cap_stops_the_fetch(self):
+        calls = []
+
+        def get(url):
+            calls.append(url)
+            return {"results": [],
+                    "next": API + "exerciseinfo/?offset=%d" % len(calls)}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(FetchError):
+                fetch(os.path.join(d, "c"), get=get, pause=0)
+        self.assertEqual(len(calls), MAX_PAGES)
+
+    def test_nothing_is_written_after_a_failure(self):
+        def get(url):
+            return {"results": [], "next": "http://elsewhere.example/"}
+        with tempfile.TemporaryDirectory() as d:
+            cache = os.path.join(d, "c")
+            with self.assertRaises(FetchError):
+                fetch(cache, get=get, pause=0)
+            self.assertEqual(os.listdir(cache), [])
+
+    def test_a_normal_fetch_writes_the_cache(self):
+        def get(url):
+            if "license" in url:
+                return {"results": LICENSES, "next": None}
+            return {"results": [exercise(1)], "next": None}
+        with tempfile.TemporaryDirectory() as d:
+            cache = os.path.join(d, "c")
+            exercises, licenses, fetched = fetch(cache, get=get, pause=0)
+            self.assertEqual(len(exercises), 1)
+            self.assertEqual(sorted(os.listdir(cache)),
+                             ["exerciseinfo.json", "fetched.txt",
+                              "licenses.json"])
 
 
 if __name__ == "__main__":

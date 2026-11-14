@@ -79,7 +79,7 @@ They are inserted when the database is created.
 | `cardio_sessions` | Cardio | `activity_code` (Compendium code), `activity_name`, `met`, `duration_seconds`, `distance_meters`, `avg_heart_rate`, `kcal_estimated`, `kcal_override`, `source`, `source_id`, `deleted_at_ms` |
 
 - Prefilled sets: a new workout from a routine copies the last session's `weight_kg` and `reps` for each exercise. That is a query on `workout_sets`, not a stored copy.
-- The wger exercise library is loaded into the reference side in Phase 4 (resistance training). Phase 2 only defines where user exercises and sets live.
+- The wger exercise library ships as a JSON asset (assets/exercises/wger_exercises.json) and is read into memory by lib/data/exercise_library.dart, added in Phase 4. It is not in either database. The user database holds the user's own exercises, routines, workouts and sets.
 
 ### Goals and settings
 

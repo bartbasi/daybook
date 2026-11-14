@@ -33,9 +33,43 @@ API = "https://wger.de/api/v2/"
 USER_AGENT = "exercise-data-builder/1.0"
 ENGLISH = 2  # wger's language id for English
 PAGE = 100
+MAX_PAGES = 50
 PAUSE_SECONDS = 1.0
 CONTRIBUTOR = "wger.de contributor"
 EXERCISE_URL = "https://wger.de/en/exercise/%d/view/"
+
+# Descriptions left out (the name, muscles, equipment, license and credit stay
+# as wger supplies them). wger's own record says this text came from a
+# commercial source, and nothing is copied from commercial apps or sites.
+DESCRIPTION_LEFT_OUT = {
+    1925: "ends with 'Description taken from MuscleWiki'",
+    202: "author field names exrx.net",
+    204: "author field names ExRx",
+    260: "author field names realsimple.com",
+    580: "author field names bodybuilding.com",
+    655: "author field names carinatum.com",
+    688: "author field names Mens Fitness",
+    445: "author field names a commercial site",
+    599: "author field names a commercial magazine or site",
+}
+
+# Entries left out of the asset, by id, with the reason.
+ENTRY_LEFT_OUT = {
+    2645: "description says it was made by a routine importer",
+    1949: "'Limber 11' is a routine, not an exercise",
+    2452: "Spanish name, and the description is about a different exercise",
+    1702: "Spanish name",
+}
+# Entries whose name ends with this are left out too: copies of existing
+# exercises made from a template.
+CUSTOM_SUFFIX = "(Custom)"
+
+# Descriptions that say where they came from, reported by the build so a new
+# refresh shows new cases. These are not dropped by this rule.
+TAKEN_FROM = re.compile(r"\b(?:taken|copied) from\s+[^\n]{0,40}", re.I)
+
+ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\ufeff]")
+HAS_TEXT = re.compile(r"[^\W_]")
 
 EMAIL = re.compile(r"[^\s@<>]+@[^\s@<>]+", re.I)
 LEFTOVER_TAG = re.compile(r"</?[A-Za-z!][^<>]*>")
@@ -48,21 +82,29 @@ def get_json(url):
         return json.load(r)
 
 
-def fetch(cache, refresh=False):
-    """Returns (exercises, licenses, fetched date), downloading if needed."""
+def fetch(cache, refresh=False, get=get_json, pause=PAUSE_SECONDS):
+    """Returns (exercises, licenses, fetched date), downloading if needed.
+    The download follows at most MAX_PAGES pages and only links that stay on
+    the wger API; otherwise it raises FetchError and writes nothing."""
     raw = os.path.join(cache, "exerciseinfo.json")
     if refresh or not os.path.exists(raw):
         os.makedirs(cache, exist_ok=True)
         print("downloading from wger.de", file=sys.stderr)
         results = []
         url = "%sexerciseinfo/?language=%d&limit=%d" % (API, ENGLISH, PAGE)
+        pages = 0
         while url:
-            page = get_json(url)
+            pages += 1
+            if pages > MAX_PAGES:
+                raise FetchError("more than %d pages, stopping" % MAX_PAGES)
+            if not url.startswith(API):
+                raise FetchError("the next page is not on the wger API, stopping")
+            page = get(url)
             results.extend(page["results"])
             url = page["next"]
             if url:
-                time.sleep(PAUSE_SECONDS)
-        licenses = get_json(API + "license/")["results"]
+                time.sleep(pause)
+        licenses = get(API + "license/")["results"]
         today = datetime.date.today().isoformat()
         for name, data in (("licenses.json", licenses),
                            ("exerciseinfo.json", results)):
@@ -80,6 +122,10 @@ def fetch(cache, refresh=False):
     return exercises, licenses, fetched
 
 
+class FetchError(Exception):
+    pass
+
+
 class _Text(html.parser.HTMLParser):
     """Collects the text of an HTML fragment, one block per line."""
 
@@ -92,6 +138,12 @@ class _Text(html.parser.HTMLParser):
         self.out = []
         self.skip = 0
         self.lists = []  # [is ordered, next number]
+        self.marker = False  # a list marker was just written
+
+    def _break(self):
+        # No line break straight after a marker, so "1." keeps its text.
+        if not self.marker:
+            self.out.append("\n")
 
     def handle_starttag(self, tag, attrs):
         if tag in self.SKIP:
@@ -99,13 +151,14 @@ class _Text(html.parser.HTMLParser):
         if tag in ("ul", "ol"):
             self.lists.append([tag == "ol", 1])
         if tag in self.BLOCKS:
-            self.out.append("\n")
+            self._break()
         if tag == "li" and not self.skip:
             if self.lists and self.lists[-1][0]:
                 self.out.append("%d. " % self.lists[-1][1])
                 self.lists[-1][1] += 1
             else:
                 self.out.append("- ")
+            self.marker = True
 
     def handle_endtag(self, tag):
         if tag in self.SKIP and self.skip:
@@ -113,11 +166,17 @@ class _Text(html.parser.HTMLParser):
         if tag in ("ul", "ol") and self.lists:
             self.lists.pop()
         if tag in self.BLOCKS:
-            self.out.append("\n")
+            self._break()
 
     def handle_data(self, data):
-        if not self.skip:
-            self.out.append(data)
+        if self.skip:
+            return
+        if self.marker:
+            data = data.lstrip()
+            if not data:
+                return
+            self.marker = False
+        self.out.append(data)
 
 
 def plain_text(source):
@@ -126,7 +185,7 @@ def plain_text(source):
     parser = _Text()
     parser.feed(source or "")
     parser.close()
-    text = "".join(parser.out).replace("\xa0", " ")
+    text = ZERO_WIDTH.sub("", "".join(parser.out)).replace("\xa0", " ")
     # Entities such as &lt;b&gt; decode to tag-looking text. Remove that too.
     text = EMAIL.sub("", LEFTOVER_TAG.sub("", html.unescape(text)))
     lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in text.splitlines()]
@@ -135,7 +194,7 @@ def plain_text(source):
 
 def clean_line(text):
     """A one-line field (name, alias, muscle): no tags, no email address."""
-    text = LEFTOVER_TAG.sub("", html.unescape(text or ""))
+    text = ZERO_WIDTH.sub("", LEFTOVER_TAG.sub("", html.unescape(text or "")))
     text = EMAIL.sub("", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -143,17 +202,45 @@ def clean_line(text):
 def credit(author):
     """The author as shown: an email address, or a string holding one, is
     replaced as a whole by 'wger.de contributor'."""
-    author = re.sub(r"\s+", " ", author or "").strip()
+    author = re.sub(r"\s+", " ", ZERO_WIDTH.sub("", author or "")).strip()
     if not author:
         return ""
     return CONTRIBUTOR if "@" in author or EMAIL.search(author) else author
+
+
+def https_url(url):
+    """creativecommons.org links are written with https. Only the URL changes."""
+    url = url.strip()
+    if url.startswith("http://creativecommons.org/"):
+        url = "https://" + url[len("http://"):]
+    return url
+
+
+def _author_list(*sources):
+    """Authors from the first source that has any, as (shown, email count)."""
+    for src in sources:
+        raw = list(src.get("author_history") or [])
+        if src.get("license_author"):
+            raw.append(src["license_author"])
+        shown, replaced = [], 0
+        for a in raw:
+            c = credit(a)
+            if c == CONTRIBUTOR and a.strip() != CONTRIBUTOR:
+                replaced += 1
+            if c and c not in shown:
+                shown.append(c)
+        if shown:
+            return shown, replaced
+    return [], 0
 
 
 def build_entries(exercises, licenses):
     """Returns (entries sorted by id, stats)."""
     by_id = {lic["id"]: lic for lic in licenses}
     stats = {"seen": 0, "no_english": 0, "no_name": 0, "no_license": 0,
-             "email_authors": 0, "email_entries": 0, "no_author": 0}
+             "email_authors": 0, "email_entries": 0, "no_author": 0,
+             "named": 0, "left_out": [], "custom": [], "emptied": [],
+             "empty_text": [], "taken_from": []}
     entries = []
     for ex in exercises:
         stats["seen"] += 1
@@ -171,22 +258,32 @@ def build_entries(exercises, licenses):
         if lic is None:
             stats["no_license"] += 1
             continue
-        raw_authors = list(tr.get("author_history") or [])
-        if tr.get("license_author"):
-            raw_authors.append(tr["license_author"])
-        authors = []
-        replaced = 0
-        for a in raw_authors:
-            shown = credit(a)
-            if shown == CONTRIBUTOR and a.strip() != CONTRIBUTOR:
-                replaced += 1
-            if shown and shown not in authors:
-                authors.append(shown)
+        if ex["id"] in ENTRY_LEFT_OUT:
+            stats["left_out"].append(ex["id"])
+            continue
+        if name.endswith(CUSTOM_SUFFIX):
+            stats["custom"].append(ex["id"])
+            continue
+        # The English text's authors first; when it has none, the exercise's.
+        authors, replaced = _author_list(tr, ex)
         stats["email_authors"] += replaced
         stats["email_entries"] += 1 if replaced else 0
         if not authors:
             stats["no_author"] += 1
             authors = [CONTRIBUTOR]
+        elif authors != [CONTRIBUTOR]:
+            stats["named"] += 1
+        description = plain_text(tr.get("description"))
+        found = TAKEN_FROM.search(description)
+        if found:
+            stats["taken_from"].append((ex["id"], found.group(0).strip(),
+                                        ex["id"] in DESCRIPTION_LEFT_OUT))
+        if ex["id"] in DESCRIPTION_LEFT_OUT:
+            stats["emptied"].append(ex["id"])
+            description = ""
+        elif description and not HAS_TEXT.search(description):
+            stats["empty_text"].append(ex["id"])
+            description = ""
         aliases = []
         for a in tr.get("aliases") or []:
             a = clean_line(a.get("alias") if isinstance(a, dict) else a)
@@ -201,10 +298,10 @@ def build_entries(exercises, licenses):
             "secondary_muscles": _names(ex.get("muscles_secondary"),
                                         "name_en", "name"),
             "equipment": _names(ex.get("equipment"), "name"),
-            "description": plain_text(tr.get("description")),
+            "description": description,
             "license": lic["short_name"].strip(),
             "license_full": lic["full_name"].strip(),
-            "license_url": lic["url"].strip(),
+            "license_url": https_url(lic["url"]),
             "authors": authors,
             "url": EXERCISE_URL % ex["id"],
         })
@@ -240,7 +337,10 @@ def main():
     ap.add_argument("--refresh", action="store_true")
     args = ap.parse_args()
 
-    exercises, licenses, fetched = fetch(args.cache, args.refresh)
+    try:
+        exercises, licenses, fetched = fetch(args.cache, args.refresh)
+    except FetchError as e:
+        sys.exit("fetch failed, nothing written: %s" % e)
     entries, stats = build_entries(exercises, licenses)
     os.makedirs(args.out_dir, exist_ok=True)
     path = os.path.join(args.out_dir, "wger_exercises.json")
@@ -255,10 +355,20 @@ def main():
     print("dropped:", {k: stats[k] for k in
                        ("no_english", "no_name", "no_license")})
     print("licenses:", counts)
+    print("left out by id:", sorted(stats["left_out"]))
+    print("left out as (Custom):", len(stats["custom"]), sorted(stats["custom"]))
+    print("descriptions left out by id:", sorted(stats["emptied"]))
+    print("descriptions with no letters or digits, emptied:",
+          sorted(stats["empty_text"]))
+    print("descriptions that say where they came from:")
+    for i, snippet, emptied in stats["taken_from"]:
+        print("  %d%s: %s" % (i, " (left out)" if emptied else "", snippet))
+    print("credits: named", stats["named"], "| contributor, an email author:",
+          sum(1 for e in entries if e["authors"] == [CONTRIBUTOR])
+          - stats["no_author"],
+          "| contributor, no author at either level:", stats["no_author"])
     print("author strings replaced by", CONTRIBUTOR + ":",
           stats["email_authors"], "in", stats["email_entries"], "entries")
-    print("entries with no author recorded, credited as", CONTRIBUTOR + ":",
-          stats["no_author"])
     print("bytes:", os.path.getsize(path))
 
 

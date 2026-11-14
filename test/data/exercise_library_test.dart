@@ -6,9 +6,29 @@ import 'dart:io';
 
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/exercise_library.dart';
+import 'package:daybook/parser/normalize.dart' show foldText;
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// A bundle that holds one asset as text, or none when [text] is null.
+class _FakeBundle extends AssetBundle {
+  _FakeBundle(this.text);
+  String? text;
+  final cacheArgs = <bool>[];
+
+  @override
+  Future<ByteData> load(String key) async => throw StateError('use loadString');
+
+  @override
+  Future<String> loadString(String key, {bool cache = true}) async {
+    cacheArgs.add(cache);
+    final t = text;
+    if (t == null) throw StateError('Unable to load asset');
+    return t;
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -66,17 +86,67 @@ void main() {
       );
     });
 
-    test('the list is sorted by name, accents and case ignored', () {
-      final names = [for (final e in lib.all) e.name.toLowerCase()];
-      for (var i = 1; i < names.length; i++) {
-        // Compare only the first letters; the full key also drops accents.
+    test('the list is sorted by the full folded name, then the ref', () {
+      final all = lib.all;
+      for (var i = 1; i < all.length; i++) {
+        final x = all[i - 1];
+        final y = all[i];
+        final c = foldText(x.name).compareTo(foldText(y.name));
         expect(
-          names[i - 1].codeUnitAt(0) <= names[i].codeUnitAt(0) ||
-              names[i].codeUnitAt(0) > 0x7f ||
-              names[i - 1].codeUnitAt(0) > 0x7f,
+          c < 0 || (c == 0 && x.ref.compareTo(y.ref) < 0),
           isTrue,
-          reason: '${names[i - 1]} before ${names[i]}',
+          reason: '${x.ref} ${x.name} before ${y.ref} ${y.name}',
         );
+      }
+    });
+
+    test('credits are pinned', () {
+      // No author at either level in wger, and an email author: both read
+      // as the contributor wording.
+      expect(lib.lookup('wger:549').exercise!.authors, ['wger.de contributor']);
+      // A named author on the text.
+      expect(lib.lookup('wger:9').exercise!.authors, ['deusinvictus']);
+      expect(lib.lookup('wger:9').exercise!.credit, 'deusinvictus');
+      // Authors that wger gives only on the exercise itself are kept.
+      expect(lib.lookup('wger:1084').exercise!.authors, ['admin']);
+      expect(lib.lookup('wger:2692').exercise!.authors, [
+        'Original exercise instructions prepared for nalhilal',
+      ]);
+      // Two authors.
+      final two = lib.lookup('wger:12').exercise!;
+      expect(two.authors, ['Araaosf', 'flori']);
+      expect(two.credit, 'Araaosf and flori');
+    });
+
+    test('a CC0 entry has its label and an https license URL', () {
+      final e = lib.lookup('wger:152').exercise!;
+      expect(e.license, 'CC0');
+      expect(e.licenseLabel, 'CC0 1.0');
+      expect(
+        e.licenseUrl,
+        'https://creativecommons.org/publicdomain/zero/1.0/',
+      );
+      expect(
+        lib.all.where((x) => x.licenseUrl!.startsWith('http://')),
+        isEmpty,
+      );
+    });
+
+    test('left out entries and descriptions stay out', () {
+      for (final id in [2699, 2760, 2645, 1949, 2452, 1702]) {
+        expect(lib.lookup('wger:$id').found, isFalse, reason: '$id');
+      }
+      expect(lib.all.any((e) => e.name.endsWith('(Custom)')), isFalse);
+      expect(lib.lookup('wger:1925').exercise!.description, '');
+      expect(lib.lookup('wger:205').exercise!.description, '');
+    });
+
+    test('no orphan list marker and no zero width character', () {
+      expect(RegExp('[​-‍﻿]').hasMatch(rawAsset), isFalse);
+      for (final e in lib.all) {
+        for (final line in e.description.split('\n')) {
+          expect(RegExp(r'^(\d+\.|-)$').hasMatch(line), isFalse, reason: e.ref);
+        }
       }
     });
 
@@ -85,6 +155,123 @@ void main() {
         lib.all.any((e) => e.authors.contains('wger.de contributor')),
         isTrue,
       );
+    });
+  });
+
+  group('names for people', () {
+    LibraryExercise withAuthors(List<String> a, [String? license]) =>
+        LibraryExercise(ref: 'wger:1', name: 'X', authors: a, license: license);
+
+    test('credit joins authors with and', () {
+      expect(withAuthors([]).credit, isNull);
+      expect(withAuthors(['A']).credit, 'A');
+      expect(withAuthors(['A', 'B']).credit, 'A and B');
+      expect(withAuthors(['A', 'B', 'C']).credit, 'A, B, and C');
+    });
+
+    test('license label', () {
+      expect(withAuthors([], 'CC-BY-SA 4').licenseLabel, 'CC BY-SA 4.0');
+      expect(withAuthors([], 'CC-BY-SA 3').licenseLabel, 'CC BY-SA 3.0');
+      expect(withAuthors([], 'CC0').licenseLabel, 'CC0 1.0');
+      expect(withAuthors([], 'ODbL').licenseLabel, 'ODbL');
+      expect(withAuthors([]).licenseLabel, isNull);
+      expect(withAuthors([], 'CC-BY-SA 4').license, 'CC-BY-SA 4');
+    });
+  });
+
+  group('the loader', () {
+    final good = jsonEncode([
+      {
+        'id': 1,
+        'name': 'Test',
+        'aliases': <String>[],
+        'category': '',
+        'primary_muscles': <String>[],
+        'secondary_muscles': <String>[],
+        'equipment': <String>[],
+        'description': '',
+        'license': 'CC0',
+        'license_full': 'x',
+        'license_url': 'https://creativecommons.org/publicdomain/zero/1.0/',
+        'authors': ['a'],
+        'url': 'https://wger.de/en/exercise/1/view/',
+      },
+    ]);
+
+    test(
+      'a missing asset is a FormatException naming the asset only',
+      () async {
+        final bundle = _FakeBundle(null);
+        await expectLater(
+          ExerciseLibrary.load(bundle: bundle),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              'assets/exercises/wger_exercises.json could not be loaded',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('bad JSON does not leak its content', () async {
+      final bundle = _FakeBundle('{"secret": oops');
+      await expectLater(
+        ExerciseLibrary.load(bundle: bundle),
+        throwsA(
+          isA<FormatException>()
+              .having((e) => e.message, 'message', contains('not valid JSON'))
+              .having((e) => e.message, 'message', isNot(contains('secret'))),
+        ),
+      );
+    });
+
+    test('a wrong shape names the entry', () async {
+      await expectLater(
+        ExerciseLibrary.load(bundle: _FakeBundle('{"a": 1}')),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('not a list'),
+          ),
+        ),
+      );
+      final broken = jsonEncode([
+        ...jsonDecode(good) as List,
+        {'id': 2, 'name': 'No other fields'},
+      ]);
+      await expectLater(
+        ExerciseLibrary.load(bundle: _FakeBundle(broken)),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('Entry 1'), isNot(contains('No other fields'))),
+          ),
+        ),
+      );
+    });
+
+    test('a failure is not remembered and a later good load works', () async {
+      final bundle = _FakeBundle('nope');
+      await expectLater(
+        ExerciseLibrary.load(bundle: bundle),
+        throwsA(isA<FormatException>()),
+      );
+      bundle.text = good;
+      final loaded = await ExerciseLibrary.load(bundle: bundle);
+      expect(loaded.all.single.name, 'Test');
+      // A second load shares the first and does not read the asset again.
+      bundle.text = 'changed but not read again';
+      expect((await ExerciseLibrary.load(bundle: bundle)).all.length, 1);
+    });
+
+    test('the asset text is not cached by the bundle', () async {
+      final bundle = _FakeBundle(good);
+      await ExerciseLibrary.load(bundle: bundle);
+      expect(bundle.cacheArgs, [false]);
     });
   });
 

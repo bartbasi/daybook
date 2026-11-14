@@ -74,7 +74,25 @@ class LibraryExercise {
   bool get isUser => ref.startsWith('local:');
 
   /// The authors as one line, or null when there are none (user exercises).
-  String? get credit => authors.isEmpty ? null : authors.join(', ');
+  /// Two authors are joined with 'and', three or more with commas and a
+  /// final 'and', so "Text by A and B, CC BY-SA 4.0" reads clearly.
+  String? get credit {
+    if (authors.isEmpty) return null;
+    if (authors.length == 1) return authors.first;
+    final head = authors.sublist(0, authors.length - 1);
+    final sep = authors.length == 2 ? ' and ' : ', and ';
+    return '${head.join(', ')}$sep${authors.last}';
+  }
+
+  /// The license as people write it: 'CC-BY-SA 4' is 'CC BY-SA 4.0',
+  /// 'CC-BY-SA 3' is 'CC BY-SA 3.0', 'CC0' is 'CC0 1.0'. Anything else is
+  /// shown as stored. [license] itself stays as wger gives it.
+  String? get licenseLabel => switch (license) {
+    'CC-BY-SA 4' => 'CC BY-SA 4.0',
+    'CC-BY-SA 3' => 'CC BY-SA 3.0',
+    'CC0' => 'CC0 1.0',
+    final other => other,
+  };
 
   late final String _nameKey = foldText(name);
   late final List<String> _aliasKeys = [for (final a in aliases) foldText(a)];
@@ -161,21 +179,49 @@ class ExerciseLibrary {
 
   /// Loads the bundled wger list (once per bundle; a second call shares the
   /// first) with [userExercises] merged in. The file is under 1 MB, so it is
-  /// decoded on the calling isolate.
+  /// decoded on the calling isolate. A missing or bad asset throws a
+  /// [FormatException] that names the asset (and the entry number), never its
+  /// content, and a failed load is not remembered: the next call tries again.
   static Future<ExerciseLibrary> load({
     AssetBundle? bundle,
     List<LibraryExercise> userExercises = const [],
   }) async {
     final b = bundle ?? rootBundle;
-    final wger = await (_wgerCache[b] ??= _readWger(b));
-    return ExerciseLibrary._(wger, userExercises);
+    final future = _wgerCache[b] ??= _readWger(b);
+    try {
+      return ExerciseLibrary._(await future, userExercises);
+    } catch (_) {
+      if (identical(_wgerCache[b], future)) _wgerCache[b] = null;
+      rethrow;
+    }
   }
 
   static Future<List<LibraryExercise>> _readWger(AssetBundle bundle) async {
-    final data = jsonDecode(await bundle.loadString(_assetPath)) as List;
-    return List.unmodifiable([
-      for (final j in data) LibraryExercise.fromWger(j as Map<String, dynamic>),
-    ]);
+    final String text;
+    try {
+      // Not cached by the bundle, so the 0.7 MB string is not kept.
+      text = await bundle.loadString(_assetPath, cache: false);
+    } catch (_) {
+      throw const FormatException('$_assetPath could not be loaded');
+    }
+    final Object? data;
+    try {
+      data = jsonDecode(text);
+    } catch (_) {
+      throw const FormatException('$_assetPath is not valid JSON');
+    }
+    if (data is! List) {
+      throw const FormatException('$_assetPath is not a list');
+    }
+    final out = <LibraryExercise>[];
+    for (var i = 0; i < data.length; i++) {
+      try {
+        out.add(LibraryExercise.fromWger(data[i] as Map<String, dynamic>));
+      } catch (_) {
+        throw FormatException('Entry $i of $_assetPath has the wrong shape');
+      }
+    }
+    return List.unmodifiable(out);
   }
 
   /// The same library with a new set of user exercises (use the rows from
