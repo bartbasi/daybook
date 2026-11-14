@@ -109,7 +109,14 @@ Terms, quoted from the wger README:
 
 Daybook uses only the data, so the AGPL code license does not apply. The data license is set on each entry. The license table lists CC BY-SA 3.0, CC BY 4.0, CC BY-SA 4.0, CC0 and ODbL. Entries sampled were CC BY-SA 4.0 with a named author. Images sampled were CC BY-SA 3.0, many by Everkinetic.
 
-What it has: about 950 exercises in the live database, about 380 images. Fields include category, primary and secondary muscles, equipment, a description, aliases, variations, and license author per entry. Not every exercise has an image. The number with English text was not counted.
+What it has: about 950 exercises in the live database, about 380 images. Fields include category, primary and secondary muscles, equipment, a description, aliases, variations, and license author per entry. Not every exercise has an image.
+
+What was fetched (task 4.1, 2026-11-13, by `tools/build_exercise_data.py`, from https://wger.de/api/v2/exerciseinfo/ and /license/):
+- 967 exercises, all with English text and a name. None were dropped.
+- License of the English text, as wger names them: CC-BY-SA 4: 819, CC-BY-SA 3: 128, CC0: 20. No other license appeared.
+- 807 have primary muscles, 739 have equipment, 88 have aliases, 23 have an empty description.
+- 20 entries had an email address as author. Each is shown as "wger.de contributor" (40 author strings, because wger lists each one twice). 77 more entries have no author recorded and are also credited to "wger.de contributor".
+- The result is `assets/exercises/wger_exercises.json`, about 700 KB, no images or videos. Its README lists the licenses and the changes made (HTML turned into plain text, English only).
 
 Compatibility with GPL-3.0:
 - CC BY-SA 4.0 can be relicensed one way into GPLv3, but CC BY-SA 3.0 cannot.
@@ -124,10 +131,10 @@ Decision (Bart, 2026-11-08): when a wger `license_author` value is an email addr
 
 Usable: yes, with conditions.
 
-About screen text:
-> Exercise data from the wger project (https://wger.de), by wger.de contributors, licensed under Creative Commons (CC BY-SA 4.0 and CC BY-SA 3.0; see each exercise for author and license). Some illustrations by Everkinetic (CC BY-SA 3.0).
+About screen text (no images are shipped, so the Everkinetic sentence is dropped, Bart's answer to open question 7):
+> Exercise data from the wger project (https://wger.de), by wger.de contributors, licensed under Creative Commons (CC BY-SA 4.0, CC BY-SA 3.0 and CC0; see each exercise for author and license). Descriptions were changed from HTML to plain text.
 
-Each exercise detail screen also shows its own author and license.
+Each exercise detail screen also shows its own author and license, for example "Text by wger.de contributor, CC BY-SA 4.0" with a link to the exercise on wger.de. The data file keeps wger's own license names ("CC-BY-SA 4", "CC-BY-SA 3", "CC0") and the license URL; the screen may show the license by its usual name, linked to that URL.
 
 ### Other exercise lists checked
 
@@ -190,7 +197,6 @@ License: a federal regulation is a US government work and is not copyrighted.
 ## Not yet verified
 
 - FNDDS and Branded citation formats (only the general FDC citation and the Foundation and SR Legacy ones were found).
-- Number of wger exercises with English text.
 - Full ExerciseDB terms text (rejected anyway).
 - Whether Open Food Facts has a published logo or trademark policy.
 - Reuse terms for the 2011 Compendium.
