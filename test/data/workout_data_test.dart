@@ -10,7 +10,7 @@ import 'package:daybook/data/weight_data.dart';
 import 'package:daybook/data/workout_data.dart';
 import 'package:daybook/math/training.dart';
 import 'package:daybook/util/units.dart';
-import 'package:drift/drift.dart' show OrderingTerm, driftRuntimeOptions;
+import 'package:drift/drift.dart' show OrderingTerm, Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -74,7 +74,10 @@ void main() {
           weightKg: lbToKg(e.$3[i].$1),
           reps: e.$3[i].$2,
         );
-        await db.logSet(rows[i].row.id, start);
+        await db.logSet(
+          rows[i].row.id,
+          Now(utcMs: start.utcMs + minutes * 60000, offsetMinutes: -360),
+        );
       }
     }
     await db.finishWorkout(
@@ -667,7 +670,7 @@ void main() {
   });
 
   group('finish and resume', () {
-    test('2 planned sets not logged are removed, Resume brings them back, then finish again', () async {
+    test('2 planned sets not logged are hidden, Resume brings them back, then finish again', () async {
       final r = await pushRoutine();
       final id = (await db.startRoutine(
         r.routine.id,
@@ -692,8 +695,12 @@ void main() {
       final finished = await db.finishWorkout(id, at('2026-11-12', 18, 22));
       expect(finished.endedAtMs, at('2026-11-12', 18, 22).utcMs);
       var rows = await db.select(db.workoutSets).get();
-      expect(rows, hasLength(4));
-      expect(rows.every((s) => s.completedAtMs != null), isTrue);
+      expect(rows, hasLength(6));
+      expect(rows.where((s) => s.completedAtMs == null), hasLength(2));
+      expect((await view(id)).completedSetCount, 4);
+      expect([
+        for (final e in (await view(id)).exercises) ...e.sets,
+      ], hasLength(4));
       expect((await db.workoutResult(id)).removedPlannedSets, 2);
       expect((await db.workoutResult(id)).setCount, 4);
 
@@ -730,7 +737,11 @@ void main() {
 
       // Finish again: the same two are removed again, and Resume again works.
       await db.finishWorkout(id, at('2026-11-12', 18, 30));
-      expect(await db.select(db.workoutSets).get(), hasLength(4));
+      expect(await db.select(db.workoutSets).get(), hasLength(6));
+      expect((await view(id)).completedSetCount, 4);
+      expect([
+        for (final e in (await view(id)).exercises) ...e.sets,
+      ], hasLength(4));
       await db.resumeWorkout(id);
       expect(await db.select(db.workoutSets).get(), hasLength(6));
       // Log the two this time and finish: nothing removed, nothing to resume.
@@ -768,7 +779,7 @@ void main() {
       dir.deleteSync(recursive: true);
     });
 
-    test('finish with nothing logged: ends it, no estimate, planned sets come back on resume', () async {
+    test('finish with nothing logged: ends it, no estimate, no length, planned sets come back on resume', () async {
       await db.saveWeight(180, imp, at('2026-11-12', 7, 0));
       final r = await pushRoutine();
       final id = (await db.startRoutine(
@@ -778,7 +789,9 @@ void main() {
       final w = await db.finishWorkout(id, at('2026-11-12', 18, 0));
       expect(w.endedAtMs, isNotNull);
       expect(w.kcalEstimated, isNull);
-      expect(await db.select(db.workoutSets).get(), isEmpty);
+      expect(await db.select(db.workoutSets).get(), hasLength(6));
+      expect((await view(id)).exercises, isEmpty);
+      expect((await db.workoutResult(id)).durationMs, isNull);
       expect(await db.exerciseKcalForDay('2026-11-12'), 0);
       expect(await db.startAgainList('2026-11-13'), isEmpty);
       expect((await db.workoutResult(id)).removedPlannedSets, 6);
@@ -822,7 +835,13 @@ void main() {
       await db.addExercise(id, bench, 'Bench press', sets: 1);
       final s = (await db.select(db.workoutSets).get()).first;
       await db.adjustSet(s.id, weightKg: 80, reps: 8);
-      await db.logSet(s.id, start);
+      await db.logSet(
+        s.id,
+        Now(
+          utcMs: start.utcMs + minutes * 60000,
+          offsetMinutes: start.offsetMinutes,
+        ),
+      );
       await db.finishWorkout(
         id,
         Now(
@@ -836,17 +855,20 @@ void main() {
     Future<Workout> row(int id) =>
         (db.select(db.workouts)..where((w) => w.id.equals(id))).getSingle();
 
-    test('with a weigh-in: 3.5 MET x kg x hours, finish minus start', () async {
-      await db.saveWeight(181.8, imp, at('2026-11-10', 7, 0));
-      final id = await sampleWorkout(at('2026-11-12', 17, 30), 52);
-      final kg = (await db.weightOnOrBefore('2026-11-12'))!.weightKg;
-      expect(kg, closeTo(lbToKg(181.8), 1e-9));
-      // 3.5 x 82.46 kg x 52/60 h
-      final kcal = (await row(id)).kcalEstimated!;
-      expect(kcal, closeTo(3.5 * kg * 52 / 60, 1e-9));
-      expect(kcal.round(), 250);
-      expect(await db.exerciseKcalForDay('2026-11-12'), kcal);
-    });
+    test(
+      'with a weigh-in: 3.5 MET x kg x hours, start to the last set',
+      () async {
+        await db.saveWeight(181.8, imp, at('2026-11-10', 7, 0));
+        final id = await sampleWorkout(at('2026-11-12', 17, 30), 52);
+        final kg = (await db.weightOnOrBefore('2026-11-12'))!.weightKg;
+        expect(kg, closeTo(lbToKg(181.8), 1e-9));
+        // 3.5 x 82.46 kg x 52/60 h
+        final kcal = (await row(id)).kcalEstimated!;
+        expect(kcal, closeTo(3.5 * kg * 52 / 60, 1e-9));
+        expect(kcal.round(), 250);
+        expect(await db.exerciseKcalForDay('2026-11-12'), kcal);
+      },
+    );
 
     test('with no weigh-in there is no estimate, not zero', () async {
       final id = await sampleWorkout(at('2026-11-12', 17, 30), 52);
@@ -915,10 +937,14 @@ void main() {
       await db.resumeWorkout(id);
       expect((await row(id)).kcalEstimated, isNull);
       expect((await row(id)).kcalOverride, 123);
-      await db.finishWorkout(
-        id,
-        Now(utcMs: start.utcMs + 60 * 60000, offsetMinutes: -360),
+      final more = await db.addSet(id, bench);
+      final hourLater = Now(
+        utcMs: start.utcMs + 60 * 60000,
+        offsetMinutes: -360,
       );
+      await db.adjustSet(more.id, weightKg: 80, reps: 8);
+      await db.logSet(more.id, hourLater);
+      await db.finishWorkout(id, hourLater);
       expect((await row(id)).kcalEstimated!, closeTo(3.5 * lbToKg(180), 1e-9));
       expect((await row(id)).kcalOverride, 123);
     });
@@ -952,12 +978,10 @@ void main() {
         await db.addExercise(id, bench, 'Bench press', sets: 1);
         final s = (await db.select(db.workoutSets).get()).first;
         await db.adjustSet(s.id, weightKg: 80, reps: 8);
-        await db.logSet(s.id, start);
+        final later = Now(utcMs: start.utcMs + 30 * 60000, offsetMinutes: 60);
+        await db.logSet(s.id, later);
         // Finished 30 minutes later, but the phone now says +1 hour.
-        await db.finishWorkout(
-          id,
-          Now(utcMs: start.utcMs + 30 * 60000, offsetMinutes: 60),
-        );
+        await db.finishWorkout(id, later);
         expect(
           (await row(id)).kcalEstimated!,
           closeTo(3.5 * lbToKg(180) * 0.5, 1e-9),
@@ -1149,7 +1173,7 @@ void main() {
         expect(roundOneRepMaxForDisplay(kgToLb(rec.bestEstimateKg!), imp), 228);
 
         final sessions = await db.exerciseHistory(bench);
-        expect(sessions.map((s) => s.workout.localDate), [
+        expect(sessions.map((s) => s.localDate), [
           '2026-11-12',
           '2026-11-05',
           '2026-10-29',
@@ -1213,17 +1237,6 @@ void main() {
       final names = (await db.recentExercises()).map((e) => e.exerciseName);
       expect(names.toList(), ['Squat', 'Overhead press', 'Bench press']);
       expect(await db.recentExercises(limit: 2), hasLength(2));
-    });
-
-    test('history lists finished workouts newest first', () async {
-      final a = await doWorkout('2026-11-05', [
-        (bench, 'Bench press', [(175, 8)]),
-      ]);
-      final b = await doWorkout('2026-11-12', [
-        (bench, 'Bench press', [(175, 8)]),
-      ]);
-      await db.startEmptyWorkout(at('2026-11-13', 9, 0));
-      expect((await db.workoutHistory()).map((s) => s.workout.id), [b, a]);
     });
   });
 
@@ -1448,5 +1461,628 @@ void main() {
         expect(e.toString(), isNot(contains(secret)));
       }
     });
+  });
+
+  // Review round: positions, planned rows left in place, time, records.
+  group('review fixes', () {
+    Future<void> logAll(int id, {double lb = 100, int reps = 5}) async {
+      for (final e in (await view(id)).exercises) {
+        for (final s in e.sets) {
+          if (s.isDone) continue;
+          await db.adjustSet(s.row.id, weightKg: lbToKg(lb), reps: reps);
+          await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+        }
+      }
+    }
+
+    List<String> refs(WorkoutView v) => [
+      for (final e in v.exercises) e.exerciseRef,
+    ];
+
+    test(
+      'adding an exercise after removed sets goes last, not into the gap',
+      () async {
+        final r = await db.createRoutine('R', [
+          ex(bench, 'Bench press', sets: 6),
+          ex(press, 'Overhead press', sets: 3),
+        ], at('2026-11-01', 9, 0));
+        final id = (await db.startRoutine(
+          r.routine.id,
+          at('2026-11-12', 17, 30),
+        )).workout!.id;
+        for (final s in setsOf(await view(id), bench).take(4)) {
+          await db.removeSet(s.row.id);
+        }
+        await db.addExercise(id, squat, 'Squat', sets: 3);
+        final v = await view(id);
+        expect(refs(v), [bench, press, squat]);
+        final positions = [
+          for (final e in v.exercises)
+            for (final s in e.sets) s.row.position,
+        ];
+        expect(positions, [...positions]..sort());
+        expect(positions.toSet(), hasLength(positions.length));
+      },
+    );
+
+    test(
+      'order is kept through removes, adds, moves and Start again',
+      () async {
+        final r = await db.createRoutine('R', [
+          ex(bench, 'Bench press', sets: 3),
+          ex(press, 'Overhead press', sets: 2),
+          ex(row, 'Row', sets: 2),
+        ], at('2026-11-01', 9, 0));
+        final id = (await db.startRoutine(
+          r.routine.id,
+          at('2026-11-12', 17, 30),
+        )).workout!.id;
+        await db.removeSet(setsOf(await view(id), press).first.row.id);
+        await db.addExercise(id, squat, 'Squat', sets: 2);
+        await db.moveExercise(id, squat, -1);
+        await db.addSet(id, bench);
+        await db.removeExercise(id, row);
+        await db.addExercise(id, row, 'Row', sets: 1);
+        await db.removeSet(setsOf(await view(id), bench).first.row.id);
+        await db.moveExercise(id, bench, 1);
+        final expected = refs(await view(id));
+        expect(expected, [press, bench, squat, row]);
+        await logAll(id);
+        await db.finishWorkout(id, at('2026-11-12', 18, 0));
+        expect(refs(await view(id)), expected);
+        final again = await db.startAgain(id, at('2026-11-13', 17, 0));
+        expect(refs(await view(again.workout!.id)), expected);
+      },
+    );
+
+    test(
+      'a finished workout keeps its unlogged rows, and no reader shows them',
+      () async {
+        final r = await pushRoutine();
+        final id = (await db.startRoutine(
+          r.routine.id,
+          at('2026-11-12', 17, 30),
+        )).workout!.id;
+        final s = setsOf(await view(id), bench).first;
+        await db.adjustSet(s.row.id, weightKg: lbToKg(175), reps: 8);
+        await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+        await db.finishWorkout(id, at('2026-11-12', 18, 0));
+
+        expect(await db.select(db.workoutSets).get(), hasLength(6));
+        final v = await view(id);
+        expect(refs(v), [bench]);
+        expect(v.exercises.single.sets, hasLength(1));
+        expect(v.completedSetCount, 1);
+        expect(v.nextSet, isNull);
+        final entry = (await db.startAgainList('2026-11-13')).single.summary;
+        expect(entry.plannedSetCount, 0);
+        expect(entry.exerciseNames, ['Bench press']);
+        expect(entry.setCount, 1);
+        expect((await db.recentExercises()).map((e) => e.exerciseRef), [bench]);
+        expect(await db.exerciseHistory(press), isEmpty);
+        expect((await db.exerciseRecords(press)).heaviest, isNull);
+        expect(await db.weeklyVolume('2026-11-12', (_) => ['m']), {'m': 1});
+        final res = await db.workoutResult(id);
+        expect(res.setCount, 1);
+        expect(res.removedPlannedSets, 5);
+        final copy = await db.startAgain(id, at('2026-11-13', 17, 0));
+        expect(refs(await view(copy.workout!.id)), [bench]);
+        expect(setsOf(await view(copy.workout!.id), bench), hasLength(1));
+      },
+    );
+
+    test(
+      'finish, resume, finish again leaves the same rows each time',
+      () async {
+        final r = await pushRoutine();
+        final id = (await db.startRoutine(
+          r.routine.id,
+          at('2026-11-12', 17, 30),
+        )).workout!.id;
+        final s = setsOf(await view(id), bench).first;
+        await db.adjustSet(s.row.id, weightKg: lbToKg(175), reps: 8);
+        await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+        final before = await db.select(db.workoutSets).get();
+        await db.finishWorkout(id, at('2026-11-12', 18, 0));
+        await db.resumeWorkout(id);
+        expect(await db.select(db.workoutSets).get(), before);
+        expect((await db.runningWorkout())!.plannedSetCount, 5);
+        await db.finishWorkout(id, at('2026-11-12', 18, 30));
+        expect(await db.select(db.workoutSets).get(), before);
+        expect((await db.workoutResult(id)).removedPlannedSets, 5);
+        await db.resumeWorkout(id);
+        expect(refs(await view(id)), [bench, press]);
+      },
+    );
+
+    test('on a real file, finish and resume survive a reopen', () async {
+      driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+      final dir = Directory.systemTemp.createTempSync('daybook_fin_');
+      final file = File('${dir.path}${Platform.pathSeparator}d.sqlite');
+      var d = AppDatabase(NativeDatabase(file));
+      final r = await d.createRoutine('R', [
+        ex(bench, 'Bench press', sets: 3),
+      ], at('2026-11-01', 9, 0));
+      final w = (await d.startRoutine(
+        r.routine.id,
+        at('2026-11-12', 17, 30),
+      )).workout!;
+      final first = (await d.select(d.workoutSets).get()).first;
+      await d.adjustSet(first.id, weightKg: 80, reps: 8);
+      await d.logSet(first.id, at('2026-11-12', 17, 32));
+      await d.finishWorkout(w.id, at('2026-11-12', 18, 0));
+      await d.close();
+      d = AppDatabase(NativeDatabase(file));
+      expect(await d.select(d.workoutSets).get(), hasLength(3));
+      expect((await d.workoutResult(w.id)).removedPlannedSets, 2);
+      expect((await d.loadWorkout(w.id))!.exercises.single.sets, hasLength(1));
+      await d.resumeWorkout(w.id);
+      await d.close();
+      d = AppDatabase(NativeDatabase(file));
+      expect((await d.runningWorkout())!.plannedSetCount, 2);
+      expect((await d.loadWorkout(w.id))!.exercises.single.sets, hasLength(3));
+      await d.close();
+      driftRuntimeOptions.dontWarnAboutMultipleDatabases = false;
+      dir.deleteSync(recursive: true);
+    });
+
+    Future<int> oneSetWorkout(
+      Now start,
+      int setAfterMin,
+      int finishAfterMin,
+    ) async {
+      final id = (await db.startEmptyWorkout(start)).workout!.id;
+      final s = (await db.addExercise(
+        id,
+        bench,
+        'Bench press',
+        sets: 1,
+      )).single;
+      await db.adjustSet(s.id, weightKg: 80, reps: 8);
+      Now plus(int m) => Now(
+        utcMs: start.utcMs + m * 60000,
+        offsetMinutes: start.offsetMinutes,
+      );
+      await db.logSet(s.id, plus(setAfterMin));
+      await db.finishWorkout(id, plus(finishAfterMin));
+      return id;
+    }
+
+    test(
+      'calories and duration run to the last logged set, not to Finish',
+      () async {
+        await db.saveWeight(181.8, imp, at('2026-11-10', 7, 0));
+        final start = at('2026-11-12', 17, 30);
+        final a = await oneSetWorkout(start, 52, 52);
+        final w = (await db.workoutResult(a)).workout;
+        expect(w.kcalEstimated, closeTo(3.5 * lbToKg(181.8) * 52 / 60, 1e-9));
+        expect(w.kcalEstimated!.round(), 250);
+        expect((await db.workoutResult(a)).durationMs, 52 * 60000);
+        await db.deleteWorkout(a);
+        final b = await oneSetWorkout(start, 52, 52 + 15 * 60);
+        final res = await db.workoutResult(b);
+        expect(res.workout.kcalEstimated!.round(), 250);
+        expect(res.durationMs, 52 * 60000);
+        expect(
+          res.workout.endedAtMs,
+          start.utcMs + (52 + 900) * 60000,
+          reason: 'endedAtMs is still when Finish was tapped',
+        );
+      },
+    );
+
+    test(
+      'a workout with no logged set has no duration and no estimate',
+      () async {
+        await db.saveWeight(180, imp, at('2026-11-10', 7, 0));
+        final id = (await db.startEmptyWorkout(at('2026-11-12', 17, 30)))
+            .workout!
+            .id;
+        await db.addExercise(id, bench, 'Bench press', sets: 2);
+        await db.finishWorkout(id, at('2026-11-12', 19, 30));
+        final res = await db.workoutResult(id);
+        expect(res.durationMs, isNull);
+        expect(res.workout.kcalEstimated, isNull);
+      },
+    );
+
+    test(
+      'Resume after 8 days, one more set, Finish: time runs to the last set',
+      () async {
+        await db.saveWeight(180, imp, at('2026-11-01', 7, 0));
+        final start = at('2026-11-12', 17, 30);
+        final id = await oneSetWorkout(start, 50, 55);
+        await db.resumeWorkout(id);
+        final s = await db.addSet(id, bench);
+        final later = at('2026-11-20', 18, 0);
+        await db.adjustSet(s.id, weightKg: 80, reps: 8);
+        await db.logSet(s.id, later);
+        await db.finishWorkout(id, later);
+        final res = await db.workoutResult(id);
+        expect(res.durationMs, later.utcMs - start.utcMs);
+        expect(res.durationMs, greaterThan(7 * 24 * 3600 * 1000));
+      },
+    );
+
+    test(
+      'the first session is never a record, set by set or in the summary',
+      () async {
+        final id = (await db.startEmptyWorkout(at('2026-11-12', 17, 30)))
+            .workout!
+            .id;
+        final rows = await db.addExercise(id, bench, 'Bench press', sets: 2);
+        await db.adjustSet(rows[0].id, weightKg: lbToKg(135), reps: 8);
+        await db.adjustSet(rows[1].id, weightKg: lbToKg(155), reps: 8);
+        final a = await db.logSet(rows[0].id, at('2026-11-12', 17, 35));
+        final b = await db.logSet(rows[1].id, at('2026-11-12', 17, 40));
+        expect(a.record.any, isFalse);
+        expect(b.record.any, isFalse);
+        await db.finishWorkout(id, at('2026-11-12', 17, 45));
+        expect((await db.workoutResult(id)).newRecords, isEmpty);
+        expect(setsOf(await view(id), bench).map((s) => s.record.any), [
+          false,
+          false,
+        ]);
+      },
+    );
+
+    test(
+      'the per-set flag and the summary agree against an earlier workout',
+      () async {
+        await doWorkout('2026-11-05', [
+          (bench, 'Bench press', [(175, 8)]),
+        ]);
+        final id = await doWorkout('2026-11-12', [
+          (bench, 'Bench press', [(185, 8), (180, 8), (175, 8)]),
+        ]);
+        // Both 185 and 180 beat the earlier workout; 175 ties it.
+        expect(setsOf(await view(id), bench).map((s) => s.record.heaviest), [
+          true,
+          true,
+          false,
+        ]);
+        final res = await db.workoutResult(id);
+        expect(res.newRecords, hasLength(1));
+        expect(kgToLb(res.newRecords.single.heaviest!.weightKg!).round(), 185);
+      },
+    );
+
+    test('flags follow the current data: editing an earlier workout later changes them', () async {
+      final a = await doWorkout('2026-11-05', [
+        (bench, 'Bench press', [(175, 8)]),
+      ]);
+      final b = await doWorkout('2026-11-12', [
+        (bench, 'Bench press', [(180, 8)]),
+      ]);
+      expect(setsOf(await view(b), bench).single.record.heaviest, isTrue);
+      await db.resumeWorkout(a);
+      final s = setsOf(await view(a), bench).single;
+      await db.adjustSet(s.row.id, weightKg: lbToKg(190), reps: 8);
+      await db.finishWorkout(a, at('2026-11-05', 18, 0));
+      expect(setsOf(await view(b), bench).single.record.any, isFalse);
+      expect((await db.workoutResult(b)).newRecords, isEmpty);
+    });
+
+    test('adjusting a logged set to no reps is refused', () async {
+      final id = (await db.startEmptyWorkout(at('2026-11-12', 17, 30)))
+          .workout!
+          .id;
+      final s = (await db.addExercise(
+        id,
+        bench,
+        'Bench press',
+        sets: 1,
+      )).single;
+      await db.adjustSet(s.id, weightKg: 80, reps: 8);
+      await db.logSet(s.id, at('2026-11-12', 17, 35));
+      for (final bad in [null, 0]) {
+        await expectLater(
+          db.adjustSet(s.id, weightKg: 80, reps: bad),
+          throwsA(
+            isA<WorkoutRefused>().having(
+              (e) => e.problem,
+              'problem',
+              WorkoutProblem.needsReps,
+            ),
+          ),
+        );
+      }
+      expect((await db.select(db.workoutSets).get()).single.reps, 8);
+      // A set not yet logged may still be cleared.
+      final t = await db.addSet(id, bench);
+      expect(
+        (await db.adjustSet(t.id, weightKg: null, reps: null)).reps,
+        isNull,
+      );
+    });
+
+    test('records and the flags come back after Delete and Undo', () async {
+      await doWorkout('2026-11-05', [
+        (bench, 'Bench press', [(175, 8)]),
+      ]);
+      final b = await doWorkout('2026-11-12', [
+        (bench, 'Bench press', [(180, 8)]),
+      ]);
+      final deleted = await db.deleteWorkout(b);
+      expect(
+        kgToLb((await db.exerciseRecords(bench)).heaviest!.weightKg!).round(),
+        175,
+      );
+      await db.undoDeleteWorkout(deleted);
+      expect(
+        kgToLb((await db.exerciseRecords(bench)).heaviest!.weightKg!).round(),
+        180,
+      );
+      expect(setsOf(await view(b), bench).single.record.heaviest, isTrue);
+      expect((await db.workoutResult(b)).newRecords, hasLength(1));
+    });
+
+    Future<void> trigger(String sql) => db.customStatement(sql);
+
+    test('a failing write inside start leaves nothing behind', () async {
+      final r = await pushRoutine();
+      await trigger(
+        'CREATE TRIGGER stop BEFORE INSERT ON workout_sets '
+        'WHEN NEW.position = 4 '
+        "BEGIN SELECT RAISE(ABORT, 'stop'); END",
+      );
+      await expectLater(
+        db.startRoutine(r.routine.id, at('2026-11-12', 17, 30)),
+        throwsA(anything),
+      );
+      expect(await db.select(db.workouts).get(), isEmpty);
+      expect(await db.select(db.workoutSets).get(), isEmpty);
+      await trigger('DROP TRIGGER stop');
+      expect(
+        (await db.startRoutine(r.routine.id, at('2026-11-12', 17, 31))).started,
+        isTrue,
+      );
+    });
+
+    test('a failing write inside finish and inside resume leaves the database as it was', () async {
+      final r = await pushRoutine();
+      final id = (await db.startRoutine(
+        r.routine.id,
+        at('2026-11-12', 17, 30),
+      )).workout!.id;
+      final s = setsOf(await view(id), bench).first;
+      await db.adjustSet(s.row.id, weightKg: lbToKg(175), reps: 8);
+      await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+      Future<String> snap() async =>
+          '${await db.select(db.workouts).get()}'
+          '${await db.select(db.workoutSets).get()}';
+      var before = await snap();
+      await trigger(
+        'CREATE TRIGGER stop BEFORE UPDATE ON workouts '
+        'WHEN NEW.ended_at_ms IS NOT NULL '
+        "BEGIN SELECT RAISE(ABORT, 'stop'); END",
+      );
+      await expectLater(
+        db.finishWorkout(id, at('2026-11-12', 18, 0)),
+        throwsA(anything),
+      );
+      expect(await snap(), before);
+      await trigger('DROP TRIGGER stop');
+      await db.finishWorkout(id, at('2026-11-12', 18, 0));
+      before = await snap();
+      await trigger(
+        'CREATE TRIGGER stop BEFORE UPDATE ON workouts '
+        'WHEN NEW.ended_at_ms IS NULL '
+        "BEGIN SELECT RAISE(ABORT, 'stop'); END",
+      );
+      await expectLater(db.resumeWorkout(id), throwsA(anything));
+      expect(await snap(), before);
+    });
+
+    test(
+      '200 past workouts: prefill, flags and records are unchanged',
+      () async {
+        final r = await db.createRoutine('R', [
+          ex(bench, 'Bench press', sets: 3),
+        ], at('2026-01-01', 9, 0));
+        final all = <DoneSet>[];
+        var last = <(double, int)>[];
+        for (var i = 0; i < 200; i++) {
+          final start = at('2026-01-01', 9, 0).utcMs + i * 86400000;
+          final wid = await db
+              .into(db.workouts)
+              .insert(
+                WorkoutsCompanion.insert(
+                  localDate: Now(utcMs: start, offsetMinutes: -360).localDate,
+                  startedAtMs: start,
+                  tzOffsetMinutes: -360,
+                  endedAtMs: Value(start + 3600000),
+                ),
+              );
+          last = [];
+          for (var k = 0; k < 3; k++) {
+            final kg = 60.0 + (i * 7 + k * 3) % 41;
+            final reps = 3 + (i + k) % 10;
+            last.add((kg, reps));
+            final at0 = start + 60000 * (k + 1);
+            final sid = await db
+                .into(db.workoutSets)
+                .insert(
+                  WorkoutSetsCompanion.insert(
+                    workoutId: wid,
+                    position: k,
+                    exerciseRef: bench,
+                    exerciseName: 'Bench press',
+                    weightKg: Value(kg),
+                    reps: Value(reps),
+                    completedAtMs: Value(at0),
+                  ),
+                );
+            all.add(DoneSet(weightKg: kg, reps: reps, atMs: at0, id: sid));
+          }
+        }
+        final id = (await db.startRoutine(
+          r.routine.id,
+          at('2026-09-01', 9, 0),
+        )).workout!.id;
+        final b = setsOf(await view(id), bench);
+        expect([for (final s in b) (s.row.weightKg, s.row.reps)], last);
+        final best = recordsOf(all);
+        await db.adjustSet(
+          b[0].row.id,
+          weightKg: best.heaviest!.weightKg! + 1,
+          reps: 5,
+        );
+        final logged = await db.logSet(b[0].row.id, at('2026-09-01', 9, 5));
+        expect(logged.record.heaviest, isTrue);
+        expect(setsOf(await view(id), bench)[0].record.heaviest, isTrue);
+        final rec = await db.exerciseRecords(bench);
+        expect(rec.heaviest!.weightKg, best.heaviest!.weightKg! + 1);
+      },
+    );
+  });
+
+  group('dates on records, replace exercise, volume stream', () {
+    test('records and history rows carry their workout\'s day', () async {
+      await doWorkout('2026-11-05', [
+        (bench, 'Bench press', [(175, 8)]),
+      ]);
+      // A workout that crosses midnight: its sets belong to the start day.
+      final start = at('2026-11-12', 23, 40);
+      final id = (await db.startEmptyWorkout(start)).workout!.id;
+      final s = (await db.addExercise(
+        id,
+        bench,
+        'Bench press',
+        sets: 1,
+      )).single;
+      await db.adjustSet(s.id, weightKg: lbToKg(180), reps: 8);
+      final late = Now(utcMs: start.utcMs + 30 * 60000, offsetMinutes: -360);
+      await db.logSet(s.id, late);
+      await db.finishWorkout(id, late);
+      expect(late.localDate, '2026-11-13');
+
+      final rec = await db.exerciseRecords(bench);
+      expect(rec.heaviest!.localDate, '2026-11-12');
+      expect(rec.bestEstimate!.localDate, '2026-11-12');
+      final sessions = await db.exerciseHistory(bench);
+      expect(sessions.map((x) => x.localDate), ['2026-11-12', '2026-11-05']);
+      expect(sessions.first.sets.single.localDate, '2026-11-12');
+      final res = await db.workoutResult(id);
+      expect(res.newRecords.single.heaviest!.localDate, '2026-11-12');
+    });
+
+    Future<int> startPush() async {
+      final r = await db.createRoutine('Push A', [
+        ex(bench, 'Bench press', sets: 3),
+        ex(press, 'Overhead press', sets: 2),
+        ex(row, 'Row', sets: 1),
+      ], at('2026-11-01', 9, 0));
+      return (await db.startRoutine(
+        r.routine.id,
+        at('2026-11-12', 17, 30),
+      )).workout!.id;
+    }
+
+    test('replace takes the old one\'s place, with the same number of sets, prefilled from its own last time', () async {
+      await doWorkout('2026-11-05', [
+        (squat, 'Squat', [(225, 5), (230, 4)]),
+      ]);
+      final id = await startPush();
+      final out = await db.replaceExercise(id, press, squat, 'Squat');
+      expect(out, hasLength(2));
+      final v = await view(id);
+      expect(v.exercises.map((e) => e.exerciseRef), [bench, squat, row]);
+      final sq = setsOf(v, squat);
+      expect(sq.map((s) => s.row.reps), [5, 4]);
+      expect(sq.map((s) => s.row.exerciseName).toSet(), {'Squat'});
+      expect(v.exercises[1].lastTimeDate, '2026-11-05');
+      expect(
+        (await db.select(db.workoutSets).get()).where(
+          (s) => s.exerciseRef == press,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('replace with an exercise never done leaves the sets empty', () async {
+      final id = await startPush();
+      await db.replaceExercise(id, row, squat, 'Squat');
+      final sq = setsOf(await view(id), squat).single;
+      expect(sq.row.weightKg, isNull);
+      expect(sq.row.reps, isNull);
+    });
+
+    test('replace is refused with a logged set, a duplicate, or a finished workout', () async {
+      final id = await startPush();
+      WorkoutProblem? problem(Object? e) =>
+          e is WorkoutRefused ? e.problem : null;
+      Future<WorkoutProblem?> tryReplace(String a, String b) async {
+        try {
+          await db.replaceExercise(id, a, b, 'X');
+        } on Object catch (e) {
+          return problem(e);
+        }
+        return null;
+      }
+
+      final s = setsOf(await view(id), bench).first;
+      await db.adjustSet(s.row.id, weightKg: 80, reps: 8);
+      await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+      final before = await db.select(db.workoutSets).get();
+      expect(
+        await tryReplace(bench, squat),
+        WorkoutProblem.loggedSetsInExercise,
+      );
+      expect(await tryReplace(press, row), WorkoutProblem.duplicateExercise);
+      expect(await tryReplace(press, press), WorkoutProblem.duplicateExercise);
+      expect(await db.select(db.workoutSets).get(), before);
+      await db.finishWorkout(id, at('2026-11-12', 18, 0));
+      expect(await tryReplace(press, squat), WorkoutProblem.notRunning);
+    });
+
+    test('a failing write in the middle of replace changes nothing', () async {
+      final id = await startPush();
+      final before = (await db.select(db.workoutSets).get()).toString();
+      // The second of the two overhead press rows is the one that fails.
+      await db.customStatement(
+        'CREATE TRIGGER stop BEFORE UPDATE ON workout_sets '
+        "WHEN NEW.exercise_ref = 'wger:111' AND NEW.position = 4 "
+        "BEGIN SELECT RAISE(ABORT, 'stop'); END",
+      );
+      await expectLater(
+        db.replaceExercise(id, press, squat, 'Squat'),
+        throwsA(anything),
+      );
+      expect((await db.select(db.workoutSets).get()).toString(), before);
+    });
+
+    test(
+      'the weekly volume stream re-emits when the user\'s exercises change',
+      () async {
+        var muscle = 'chest';
+        final seen = <Map<String, int>>[];
+        final sub = db
+            .watchWeeklyVolume('2026-11-12', (_) => [muscle])
+            .listen(seen.add);
+        final id = (await db.startEmptyWorkout(at('2026-11-12', 9, 0)))
+            .workout!
+            .id;
+        final s = (await db.addExercise(
+          id,
+          bench,
+          'Bench press',
+          sets: 1,
+        )).single;
+        await db.adjustSet(s.id, weightKg: 80, reps: 8);
+        await db.logSet(s.id, at('2026-11-12', 9, 5));
+        await pumpEventQueue();
+        expect(seen.last, {'chest': 1});
+        // The user edits an exercise's muscles: the stream asks the caller's
+        // function again.
+        muscle = 'back';
+        await db
+            .into(db.exercises)
+            .insert(ExercisesCompanion.insert(name: 'Mine'));
+        await pumpEventQueue();
+        expect(seen.last, {'back': 1});
+        await sub.cancel();
+      },
+    );
   });
 }

@@ -1,8 +1,6 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
-import 'dart:convert';
-
 import 'package:drift/drift.dart';
 
 import '../clock.dart';
@@ -23,14 +21,34 @@ import 'goal_data.dart';
 //   that runs past midnight stays on its start day, and so do its calories
 //   and its sets in weekly volume.
 // - A workout is running while endedAtMs is null. Only one runs at a time.
+//   endedAtMs is the moment Finish was tapped. It is not the workout's
+//   length: the length is the start to the last logged set (see below).
 // - Every planned set is a workout_sets row with completedAtMs null from the
 //   moment the workout starts. Logging sets completedAtMs, in its own write.
+// - A FINISHED workout may still hold rows with completedAtMs null. They are
+//   the planned sets that were never logged. Finish leaves them in place and
+//   Resume only clears endedAtMs (and the estimate), so they are the sets
+//   that "come back". For a finished workout every reader here ignores them:
+//   the history holds only work that was done. For a running workout they are
+//   the sets still to do. Only a running workout can be edited.
 // - workout_sets.position orders the whole workout. The sets of one exercise
-//   are next to each other, and exercises appear in order of first position.
+//   are next to each other and exercises appear in order of first position.
+//   Positions may have gaps after removals; only their order counts.
 // - A workout has no name column. Its name is its routine's name; with no
 //   routine (an empty workout) the screen names it by its exercises.
 // - Rest time is not stored on a workout. It is read from the workout's
 //   routine for that exercise, and is null for an exercise added mid-workout.
+// - Length and calories: a workout's length is its start to the completion
+//   time of its LAST LOGGED SET, so a workout left open overnight is not
+//   counted as hours it was not worked. With no logged set there is no length
+//   and no estimate. After a Resume, the length still runs from the original
+//   start to the newest last set, so a workout resumed days later is days
+//   long. The schema cannot say how long it was really worked.
+// - Records: a set is a record only when a workout that started before its
+//   own (then by id) holds a qualifying set that it beats. Sets of the same
+//   workout never count against each other, and the first time an exercise
+//   is ever done nothing is a record. The flags are worked out when read, so
+//   they follow the data as it is now.
 
 /// Why a write was refused. Carries no user data.
 enum WorkoutProblem {
@@ -40,7 +58,8 @@ enum WorkoutProblem {
   /// The workout is finished, so its sets cannot change. Resume it first.
   notRunning,
 
-  /// The set has no reps yet, so it cannot be logged.
+  /// The set has no reps yet, so it cannot be logged, and a logged set cannot
+  /// lose its reps.
   needsReps,
 
   /// A weight, reps, rest, set count or calorie number that is negative, not
@@ -52,6 +71,10 @@ enum WorkoutProblem {
 
   /// The same exercise twice in one routine or one workout.
   duplicateExercise,
+
+  /// Replace exercise, but a set of the old exercise is already logged. The
+  /// user adds an exercise instead.
+  loggedSetsInExercise,
 }
 
 class WorkoutRefused implements Exception {
@@ -104,7 +127,7 @@ class RoutineWithExercises {
 
 // Workouts
 
-/// A workout for lists: Start again, history, Return to workout.
+/// A workout for lists: Start again and Return to workout.
 class WorkoutSummary {
   const WorkoutSummary({
     required this.workout,
@@ -112,6 +135,7 @@ class WorkoutSummary {
     required this.exerciseNames,
     required this.setCount,
     required this.plannedSetCount,
+    required this.lastSetAtMs,
   });
 
   final Workout workout;
@@ -120,22 +144,33 @@ class WorkoutSummary {
   /// Then the screen names the workout by [exerciseNames].
   final String? routineName;
 
-  /// Each exercise once, in order.
+  /// Each exercise once, in order. For a finished workout only exercises with
+  /// a completed set.
   final List<String> exerciseNames;
 
   /// Completed sets.
   final int setCount;
 
-  /// Sets still planned (not logged). Only a running workout has any.
+  /// Sets still planned (not logged). Always 0 for a finished workout.
   final int plannedSetCount;
+
+  /// When the last logged set was completed, or null if none was.
+  final int? lastSetAtMs;
 
   int get exerciseCount => exerciseNames.length;
   bool get isRunning => workout.endedAtMs == null;
 
-  /// Finish minus start in milliseconds, or null while running.
-  int? get durationMs => workout.endedAtMs == null
-      ? null
-      : workout.endedAtMs! - workout.startedAtMs;
+  /// The workout's length in milliseconds: start to the last logged set. Null
+  /// while running and when no set was logged.
+  int? get durationMs =>
+      isRunning ? null : workoutLength(workout.startedAtMs, lastSetAtMs);
+}
+
+/// Start to last logged set, never negative, or null with no logged set.
+int? workoutLength(int startedAtMs, int? lastSetAtMs) {
+  if (lastSetAtMs == null) return null;
+  final d = lastSetAtMs - startedAtMs;
+  return d < 0 ? 0 : d;
 }
 
 enum StartAgainKind { yesterday, sameWeekdayLastWeek, other }
@@ -180,7 +215,7 @@ class SetView {
   /// from 175 x 7". Always false once logged.
   final bool changed;
 
-  /// For a logged set: whether it beat every set logged before it.
+  /// For a logged set: whether it beat every set of earlier workouts.
   final RecordCheck record;
 
   bool get isDone => row.completedAtMs != null;
@@ -208,7 +243,7 @@ class ExerciseBlock {
   final String? lastTimeDate;
   final List<SetValues> lastTime;
 
-  /// In order.
+  /// In order. For a finished workout only the logged sets.
   final List<SetView> sets;
 }
 
@@ -253,7 +288,8 @@ class LoggedSet {
 }
 
 /// A record beaten in a workout, with what it replaced (null when there was
-/// no earlier set to beat in that kind of record).
+/// no earlier set to beat in that kind of record). The sets carry their
+/// workout's day in [DoneSet.localDate].
 class RecordBreak {
   const RecordBreak({
     required this.exerciseRef,
@@ -286,6 +322,7 @@ class WorkoutResult {
     required this.volumeKg,
     required this.newRecords,
     required this.removedPlannedSets,
+    required this.durationMs,
   });
 
   /// Read back, with the estimated and own calories.
@@ -296,26 +333,32 @@ class WorkoutResult {
   final double volumeKg;
   final List<RecordBreak> newRecords;
 
-  /// Planned sets removed at finish that Resume would bring back.
+  /// Sets planned but not logged when the workout was finished (they are
+  /// hidden now and Resume brings them back). 0 for a running workout.
   final int removedPlannedSets;
 
-  /// Finish minus start in milliseconds, or null while running.
-  int? get durationMs => workout.endedAtMs == null
-      ? null
-      : workout.endedAtMs! - workout.startedAtMs;
+  /// Start to the last logged set, or null with no logged set.
+  final int? durationMs;
 }
 
 /// One past session of an exercise, for exercise detail.
 class ExerciseSession {
   const ExerciseSession({
-    required this.workout,
+    required this.workoutId,
+    required this.localDate,
+    required this.startedAtMs,
     required this.sets,
     required this.bestEstimate,
   });
 
-  final Workout workout;
+  final int workoutId;
 
-  /// Completed sets, in order.
+  /// The day the workout started: show this, never a day worked out from a
+  /// timestamp.
+  final String localDate;
+  final int startedAtMs;
+
+  /// Completed sets, in order, each with [DoneSet.localDate].
   final List<DoneSet> sets;
 
   /// The set with the best estimate this session ("228 lb best 180 x 8"), or
@@ -326,15 +369,20 @@ class ExerciseSession {
 /// A workout removed by [WorkoutData.deleteWorkout], kept so Undo can put
 /// back exactly the same rows. It lives in memory only.
 class DeletedWorkout {
-  const DeletedWorkout._(this.workout, this.sets, this._stash);
+  const DeletedWorkout._(this.workout, this.sets);
 
   final Workout workout;
   final List<WorkoutSet> sets;
-  final String? _stash;
 }
 
 typedef _Plan = ({String ref, String name, int sets});
-typedef _Done = ({WorkoutSet set, Workout workout});
+typedef _LastTime = ({String? date, List<SetValues> sets});
+typedef _DoneRow = ({
+  DoneSet set,
+  int workoutId,
+  int startedAtMs,
+  int position,
+});
 
 extension WorkoutData on AppDatabase {
   // Routines
@@ -510,24 +558,23 @@ extension WorkoutData on AppDatabase {
       });
 
   /// Starts a workout that copies a past workout's exercises and number of
-  /// sets ("Start again"), with the same routine. Sets are prefilled from the
-  /// last time each exercise was done, which may be a later workout than the
-  /// one copied. Refused like [startRoutine] while one is running.
+  /// sets ("Start again"), with the same routine. Only sets that were logged
+  /// are copied. Sets are prefilled from the last time each exercise was
+  /// done, which may be a later workout than the one copied. Refused like
+  /// [startRoutine] while one is running.
   Future<StartResult> startAgain(int workoutId, Now now) =>
       transaction(() async {
         final w = await _workoutRow(workoutId);
-        final rows = await _setRows(workoutId);
-        final plans = <_Plan>[];
-        for (final b in _group(rows)) {
-          plans.add((
-            ref: b.first.exerciseRef,
-            name: b.first.exerciseName,
-            sets: b.where((s) => s.completedAtMs != null).length,
-          ));
-        }
+        final rows = (await _setRows(workoutId))
+            .where((s) => s.completedAtMs != null)
+            .toList();
         return _begin(now, w.routineId, [
-          for (final p in plans)
-            if (p.sets > 0) p,
+          for (final g in _group(rows))
+            (
+              ref: g.first.exerciseRef,
+              name: g.first.exerciseName,
+              sets: g.length,
+            ),
         ]);
       });
 
@@ -550,10 +597,9 @@ extension WorkoutData on AppDatabase {
     );
     var position = 0;
     for (final p in plans) {
-      final last = _lastTime(await _doneRows(p.ref), id);
+      final last = await _lastTime(p.ref, id);
       for (var i = 0; i < p.sets; i++) {
-        final v = _prefill(last, i);
-        await _insertSet(id, position++, p.ref, p.name, v);
+        await _insertSet(id, position++, p.ref, p.name, _prefill(last, i));
       }
     }
     return StartResult.started(await _workoutRow(id));
@@ -591,7 +637,7 @@ extension WorkoutData on AppDatabase {
       out.add(StartAgainEntry(StartAgainKind.sameWeekdayLastWeek, w));
     }
     final used = {for (final e in out) e.summary.workout.id};
-    final recent = await _summaries(await _finishedNewestFirst(60));
+    final recent = await _summaries(await _finishedNewestFirst(limit + 20));
     for (final s in recent) {
       if (out.length >= limit) break;
       if (s.setCount == 0 || used.contains(s.workout.id)) continue;
@@ -600,6 +646,8 @@ extension WorkoutData on AppDatabase {
     return out.take(limit).toList();
   }
 
+  /// [startAgainList] again after any change. It is worked out for the [today]
+  /// given: the caller must subscribe again after midnight, with the new day.
   Stream<List<StartAgainEntry>> watchStartAgainList(
     String today, {
     int limit = 10,
@@ -611,13 +659,14 @@ extension WorkoutData on AppDatabase {
 
   // Reading a workout
 
-  /// A workout with its exercises and sets, or null if it does not exist.
+  /// A workout with its exercises and sets, or null if it does not exist. A
+  /// finished workout shows only its logged sets.
   Future<WorkoutView?> loadWorkout(int id) async {
     final w = await (select(
       workouts,
     )..where((x) => x.id.equals(id))).getSingleOrNull();
     if (w == null) return null;
-    final rows = await _setRows(id);
+    final rows = (await _setRows(id)).where((s) => _visible(w, s)).toList();
     final routineId = w.routineId;
     String? routineName;
     final rest = <String, int?>{};
@@ -631,9 +680,8 @@ extension WorkoutData on AppDatabase {
     final blocks = <ExerciseBlock>[];
     for (final group in _group(rows)) {
       final ref = group.first.exerciseRef;
-      final done = await _doneRows(ref);
-      final last = _lastTime(done, id);
-      final allDone = [for (final d in done) _doneSet(d.set)];
+      final last = await _lastTime(ref, id);
+      final before = await _bestsBefore(ref, w);
       final sets = <SetView>[];
       for (var i = 0; i < group.length; i++) {
         final s = group[i];
@@ -647,7 +695,9 @@ extension WorkoutData on AppDatabase {
                 !isDone &&
                 prev != null &&
                 (prev.weightKg != s.weightKg || prev.reps != s.reps),
-            record: isDone ? recordFor(_doneSet(s), allDone) : RecordCheck.none,
+            record: isDone
+                ? checkRecord(before, _doneSet(s, w.localDate))
+                : RecordCheck.none,
           ),
         );
       }
@@ -682,7 +732,8 @@ extension WorkoutData on AppDatabase {
   /// is finished ([WorkoutProblem.notRunning]) or the set has no reps
   /// ([WorkoutProblem.needsReps]).
   Future<LoggedSet> logSet(int setId, Now now) => transaction(() async {
-    final s = await _openSet(setId);
+    final s = await _setById(setId);
+    final w = await _openWorkout(s.workoutId);
     var row = s;
     if (s.completedAtMs == null) {
       if (s.reps == null || s.reps! < 1) {
@@ -693,16 +744,15 @@ extension WorkoutData on AppDatabase {
       );
       row = await _setById(setId);
     }
-    final all = [
-      for (final d in await _doneRows(s.exerciseRef)) _doneSet(d.set),
-    ];
-    return LoggedSet(row, recordFor(_doneSet(row), all));
+    final before = await _bestsBefore(s.exerciseRef, w);
+    return LoggedSet(row, checkRecord(before, _doneSet(row, w.localDate)));
   });
 
   /// Sets the weight (kg, null for body weight) and reps of a set, before or
   /// after it is logged. Both values are written as given. Throws
   /// [WorkoutRefused] for a negative or non-finite number or a finished
-  /// workout.
+  /// workout, and with [WorkoutProblem.needsReps] when the set is logged and
+  /// reps would be missing or below 1.
   Future<WorkoutSet> adjustSet(
     int setId, {
     required double? weightKg,
@@ -712,7 +762,11 @@ extension WorkoutData on AppDatabase {
         (reps != null && reps < 0)) {
       throw const WorkoutRefused(WorkoutProblem.badNumber);
     }
-    await _openSet(setId);
+    final s = await _setById(setId);
+    await _openWorkout(s.workoutId);
+    if (s.completedAtMs != null && (reps == null || reps < 1)) {
+      throw const WorkoutRefused(WorkoutProblem.needsReps);
+    }
     await (update(workoutSets)..where((x) => x.id.equals(setId))).write(
       WorkoutSetsCompanion(weightKg: Value(weightKg), reps: Value(reps)),
     );
@@ -722,7 +776,8 @@ extension WorkoutData on AppDatabase {
   /// Removes a set from this workout only. An exercise left with no sets
   /// leaves the workout.
   Future<void> removeSet(int setId) => transaction(() async {
-    await _openSet(setId);
+    final s = await _setById(setId);
+    await _openWorkout(s.workoutId);
     await (delete(workoutSets)..where((x) => x.id.equals(setId))).go();
   });
 
@@ -735,7 +790,7 @@ extension WorkoutData on AppDatabase {
         final rows = await _setRows(workoutId);
         final block = rows.where((s) => s.exerciseRef == exerciseRef).toList();
         if (block.isEmpty) throw StateError('No such exercise');
-        final last = _lastTime(await _doneRows(exerciseRef), workoutId);
+        final last = await _lastTime(exerciseRef, workoutId);
         final n = block.length;
         final SetValues v = n < last.sets.length
             ? last.sets[n]
@@ -770,15 +825,18 @@ extension WorkoutData on AppDatabase {
     if (rows.any((s) => s.exerciseRef == exerciseRef)) {
       throw const WorkoutRefused(WorkoutProblem.duplicateExercise);
     }
-    final last = _lastTime(await _doneRows(exerciseRef), workoutId);
+    final last = await _lastTime(exerciseRef, workoutId);
     final count =
         sets ?? (last.sets.isEmpty ? defaultSetCount : last.sets.length);
+    // After the highest position: removals leave gaps, so the row count is
+    // not a free position.
+    final first = rows.isEmpty ? 0 : rows.last.position + 1;
     final ids = <int>[];
     for (var i = 0; i < count; i++) {
       ids.add(
         await _insertSet(
           workoutId,
-          rows.length + i,
+          first + i,
           exerciseRef,
           exerciseName,
           _prefill(last, i),
@@ -786,6 +844,43 @@ extension WorkoutData on AppDatabase {
       );
     }
     return [for (final id in ids) await _setById(id)];
+  });
+
+  /// Replaces an exercise with another, in the same place in the order and
+  /// with the same number of sets, prefilled from the new exercise's own last
+  /// time. One transaction. Throws [WorkoutRefused] when the workout is not
+  /// running, when any set of the old exercise is already logged
+  /// ([WorkoutProblem.loggedSetsInExercise]: the user adds an exercise
+  /// instead), or when the new exercise is already in the workout.
+  Future<List<WorkoutSet>> replaceExercise(
+    int workoutId,
+    String oldRef,
+    String newRef,
+    String newName,
+  ) => transaction(() async {
+    await _openWorkout(workoutId);
+    final rows = await _setRows(workoutId);
+    final old = rows.where((s) => s.exerciseRef == oldRef).toList();
+    if (old.isEmpty) throw StateError('No such exercise');
+    if (old.any((s) => s.completedAtMs != null)) {
+      throw const WorkoutRefused(WorkoutProblem.loggedSetsInExercise);
+    }
+    if (rows.any((s) => s.exerciseRef == newRef)) {
+      throw const WorkoutRefused(WorkoutProblem.duplicateExercise);
+    }
+    final last = await _lastTime(newRef, workoutId);
+    for (var i = 0; i < old.length; i++) {
+      final v = _prefill(last, i);
+      await (update(workoutSets)..where((x) => x.id.equals(old[i].id))).write(
+        WorkoutSetsCompanion(
+          exerciseRef: Value(newRef),
+          exerciseName: Value(newName),
+          weightKg: Value(v.weightKg),
+          reps: Value(v.reps),
+        ),
+      );
+    }
+    return [for (final s in old) await _setById(s.id)];
   });
 
   /// Removes an exercise with all its sets from this workout.
@@ -821,48 +916,25 @@ extension WorkoutData on AppDatabase {
 
   // Finishing and resuming
 
-  /// Ends the workout now. Planned sets that were not logged are deleted (and
-  /// kept aside so [resumeWorkout] can bring them back). The estimated
-  /// calories are 3.5 MET x the latest weigh-in on or before the workout's
-  /// day x hours (finish minus start). With no weigh-in on or before that
-  /// day, or with no completed set, the estimate is null, not zero. The
-  /// user's own number, if set, is kept. Finishing a finished workout changes
-  /// nothing. Returns the row read back.
+  /// Ends the workout now. Planned sets that were not logged stay in place and
+  /// are hidden (see the header). The estimated calories are 3.5 MET x the
+  /// latest weigh-in on or before the workout's day x hours, where hours run
+  /// from the start to the last logged set, not to now. With no weigh-in on
+  /// or before that day, or with no logged set, the estimate is null, not
+  /// zero. The user's own number, if set, is kept. endedAtMs is when Finish
+  /// was tapped. Finishing a finished workout changes nothing. Returns the row
+  /// read back.
   Future<Workout> finishWorkout(int id, Now now) => transaction(() async {
     final w = await _workoutRow(id);
     if (w.endedAtMs != null) return w;
-    final rows = await _setRows(id);
-    final planned = rows.where((s) => s.completedAtMs == null).toList();
-    final done = rows.length - planned.length;
-    if (planned.isEmpty) {
-      await _setStash(id, null);
-    } else {
-      await _setStash(
-        id,
-        jsonEncode([
-          for (final s in planned)
-            {
-              'p': s.position,
-              'ref': s.exerciseRef,
-              'name': s.exerciseName,
-              'w': s.weightKg,
-              'r': s.reps,
-            },
-        ]),
-      );
-      await (delete(
-        workoutSets,
-      )..where((s) => s.workoutId.equals(id) & s.completedAtMs.isNull())).go();
-    }
+    final lastSet = await _lastSetAt(id);
     final end = now.utcMs < w.startedAtMs ? w.startedAtMs : now.utcMs;
     double? kcal;
-    if (done > 0) {
+    final length = workoutLength(w.startedAtMs, lastSet);
+    if (length != null) {
       final weight = await weightOnOrBefore(w.localDate);
       if (weight != null) {
-        kcal = workoutKcal(
-          bodyWeightKg: weight.weightKg,
-          durationMs: end - w.startedAtMs,
-        );
+        kcal = workoutKcal(bodyWeightKg: weight.weightKg, durationMs: length);
       }
     }
     await (update(workouts)..where((x) => x.id.equals(id))).write(
@@ -871,11 +943,11 @@ extension WorkoutData on AppDatabase {
     return _workoutRow(id);
   });
 
-  /// Runs a finished workout again: it has no end time, the planned sets
-  /// removed at finish come back where they were, and the estimate is cleared
-  /// until the next finish. The user's own calorie number stays. If another
-  /// workout is running nothing changes and the result names it. Resuming a
-  /// running workout does nothing.
+  /// Runs a finished workout again: it has no end time, its unlogged planned
+  /// sets are sets to do again, and the estimate is cleared until the next
+  /// finish. The user's own calorie number stays. If another workout is
+  /// running nothing changes and the result names it. Resuming a running
+  /// workout does nothing.
   Future<StartResult> resumeWorkout(int id) => transaction(() async {
     final w = await _workoutRow(id);
     if (w.endedAtMs == null) return StartResult.started(w);
@@ -883,19 +955,6 @@ extension WorkoutData on AppDatabase {
     if (running != null) {
       return StartResult.refused((await _summaries([running])).single);
     }
-    for (final s in await _readStash(id)) {
-      await into(workoutSets).insert(
-        WorkoutSetsCompanion.insert(
-          workoutId: id,
-          position: s.position,
-          exerciseRef: s.ref,
-          exerciseName: s.name,
-          weightKg: Value(s.weightKg),
-          reps: Value(s.reps),
-        ),
-      );
-    }
-    await _setStash(id, null);
     await (update(workouts)..where((x) => x.id.equals(id))).write(
       const WorkoutsCompanion(
         endedAtMs: Value(null),
@@ -918,40 +977,30 @@ extension WorkoutData on AppDatabase {
     return _workoutRow(id);
   }
 
-  /// What the finish screen shows: time, sets, volume, the records this
-  /// workout beat (compared with workouts that started before it) and how
-  /// many planned sets were removed.
+  /// What the finish screen shows: length, sets, volume, the records this
+  /// workout beat (against workouts that started before it, the same rule as
+  /// the flag on each set) and how many planned sets were not logged.
   Future<WorkoutResult> workoutResult(int id) async {
     final w = await _workoutRow(id);
-    final rows = (await _setRows(id)).where((s) => s.completedAtMs != null);
-    final byRef = <String, List<WorkoutSet>>{};
-    for (final s in rows) {
-      (byRef[s.exerciseRef] ??= []).add(s);
-    }
+    final all = await _setRows(id);
+    final rows = all.where((s) => s.completedAtMs != null).toList();
     final breaks = <RecordBreak>[];
-    for (final e in byRef.entries) {
-      final earlier = [
-        for (final d in await _doneRows(e.key))
-          if (d.workout.id != id &&
-              (d.workout.startedAtMs < w.startedAtMs ||
-                  (d.workout.startedAtMs == w.startedAtMs &&
-                      d.workout.id < w.id)))
-            _doneSet(d.set),
-      ];
-      final before = recordsOf(earlier);
-      final now = recordsOf(e.value.map(_doneSet));
-      final h = now.heaviest, bh = before.heaviest;
-      final est = now.bestEstimate, be = before.bestEstimateKg;
-      final heavier = h != null && bh != null && h.weightKg! > bh.weightKg!;
-      final better =
-          est != null && be != null && est.estimateKg! > be + 1e-9 * be;
+    for (final g in _group(rows)) {
+      final ref = g.first.exerciseRef;
+      final before = await _bestsBefore(ref, w);
+      final mine = recordsOf(g.map((s) => _doneSet(s, w.localDate)));
+      final h = mine.heaviest, est = mine.bestEstimate;
+      final bh = recordsOf(before).heaviest;
+      final be = recordsOf(before).bestEstimateKg;
+      final heavier = h != null && checkRecord(before, h).heaviest;
+      final better = est != null && checkRecord(before, est).estimate;
       if (!heavier && !better) continue;
       breaks.add(
         RecordBreak(
-          exerciseRef: e.key,
-          exerciseName: e.value.first.exerciseName,
+          exerciseRef: ref,
+          exerciseName: g.first.exerciseName,
           heaviest: heavier ? h : null,
-          heaviestWasKg: heavier ? bh.weightKg : null,
+          heaviestWasKg: heavier ? bh?.weightKg : null,
           estimate: better ? est : null,
           estimateWasKg: better ? be : null,
         ),
@@ -960,9 +1009,19 @@ extension WorkoutData on AppDatabase {
     return WorkoutResult(
       workout: w,
       setCount: rows.length,
-      volumeKg: totalVolumeKg(rows.map(_doneSet)),
+      volumeKg: totalVolumeKg(rows.map((s) => _doneSet(s, w.localDate))),
       newRecords: breaks,
-      removedPlannedSets: (await _readStash(id)).length,
+      removedPlannedSets: w.endedAtMs == null ? 0 : all.length - rows.length,
+      durationMs: w.endedAtMs == null
+          ? null
+          : workoutLength(
+              w.startedAtMs,
+              rows.isEmpty
+                  ? null
+                  : rows
+                        .map((s) => s.completedAtMs!)
+                        .reduce((a, b) => a > b ? a : b),
+            ),
     );
   }
 
@@ -975,10 +1034,8 @@ extension WorkoutData on AppDatabase {
   Future<DeletedWorkout> deleteWorkout(int id) => transaction(() async {
     final w = await _workoutRow(id);
     final rows = await _setRows(id);
-    final stash = await _stashText(id);
     await (delete(workouts)..where((x) => x.id.equals(id))).go();
-    await _setStash(id, null);
-    return DeletedWorkout._(w, rows, stash);
+    return DeletedWorkout._(w, rows);
   });
 
   /// Puts back a deleted workout with the same ids and values. If it was
@@ -1006,50 +1063,39 @@ extension WorkoutData on AppDatabase {
         for (final s in deleted.sets) {
           await into(workoutSets).insert(s.toCompanion(false));
         }
-        await _setStash(w.id, deleted._stash);
         return _workoutRow(w.id);
       });
 
-  // History, records, volume
-
-  /// Finished workouts, newest first.
-  Future<List<WorkoutSummary>> workoutHistory({int limit = 50}) async =>
-      _summaries(await _finishedNewestFirst(limit));
-
-  Stream<List<WorkoutSummary>> watchWorkoutHistory({int limit = 50}) =>
-      liveQuery(this, [
-        workouts,
-        workoutSets,
-        routines,
-      ], () => workoutHistory(limit: limit));
+  // Records, history, volume
 
   /// Every session of an exercise that has a completed set, newest first.
   Future<List<ExerciseSession>> exerciseHistory(String exerciseRef) async {
-    final done = await _doneRows(exerciseRef);
-    final byWorkout = <int, List<_Done>>{};
-    for (final d in done) {
-      (byWorkout[d.workout.id] ??= []).add(d);
+    final byWorkout = <int, List<_DoneRow>>{};
+    for (final d in await _doneRows(exerciseRef)) {
+      (byWorkout[d.workoutId] ??= []).add(d);
     }
     final sessions = <ExerciseSession>[];
     for (final list in byWorkout.values) {
       list.sort(
-        (a, b) => a.set.position != b.set.position
-            ? a.set.position.compareTo(b.set.position)
+        (a, b) => a.position != b.position
+            ? a.position.compareTo(b.position)
             : a.set.id.compareTo(b.set.id),
       );
-      final sets = [for (final d in list) _doneSet(d.set)];
+      final sets = [for (final d in list) d.set];
       sessions.add(
         ExerciseSession(
-          workout: list.first.workout,
+          workoutId: list.first.workoutId,
+          localDate: sets.first.localDate,
+          startedAtMs: list.first.startedAtMs,
           sets: sets,
           bestEstimate: recordsOf(sets).bestEstimate,
         ),
       );
     }
     sessions.sort(
-      (a, b) => a.workout.startedAtMs != b.workout.startedAtMs
-          ? b.workout.startedAtMs.compareTo(a.workout.startedAtMs)
-          : b.workout.id.compareTo(a.workout.id),
+      (a, b) => a.startedAtMs != b.startedAtMs
+          ? b.startedAtMs.compareTo(a.startedAtMs)
+          : b.workoutId.compareTo(a.workoutId),
     );
     return sessions;
   }
@@ -1060,12 +1106,15 @@ extension WorkoutData on AppDatabase {
         workoutSets,
       ], () => exerciseHistory(exerciseRef));
 
-  /// An exercise's records over every completed set. See [recordsOf].
+  /// An exercise's records over every completed set, each with the set it came
+  /// from and that workout's day ([DoneSet.localDate]). See [recordsOf].
   Future<Records> exerciseRecords(String exerciseRef) async =>
-      recordsOf((await _doneRows(exerciseRef)).map((d) => _doneSet(d.set)));
+      recordsOf((await _doneRows(exerciseRef)).map((d) => d.set));
 
-  Stream<Records> watchExerciseRecords(String exerciseRef) =>
-      liveQuery(this, [workoutSets], () => exerciseRecords(exerciseRef));
+  Stream<Records> watchExerciseRecords(String exerciseRef) => liveQuery(this, [
+    workouts,
+    workoutSets,
+  ], () => exerciseRecords(exerciseRef));
 
   /// Exercises done lately, most recent first, each once with the name it was
   /// last logged under: the picker's list before anything is typed.
@@ -1090,49 +1139,61 @@ extension WorkoutData on AppDatabase {
   }
 
   /// Completed sets per primary muscle in the Monday to Sunday week that
-  /// contains [dayInWeek] ('YYYY-MM-DD'). Sets count on their workout's
-  /// start day, from running and finished workouts. [musclesOf] gives each
-  /// exercise's primary muscles. See [setsPerMuscle].
+  /// contains [dayInWeek]. Sets count on their workout's start day, from
+  /// running and finished workouts. [musclesOf] gives each exercise's primary
+  /// muscles. See [setsPerMuscle].
   Future<Map<String, int>> weeklyVolume(
     String dayInWeek,
     MusclesOf musclesOf,
   ) async {
     final monday = mondayOf(dayInWeek);
-    final q =
-        select(workoutSets).join([
-          innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId)),
-        ])..where(
-          workoutSets.completedAtMs.isNotNull() &
-              workouts.localDate.isBiggerOrEqualValue(monday) &
-              workouts.localDate.isSmallerOrEqualValue(addDays(monday, 6)),
-        );
+    final count = workoutSets.id.count();
+    final q = selectOnly(
+      workoutSets,
+    ).join([innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId))]);
+    q
+      ..addColumns([workoutSets.exerciseRef, workouts.localDate, count])
+      ..where(
+        workoutSets.completedAtMs.isNotNull() &
+            workouts.localDate.isBiggerOrEqualValue(monday) &
+            workouts.localDate.isSmallerOrEqualValue(addDays(monday, 6)),
+      )
+      ..groupBy([workoutSets.exerciseRef, workouts.localDate]);
     final cache = <String, List<String>>{};
     final sets = <VolumeSet>[];
     for (final r in await q.get()) {
-      final ref = r.readTable(workoutSets).exerciseRef;
-      sets.add((
-        localDate: r.readTable(workouts).localDate,
-        muscles: cache[ref] ??= musclesOf(ref).toList(),
-      ));
+      final ref = r.read(workoutSets.exerciseRef)!;
+      final muscles = cache[ref] ??= musclesOf(ref).toList();
+      for (var i = 0; i < r.read(count)!; i++) {
+        sets.add((localDate: r.read(workouts.localDate)!, muscles: muscles));
+      }
     }
     return setsPerMuscle(sets, dayInWeek);
   }
 
+  /// [weeklyVolume] again after any change to workouts or to the user's
+  /// exercises (their muscles can be edited).
   Stream<Map<String, int>> watchWeeklyVolume(
     String dayInWeek,
     MusclesOf musclesOf,
   ) => liveQuery(this, [
     workouts,
     workoutSets,
+    exercises,
   ], () => weeklyVolume(dayInWeek, musclesOf));
 
   // Helpers
 
-  DoneSet _doneSet(WorkoutSet s) => DoneSet(
+  /// A finished workout shows only logged sets.
+  bool _visible(Workout w, WorkoutSet s) =>
+      w.endedAtMs == null || s.completedAtMs != null;
+
+  DoneSet _doneSet(WorkoutSet s, String localDate) => DoneSet(
     weightKg: s.weightKg,
     reps: s.reps,
     atMs: s.completedAtMs ?? 0,
     id: s.id,
+    localDate: localDate,
   );
 
   Future<Workout> _workoutRow(int id) async {
@@ -1159,12 +1220,6 @@ extension WorkoutData on AppDatabase {
     return s;
   }
 
-  Future<WorkoutSet> _openSet(int setId) async {
-    final s = await _setById(setId);
-    await _openWorkout(s.workoutId);
-    return s;
-  }
-
   Future<List<WorkoutSet>> _setRows(int workoutId) =>
       (select(workoutSets)
             ..where((s) => s.workoutId.equals(workoutId))
@@ -1173,6 +1228,19 @@ extension WorkoutData on AppDatabase {
               (s) => OrderingTerm.asc(s.id),
             ]))
           .get();
+
+  Future<int?> _lastSetAt(int workoutId) async {
+    final latest = workoutSets.completedAtMs.max();
+    final row =
+        await (selectOnly(workoutSets)
+              ..addColumns([latest])
+              ..where(
+                workoutSets.workoutId.equals(workoutId) &
+                    workoutSets.completedAtMs.isNotNull(),
+              ))
+            .getSingle();
+    return row.read(latest);
+  }
 
   /// Sets grouped by exercise, exercises in order of first appearance.
   List<List<WorkoutSet>> _group(List<WorkoutSet> rows) {
@@ -1207,61 +1275,121 @@ extension WorkoutData on AppDatabase {
     }
   }
 
-  /// Every completed set of an exercise with its workout, oldest first.
-  Future<List<_Done>> _doneRows(String ref) async {
-    final q =
-        select(workoutSets).join([
-            innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId)),
-          ])
-          ..where(
-            workoutSets.exerciseRef.equals(ref) &
-                workoutSets.completedAtMs.isNotNull(),
-          )
-          ..orderBy([
-            OrderingTerm.asc(workoutSets.completedAtMs),
-            OrderingTerm.asc(workoutSets.id),
-          ]);
+  /// The completed sets of an exercise in every workout, with only the columns
+  /// needed. Used by exercise detail, not by the active workout.
+  Future<List<_DoneRow>> _doneRows(String ref) async {
+    final q = selectOnly(
+      workoutSets,
+    ).join([innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId))]);
+    q
+      ..addColumns([
+        workoutSets.id,
+        workoutSets.weightKg,
+        workoutSets.reps,
+        workoutSets.completedAtMs,
+        workoutSets.position,
+        workouts.id,
+        workouts.localDate,
+        workouts.startedAtMs,
+      ])
+      ..where(
+        workoutSets.exerciseRef.equals(ref) &
+            workoutSets.completedAtMs.isNotNull(),
+      )
+      ..orderBy([
+        OrderingTerm.asc(workoutSets.completedAtMs),
+        OrderingTerm.asc(workoutSets.id),
+      ]);
     return [
       for (final r in await q.get())
-        (set: r.readTable(workoutSets), workout: r.readTable(workouts)),
+        (
+          set: DoneSet(
+            weightKg: r.read(workoutSets.weightKg),
+            reps: r.read(workoutSets.reps),
+            atMs: r.read(workoutSets.completedAtMs)!,
+            id: r.read(workoutSets.id)!,
+            localDate: r.read(workouts.localDate)!,
+          ),
+          workoutId: r.read(workouts.id)!,
+          startedAtMs: r.read(workouts.startedAtMs)!,
+          position: r.read(workoutSets.position)!,
+        ),
+    ];
+  }
+
+  /// What every workout that started before [w] (then by id) holds for an
+  /// exercise, as the best weight for each rep count: at most one small row
+  /// per distinct rep count, whatever the history. Enough for both records.
+  Future<List<DoneSet>> _bestsBefore(String ref, Workout w) async {
+    final best = workoutSets.weightKg.max();
+    final q = selectOnly(
+      workoutSets,
+    ).join([innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId))]);
+    q
+      ..addColumns([workoutSets.reps, best])
+      ..where(
+        workoutSets.exerciseRef.equals(ref) &
+            workoutSets.completedAtMs.isNotNull() &
+            workoutSets.weightKg.isBiggerThanValue(0) &
+            workoutSets.reps.isBiggerOrEqualValue(1) &
+            (workouts.startedAtMs.isSmallerThanValue(w.startedAtMs) |
+                (workouts.startedAtMs.equals(w.startedAtMs) &
+                    workouts.id.isSmallerThanValue(w.id))),
+      )
+      ..groupBy([workoutSets.reps]);
+    return [
+      for (final r in await q.get())
+        DoneSet(
+          weightKg: r.read(best),
+          reps: r.read(workoutSets.reps),
+          atMs: 0,
+        ),
     ];
   }
 
   /// The last time an exercise was done in a workout other than
-  /// [exceptWorkoutId]: the latest started workout with a completed set of it.
-  ({String? date, List<SetValues> sets}) _lastTime(
-    List<_Done> done,
-    int exceptWorkoutId,
-  ) {
-    Workout? best;
-    for (final d in done) {
-      final w = d.workout;
-      if (w.id == exceptWorkoutId) continue;
-      if (best == null ||
-          w.startedAtMs > best.startedAtMs ||
-          (w.startedAtMs == best.startedAtMs && w.id > best.id)) {
-        best = w;
-      }
-    }
-    if (best == null) return (date: null, sets: const []);
-    final mine =
-        [
-          for (final d in done)
-            if (d.workout.id == best.id) d.set,
-        ]..sort(
-          (a, b) => a.position != b.position
-              ? a.position.compareTo(b.position)
-              : a.id.compareTo(b.id),
-        );
+  /// [exceptWorkoutId]: the latest started workout with a completed set of
+  /// it, and only that workout's sets are read.
+  Future<_LastTime> _lastTime(String ref, int exceptWorkoutId) async {
+    final q = selectOnly(
+      workoutSets,
+    ).join([innerJoin(workouts, workouts.id.equalsExp(workoutSets.workoutId))]);
+    q
+      ..addColumns([workouts.id, workouts.localDate])
+      ..where(
+        workoutSets.exerciseRef.equals(ref) &
+            workoutSets.completedAtMs.isNotNull() &
+            workouts.id.equals(exceptWorkoutId).not(),
+      )
+      ..orderBy([
+        OrderingTerm.desc(workouts.startedAtMs),
+        OrderingTerm.desc(workouts.id),
+      ])
+      ..limit(1);
+    final top = (await q.get()).firstOrNull;
+    if (top == null) return (date: null, sets: const <SetValues>[]);
+    final sets =
+        await (select(workoutSets)
+              ..where(
+                (s) =>
+                    s.workoutId.equals(top.read(workouts.id)!) &
+                    s.exerciseRef.equals(ref) &
+                    s.completedAtMs.isNotNull(),
+              )
+              ..orderBy([
+                (s) => OrderingTerm.asc(s.position),
+                (s) => OrderingTerm.asc(s.id),
+              ]))
+            .get();
     return (
-      date: best.localDate,
-      sets: [for (final s in mine) (weightKg: s.weightKg, reps: s.reps)],
+      date: top.read(workouts.localDate),
+      sets: [for (final s in sets) (weightKg: s.weightKg, reps: s.reps)],
     );
   }
 
   /// Set [i] of a new workout: last time's set [i], or last time's last set
   /// when last time had fewer, or empty the first time.
-  SetValues _prefill(({String? date, List<SetValues> sets}) last, int i) {
+  SetValues _prefill(_LastTime last, int i) {
     if (last.sets.isEmpty) return (weightKg: null, reps: null);
     return i < last.sets.length ? last.sets[i] : last.sets.last;
   }
@@ -1302,62 +1430,23 @@ extension WorkoutData on AppDatabase {
     return [
       for (final w in rows)
         () {
-          final mine = sets.where((s) => s.workoutId == w.id).toList();
-          final done = mine.where((s) => s.completedAtMs != null).length;
+          final mine = sets
+              .where((s) => s.workoutId == w.id && _visible(w, s))
+              .toList();
+          final done = mine.where((s) => s.completedAtMs != null).toList();
           return WorkoutSummary(
             workout: w,
             routineName: names[w.routineId],
             exerciseNames: [for (final g in _group(mine)) g.first.exerciseName],
-            setCount: done,
-            plannedSetCount: mine.length - done,
+            setCount: done.length,
+            plannedSetCount: mine.length - done.length,
+            lastSetAtMs: done.isEmpty
+                ? null
+                : done
+                      .map((s) => s.completedAtMs!)
+                      .reduce((a, b) => a > b ? a : b),
           );
         }(),
     ];
-  }
-
-  // Planned sets removed at finish are kept in the settings table, because
-  // the schema has no place on a workout for them. One key per workout holds a
-  // JSON list, so Resume works after the app was closed.
-
-  static String _stashKey(int workoutId) => 'workout_unlogged_sets:$workoutId';
-
-  Future<String?> _stashText(int workoutId) async =>
-      (await (select(settings)
-                ..where((s) => s.key.equals(_stashKey(workoutId))))
-              .getSingleOrNull())
-          ?.value;
-
-  Future<void> _setStash(int workoutId, String? text) async {
-    if (text == null) {
-      await (delete(
-        settings,
-      )..where((s) => s.key.equals(_stashKey(workoutId)))).go();
-    } else {
-      await into(settings).insertOnConflictUpdate(
-        SettingsCompanion.insert(key: _stashKey(workoutId), value: text),
-      );
-    }
-  }
-
-  Future<
-    List<({int position, String ref, String name, double? weightKg, int? reps})>
-  >
-  _readStash(int workoutId) async {
-    final text = await _stashText(workoutId);
-    if (text == null) return const [];
-    try {
-      return [
-        for (final m in jsonDecode(text) as List)
-          (
-            position: (m['p'] as num).toInt(),
-            ref: m['ref'] as String,
-            name: m['name'] as String,
-            weightKg: (m['w'] as num?)?.toDouble(),
-            reps: (m['r'] as num?)?.toInt(),
-          ),
-      ];
-    } on Object {
-      return const [];
-    }
   }
 }

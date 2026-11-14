@@ -21,15 +21,17 @@ double roundOneRepMaxForDisplay(double value, UnitSystem units) {
 const oneRepMaxMinReps = 1;
 const oneRepMaxMaxReps = 12;
 
-/// The Epley estimated one-rep max: weight x (1 + reps / 30).
+/// The estimated one-rep max. One rep is the weight itself (a lift done once
+/// is its own one-rep max). 2 to 12 reps use Epley: weight x (1 + reps / 30).
 ///
 /// Only sets of 1 to 12 reps are estimated; any other rep count, and a weight
 /// that is not above zero (a body weight set), has no estimate and returns
 /// null. The result is in the same unit as [weight], so 180 lb for 8 reps
-/// gives 228 lb. At 1 rep the formula gives 1.033 x the weight, as written.
+/// gives 228 lb.
 double? estimatedOneRepMax(double weight, int reps) {
   if (reps < oneRepMaxMinReps || reps > oneRepMaxMaxReps) return null;
   if (!weight.isFinite || weight <= 0) return null;
+  if (reps == 1) return weight;
   return weight * (1 + reps / 30);
 }
 
@@ -50,6 +52,7 @@ class DoneSet {
     required this.reps,
     required this.atMs,
     this.id = 0,
+    this.localDate = '',
   });
 
   /// Null for a body weight set.
@@ -57,6 +60,10 @@ class DoneSet {
   final int? reps;
   final int atMs;
   final int id;
+
+  /// The day ('YYYY-MM-DD') of the workout the set belongs to, so a screen
+  /// never works a day out from [atMs]. Empty when not known.
+  final String localDate;
 
   /// This set came before [other].
   bool isBefore(DoneSet other) =>
@@ -133,7 +140,9 @@ class RecordCheck {
   bool get any => heaviest || estimate;
 }
 
-/// Whether [set] is a new record given the sets done [before] it. A tie is not
+/// Whether [set] is a new record given the sets done [before] it (the caller
+/// decides what "before" means: the workout data layer uses sets of earlier
+/// workouts). A tie is not
 /// a record. With nothing before it to beat (the first set ever, or only body
 /// weight sets before), it is not a record either: "beats the best" needs a
 /// best.
@@ -148,11 +157,6 @@ RecordCheck checkRecord(Iterable<DoneSet> before, DoneSet set) {
     estimate: e != null && mine != null && mine > e + _estimateTolerance * e,
   );
 }
-
-/// [checkRecord] against every set in [all] that was done before [set]. [all]
-/// may include [set] itself and sets done after it.
-RecordCheck recordFor(DoneSet set, Iterable<DoneSet> all) =>
-    checkRecord(all.where((s) => s.isBefore(set)), set);
 
 /// Weight x reps added up, in kilograms. Sets with no weight or no reps add
 /// nothing.
