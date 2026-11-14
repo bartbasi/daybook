@@ -954,10 +954,8 @@ class S {
       '${count(kcal)} kcal, or ${count(grams)} g of protein.';
   static const goalsMacrosIncomplete =
       'Fill in all three, or leave all three empty.';
-  static String goalsMacrosWillClear(bool percentShowing) =>
-      'Saving now removes your macro goals. Fill in the '
-      '${percentShowing ? 'percents' : 'grams'}, or switch back to '
-      '${percentShowing ? 'Grams' : 'Percent'}.';
+  static const goalsMacrosWillClear =
+      'Saving with these empty removes your macro goals.';
   static const goalsPercentBad = 'Enter a whole number from 0 to 100.';
   static String goalsPercentsDontAdd(int total) =>
       'The percents must add to 100. They add to $total%.';

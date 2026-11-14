@@ -1136,14 +1136,14 @@ void main() {
         'removes them, and after Save the row has none', (tester) async {
       await saveWithMacros(tester, MacroMode.grams);
       await openGoals(tester);
-      expect(find.text(S.goalsMacrosWillClear(false)), findsNothing);
-      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
       await tap(tester, find.text('Percent'));
-      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+      expect(find.text(S.goalsMacrosWillClear), findsOneWidget);
       await enter(tester, 'Protein', '30');
-      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
       await enter(tester, 'Protein', '');
-      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+      expect(find.text(S.goalsMacrosWillClear), findsOneWidget);
       await tap(tester, saveButton());
       final g = (await goalRows(tester)).last;
       expect(g.effectiveFrom, '2026-11-12');
@@ -1155,9 +1155,9 @@ void main() {
       await saveWithMacros(tester, MacroMode.percent);
       await openGoals(tester);
       await tap(tester, find.text('Grams'));
-      expect(find.text(S.goalsMacrosWillClear(false)), findsOneWidget);
+      expect(find.text(S.goalsMacrosWillClear), findsOneWidget);
       await tap(tester, find.text('Percent'));
-      expect(find.text(S.goalsMacrosWillClear(false)), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
       await tap(tester, find.text('Grams'));
       await tap(tester, saveButton());
       final g = (await goalRows(tester)).last;
@@ -1165,16 +1165,36 @@ void main() {
       expect([g.proteinTarget, g.carbsTarget, g.fatTarget], [null, null, null]);
     });
 
-    appTest('typed and not saved counts too, and nothing typed or saved '
-        'shows no sentence', (tester) async {
+    appTest('saved in grams, Grams stays and all three are cleared: the '
+        'sentence shows and Save writes no macros', (tester) async {
+      await saveWithMacros(tester, MacroMode.grams);
+      await openGoals(tester);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
+      await enter(tester, 'Protein', '');
+      await enter(tester, 'Carbs', '');
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
+      await enter(tester, 'Fat', '');
+      expect(find.text(S.goalsMacrosWillClear), findsOneWidget);
+      await enter(tester, 'Fat', '70');
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
+      await enter(tester, 'Fat', '');
+      await tap(tester, saveButton());
+      final g = (await goalRows(tester)).last;
+      expect(g.effectiveFrom, '2026-11-12');
+      expect([g.proteinTarget, g.carbsTarget, g.fatTarget], [null, null, null]);
+    });
+
+    appTest('typed in the other mode but never saved shows no sentence', (
+      tester,
+    ) async {
       await seedWeight(tester, 181.8);
       await openGoals(tester);
       await tap(tester, find.text('Percent'));
-      expect(find.text(S.goalsMacrosWillClear(true)), findsNothing);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
       await tap(tester, find.text('Grams'));
       await enter(tester, 'Protein', '150');
       await tap(tester, find.text('Percent'));
-      expect(find.text(S.goalsMacrosWillClear(true)), findsOneWidget);
+      expect(find.text(S.goalsMacrosWillClear), findsNothing);
     });
 
     appTest('a stored gram goal with five decimals does not hide Recalculate '

@@ -318,20 +318,16 @@ class _GoalsScreenState extends State<GoalsScreen> {
     return false;
   }
 
-  /// True when the selected mode's fields are all empty while macro goals are
-  /// saved or typed in the other mode, so Save would remove them.
+  /// True when macro goals are saved (in either mode) and the selected
+  /// mode's fields are all empty, so Save would remove them.
   bool get _macrosWouldBeRemoved {
     final here = _mode == MacroMode.grams ? _grams : _percents;
-    final other = _mode == MacroMode.grams ? _percents : _grams;
     if (here.any((c) => c.text.trim().isNotEmpty)) return false;
     final s = _saved;
-    final savedOther =
-        s != null &&
-        s.macroMode != _mode &&
+    return s != null &&
         s.row.proteinTarget != null &&
         s.row.carbsTarget != null &&
         s.row.fatTarget != null;
-    return savedOther || other.any((c) => c.text.trim().isNotEmpty);
   }
 
   /// True when the whole form is what is saved: the calorie inputs, the own
@@ -1436,9 +1432,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
       }
     }
     if (_macrosWouldBeRemoved) {
-      notes.add(
-        _small(context, S.goalsMacrosWillClear(_mode == MacroMode.percent)),
-      );
+      notes.add(_small(context, S.goalsMacrosWillClear));
     }
     return [...rows, total, ...notes, _err(context, 'macros')];
   }

@@ -93,7 +93,7 @@ Each is the recommended option from the plan's open questions, or a small call m
 61. **With no weigh-in yet, the Goals screen says so in a sentence** and points to Today for logging one, or to using your own number. The wireframes show no weigh-in button on Goals.
 62. **Home's budget card says "kcal left" or "kcal over" in words**, with no minus sign, and each macro meter carries its numbers in words ("86 of 150 g"), so nothing depends on color.
 63. **The "left today" line on the food entry screen hides in one tight case**: text larger than 1.3 times normal, the keyboard up, and at least one item still to fix. On the cover screen there is no room for it then. It comes back when the keyboard goes down or the item is fixed. The rule goes by text size, not by measured room, so it also hides on the unfolded screen in that state, where it would have fitted.
-64. **Leaving the macro fields empty means no macro goals.** If you switch between grams and percent, leave the new fields empty and save, the macro goals you had are removed. The screen says so before you save: "Saving now removes your macro goals. Fill in the percents, or switch back to Grams."
+64. **Leaving the macro fields empty means no macro goals.** If you clear them, or switch between grams and percent and leave the new fields empty, saving removes the macro goals you had. The screen says so before you save: "Saving with these empty removes your macro goals."
 65. **In percent mode Save waits until the percents add to 100**, as the wireframe says. The line "Adds to 95%. 5% left." says why.
 
 ## Open questions from the plan: answered
