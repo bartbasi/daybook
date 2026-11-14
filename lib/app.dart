@@ -19,6 +19,8 @@ import 'screens/home/home_screen.dart';
 import 'screens/more/more_screen.dart';
 import 'screens/weight/weight_sheet.dart' show weightSheetOpen;
 import 'screens/weight/weight_tab.dart';
+import 'screens/workouts/rest_timer_bar.dart';
+import 'screens/workouts/workouts_tab.dart';
 import 'strings.dart';
 import 'util/units.dart';
 
@@ -61,6 +63,9 @@ class _DaybookAppState extends State<DaybookApp> {
     factory: widget.workerFactory,
   );
 
+  // The rest timer of the running workout lives here, above every screen.
+  late final RestTimer _restTimer = RestTimer(widget.clock);
+
   late final OffClient _off =
       widget.offClient ??
       OffClient.network(userAgent: offUserAgent(appVersion));
@@ -75,6 +80,7 @@ class _DaybookAppState extends State<DaybookApp> {
   @override
   void dispose() {
     unawaited(_parser.dispose());
+    _restTimer.dispose();
     super.dispose();
   }
 
@@ -87,6 +93,7 @@ class _DaybookAppState extends State<DaybookApp> {
       parser: _parser,
       camera: widget.camera,
       off: _off,
+      restTimer: _restTimer,
       child: MaterialApp(
         title: S.title,
         theme: ThemeData(colorSchemeSeed: Colors.teal),
@@ -131,10 +138,15 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   static const _today = 0;
+  static const _workouts = 2;
   static const _weight = 3;
 
   final _home = GlobalKey<HomeScreenState>();
   int _index = _today;
+
+  // The Workouts tab is built the first time it is opened, so the app does not
+  // read workouts and the exercise list at start.
+  var _workoutsOpened = false;
 
   // The home-screen widget shows the latest weigh-in. Listening to the
   // weights and the units here, and rewriting the widget on every change,
@@ -254,7 +266,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               onOpenWeightTab: () => setState(() => _index = _weight),
             ),
             const SizedBox.shrink(),
-            const SizedBox.shrink(),
+            _workoutsOpened
+                ? WorkoutsTab(today: today)
+                : const SizedBox.shrink(),
             WeightTab(today: today),
             const MoreScreen(),
           ],
@@ -265,7 +279,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         onDestinationSelected: (i) {
           // A tab's message does not follow the user to another tab.
           ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          setState(() => _index = i);
+          setState(() {
+            _index = i;
+            if (i == _workouts) _workoutsOpened = true;
+          });
         },
         destinations: const [
           NavigationDestination(
@@ -279,8 +296,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             label: S.tabSummary,
           ),
           NavigationDestination(
-            enabled: false,
             icon: Icon(Icons.fitness_center_outlined),
+            selectedIcon: Icon(Icons.fitness_center),
             label: S.tabWorkouts,
           ),
           NavigationDestination(

@@ -1013,4 +1013,249 @@ class S {
   // Used by the food editor and the barcode lines.
   static const notListed = 'not listed';
   static const offCredit = 'Data from Open Food Facts (ODbL)';
+
+  // Workouts (workout.html and home.html). The weekday words are used by the
+  // Workouts tab too.
+  static String weekdayLong(String localDate) =>
+      _weekdaysLong[parseDate(localDate).weekday - 1];
+
+  static String _cap(String s) =>
+      s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+  /// "Monday's workout" for the last week, else "the workout from Nov 2".
+  static String earlierWorkoutName(String localDate, String today) =>
+      localDate.compareTo(addDays(today, -6)) >= 0
+      ? "${weekdayLong(localDate)}'s workout"
+      : 'the workout from ${monthDay(localDate, today)}';
+
+  static String minutesShort(int minutes) => '$minutes min';
+  static String minutesSeconds(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+  static String repsCount(int n) => n == 1 ? '1 rep' : '$n reps';
+  static const workoutDefaultName = 'Workout';
+  static const bodyWeight = 'Body weight';
+  static const bodyWeightLower = 'body weight';
+
+  /// 'Bench press, overhead press, 2 more'. [show] names are listed; with one
+  /// more than that all are listed, since "1 more" saves nothing.
+  static String exercisesInBrief(List<String> names, int show) {
+    if (names.isEmpty) return 'No exercises';
+    if (names.length <= show + 1) return names.join(', ');
+    return '${names.take(show).join(', ')}, ${names.length - show} more';
+  }
+
+  // The Workouts tab.
+  static const workoutsTitle = 'Workouts';
+  static const exercisesButton = 'Exercises';
+  static const startAgainTitle = 'Start again';
+  static const routinesTitle = 'Routines';
+  static const noRoutines = 'No routines yet.';
+  static const routineNoExercises = 'No exercises yet';
+  static const start = 'Start';
+  static const editRoutine = 'Edit';
+  static const newRoutine = '+ New routine';
+  static const emptyWorkout = 'Empty workout';
+  static String startSpoken(String name, String? when) =>
+      when == null ? 'Start $name' : 'Start $name, $when';
+  static String whenYesterday(String dayShort) => 'Yesterday, $dayShort';
+  static String whenLastWeekday(String weekday, String monthDay) =>
+      'Last $weekday, $monthDay';
+  static String workoutFacts(int exercises, int sets, int? minutes) =>
+      '$exercises ${exercises == 1 ? 'exercise' : 'exercises'}, '
+      '$sets ${sets == 1 ? 'set' : 'sets'}'
+      '${minutes == null ? '' : ', $minutes min'}';
+  static const returnToWorkout = 'Return to workout';
+  static String returnToEarlier(String name) => 'Return to $name';
+  static String workoutRunning(int minutes) => 'Workout running, $minutes min';
+  static String earlierStillRunning(String name) =>
+      '${_cap(name)} is still running.';
+  static const startRefusedToday =
+      'A workout is already running today, so nothing new was started. '
+      'Return to it, or finish it first.';
+  static String finishedEarlier(String name) =>
+      '${_cap(name)} was still running, so it was finished first. '
+      'Nothing was lost.';
+  static const startFailed =
+      'Could not start the workout. Nothing was changed.';
+  static const weeklyTitle = 'This week, sets by muscle';
+  static const weeklyUnavailable =
+      'The exercise list could not be read, so the weekly totals are not '
+      'shown.';
+  static String weeklySets(int n) => n == 1 ? '1 set' : '$n sets';
+  static String weeklySpoken(String group, int n) => '$group, ${weeklySets(n)}';
+
+  /// The word for a volume group, by the group's enum name.
+  static String groupName(String group) => switch (group) {
+    'chest' => 'Chest',
+    'shoulders' => 'Shoulders',
+    'triceps' => 'Triceps',
+    'back' => 'Back',
+    'biceps' => 'Biceps',
+    'quads' => 'Quads',
+    'hamstrings' => 'Hamstrings',
+    'glutes' => 'Glutes',
+    'calves' => 'Calves',
+    'abs' => 'Abs',
+    _ => group,
+  };
+
+  // Home: the workout bar (home.html note 2).
+  static const homeReturn = 'Return';
+
+  // The active workout (workout.html frames 2 to 5).
+  static String workoutStarted(String time, int minutes) =>
+      'Started $time, $minutes min';
+  static const finish = 'Finish';
+  static const workoutLoadFailed =
+      'Could not read this workout. Go back and try again.';
+  static const noExercises = 'No exercises yet.';
+  static const addExercise = '+ Add exercise';
+  static String exerciseMenuSpoken(String name) => 'Menu for $name';
+  static const moveUp = 'Move up';
+  static const moveDown = 'Move down';
+  static const replaceExercise = 'Replace exercise';
+  static const replaceNotAfterLogged =
+      'Not once a set is logged. Add the new exercise instead.';
+  static const removeExercise = 'Remove exercise';
+  static const exerciseDetails = 'Exercise details';
+  static const firstTimeNote = 'First time. Add the weight and reps.';
+  static String lastTime(String date, List<String> sets) =>
+      'Last time ($date): ${sets.join(', ')}';
+  static const addSet = '+ Add set';
+  static const weightCellEmpty = 'Add weight';
+  static const repsCellEmpty = 'Add reps';
+  static const doneWord = 'Done';
+  static String _weightReps(String weightWords, int reps) =>
+      '$weightWords, ${repsCount(reps)}';
+  static String checkSpoken(int n, String weightWords, int reps) =>
+      'Log set $n: ${_weightReps(weightWords, reps)}';
+  static String checkNeedsReps(int n) =>
+      'Set $n needs its reps first. Opens the set.';
+  static String setDoneSpoken(int n, String weightWords, int reps) =>
+      'Set $n done: ${_weightReps(weightWords, reps)}';
+  static String setWeightSpoken(int n, String weightWords) =>
+      'Set $n weight, $weightWords. Tap to change.';
+  static String setRepsSpoken(int n, String? repsWords) =>
+      'Set $n reps, ${repsWords ?? 'not set'}. Tap to change.';
+  static String upNext(int n, String weightWords, int? reps) =>
+      'Up next: set $n, $weightWords'
+      '${reps == null ? '' : ' x $reps'}';
+  static const changedBadge = 'Changed';
+  static String changedFrom(String was) => 'Changed, from $was';
+  static const newRecord = 'New record';
+  static String newRecordWhat({
+    required bool heaviest,
+    required String? estimate,
+    required String unit,
+  }) {
+    final est = estimate == null ? null : 'est. 1-rep max $estimate $unit';
+    if (heaviest && est != null) return 'heaviest, and $est';
+    return heaviest ? 'heaviest' : (est ?? '');
+  }
+
+  // Plain words for a change that was refused.
+  static const needsRepsFirst =
+      'Add the reps first. A set needs its reps before it can be logged.';
+  static const loggedSetNeedsReps = 'A logged set needs at least 1 rep.';
+  static const workoutSaveFailed = 'Could not save that. Nothing was changed.';
+  static const problemAnotherRunning = 'Another workout is already running.';
+  static const problemNotRunning =
+      'This workout is finished, so it cannot be changed.';
+  static const problemNeedsReps =
+      'A set needs its reps before it can be logged.';
+  static const problemBadNumber = 'That is not a number this can use.';
+  static const problemDuplicate = 'That exercise is already in this workout.';
+  static const problemLoggedSets =
+      'Sets of this exercise are already logged. Add the new exercise instead.';
+  static const resumeRefused =
+      'Another workout is running, so this one cannot be resumed. Finish '
+      'the other one first.';
+
+  // The adjust sheet (frame 4).
+  static String setSheetTitle(String name, int n) => '$name, set $n';
+  static String setSheetLast(
+    String weight,
+    String unit,
+    bool bodyWeight,
+    int reps,
+  ) => 'Last time: ${bodyWeight ? bodyWeightLower : '$weight $unit'} x $reps';
+  static const setWeightLabel = 'Weight';
+  static const setRepsLabel = 'Reps';
+  static String setTakeOffWeight(String step, String unit) =>
+      'Take $step $unit off the weight';
+  static String setAddWeight(String step, String unit) =>
+      'Add $step $unit to the weight';
+  static const setTakeOffRep = 'Take 1 rep off';
+  static const setAddRep = 'Add 1 rep';
+  static const setRemove = 'Remove set';
+  static const setSheetDone = 'Done';
+  static const setWeightBad = 'Enter a weight like 175 or 62.5.';
+  static const setRepsBad = 'Enter whole reps, like 8.';
+
+  // The rest timer (frame 3).
+  static String restRunning(String left, String total) =>
+      'Rest $left of $total';
+  static const restDone = 'Rest done';
+  static const restHide = 'Hide';
+  static const restMinus = '-15 s';
+  static const restPlus = '+15 s';
+  static const restSkip = 'Skip';
+  static const restMinusSpoken = 'Take 15 seconds off the rest';
+  static const restPlusSpoken = 'Add 15 seconds to the rest';
+  static const restSkipSpoken = 'Skip the rest';
+
+  // The finish summary (frame 6).
+  static const finishTitle = 'Workout done';
+  static String finishSub(String name, String day) => '$name, $day';
+  static const finishLoadFailed =
+      'Could not read the summary. Your workout is saved.';
+  static const resume = 'Resume';
+  static const finishDone = 'Done';
+  static const finishTime = 'Time';
+  static const finishSets = 'Sets';
+  static const finishVolume = 'Volume';
+  static const finishRecords = 'New personal records';
+  static String recordTitle(
+    String name,
+    String weight,
+    String unit,
+    int reps,
+  ) => '$name, $weight $unit x $reps';
+  static String recordHeaviest(String weight, String unit, String? was) =>
+      'Heaviest weight: $weight $unit${was == null ? '' : ' (was $was $unit)'}';
+  static String recordEstimate(String value, String unit, String? was) =>
+      'Estimated 1-rep max: $value $unit'
+      '${was == null ? '' : ' (was $was $unit)'}';
+  static const finishCalories = 'Calories';
+  static const finishEstimateWord = 'estimate';
+  static const finishOwnWord = 'your number';
+  static String finishEstimateWas(String kcal) => 'The estimate was $kcal.';
+  static String finishBasis(
+    String met,
+    String weight,
+    String unit,
+    String? weighed,
+    int minutes,
+  ) =>
+      'MET $met, $weight $unit'
+      '${weighed == null ? '' : ' (weighed $weighed)'}, $minutes min';
+  static const finishNoEstimate = 'No estimate.';
+  static const finishNoEstimateWhy =
+      'An estimate needs a weigh-in and at least one logged set. You can '
+      'type your own number with Change.';
+  static const finishNoGoals = 'Set your goals to add this to your budget.';
+  static String finishAdded(String day, int percent) => day == 'today'
+      ? "Added to today's budget at $percent%."
+      : 'Added to the budget for $day at $percent%.';
+  static const plannedTitle = 'Planned sets not logged';
+  static const plannedNone = 'None. Every planned set was logged.';
+  static const plannedBadge = 'Not logged';
+  static String plannedNotLogged(int n) =>
+      '$n planned ${n == 1 ? 'set' : 'sets'} not logged, removed';
+  static const kcalTitle = 'Calories for this workout';
+  static const kcalField = 'Calories';
+  static const kcalUnit = 'kcal';
+  static const kcalUseEstimate = 'Use the estimate';
+  static const kcalNegative = 'Calories cannot be below 0.';
+  static const kcalBad = 'Enter a number of calories, like 250.';
 }

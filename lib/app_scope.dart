@@ -11,6 +11,7 @@ import 'data/food_data.dart';
 import 'data/off_client.dart';
 import 'parser/parse_worker.dart';
 import 'platform/barcode.dart';
+import 'screens/workouts/rest_timer_bar.dart';
 import 'parser/user_snapshot_data.dart';
 
 /// Makes a worker for the USDA file at the given path. The app uses
@@ -120,6 +121,7 @@ class AppScope extends InheritedWidget {
     this.parser,
     this.camera = const ZxingCamera(),
     this.off,
+    this.restTimer,
     required super.child,
   });
 
@@ -140,6 +142,11 @@ class AppScope extends InheritedWidget {
   /// never scans (a scan then reports no connection).
   final OffClient? off;
 
+  /// The one rest timer of the running workout, held above every screen so it
+  /// keeps counting when the workout screen is left or the tab is changed.
+  /// Null in a test that builds an AppScope by hand and never logs a set.
+  final RestTimer? restTimer;
+
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
     assert(scope != null, 'No AppScope above this widget');
@@ -153,5 +160,6 @@ class AppScope extends InheritedWidget {
       foodsPath != old.foodsPath ||
       parser != old.parser ||
       camera != old.camera ||
-      off != old.off;
+      off != old.off ||
+      restTimer != old.restTimer;
 }

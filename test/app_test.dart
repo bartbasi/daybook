@@ -17,6 +17,8 @@ import 'package:daybook/screens/more/more_screen.dart';
 import 'package:daybook/screens/my_foods/my_foods_screen.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/screens/weight/weight_tab.dart';
+import 'package:daybook/screens/workouts/workouts_tab.dart';
+import 'package:daybook/data/workout_data.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -153,7 +155,8 @@ void main() {
     expect(tab(tester, 'Today').enabled, isTrue);
     expect(tab(tester, 'Weight').enabled, isTrue);
     expect(tab(tester, 'More').enabled, isTrue);
-    for (final label in ['Summary', 'Workouts']) {
+    expect(tab(tester, 'Workouts').enabled, isTrue);
+    for (final label in ['Summary']) {
       expect(tab(tester, label).enabled, isFalse, reason: label);
       await tester.tap(find.widgetWithText(NavigationDestination, label));
       await tester.pump();
@@ -165,6 +168,60 @@ void main() {
       expect(find.text('Thursday, Nov 12'), findsOneWidget, reason: label);
     }
     expect(find.textContaining('oon'), findsNothing);
+  });
+
+  appTest('Workouts opens its tab, built when first opened, and Today comes '
+      'back', (tester) async {
+    await openApp(tester);
+    expect(find.byType(WorkoutsTab), findsNothing);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Workouts'));
+    await settle(tester);
+    expect(find.byType(WorkoutsTab), findsOneWidget);
+    expect(find.text('Empty workout'), findsOneWidget);
+    expect(find.text('Start again'), findsNothing);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
+    await settle(tester);
+    expect(find.text('Thursday, Nov 12'), findsOneWidget);
+    // The tab keeps its place while it is not shown.
+    expect(find.byType(WorkoutsTab, skipOffstage: false), findsOneWidget);
+  });
+
+  appTest('a workout survives the app being closed: a new app on the same '
+      'database offers Return on Today and on the Workouts tab, with every '
+      'logged set', (tester) async {
+    final now = Now.fromLocal('2026-11-12', 7 * 60 + 2, -360);
+    final id = await tester.runAsync(() async {
+      final r = await db.startEmptyWorkout(now);
+      final id = r.workout!.id;
+      await db.addExercise(id, 'wger:192', 'Bench press', sets: 3);
+      final v = (await db.loadWorkout(id))!;
+      for (final s in v.exercises.first.sets.take(2)) {
+        await db.adjustSet(s.row.id, weightKg: 80, reps: 8);
+        await db.logSet(s.row.id, now);
+      }
+      return id;
+    });
+    await openApp(tester);
+    expect(find.text('Workout running, 0 min'), findsOneWidget);
+
+    // The app is killed.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 10));
+    await openApp(tester);
+    expect(find.text('Workout running, 0 min'), findsOneWidget);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Workouts'));
+    await settle(tester);
+    expect(find.text('Return to workout'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Start'), findsNothing);
+    await tester.tap(find.text('Return to workout'));
+    await settle(tester);
+    expect(find.text('Done'), findsNWidgets(2));
+    final rows = await tester.runAsync(
+      () => (db.select(
+        db.workoutSets,
+      )..where((s) => s.workoutId.equals(id!))).get(),
+    );
+    expect(rows!.where((s) => s.completedAtMs != null), hasLength(2));
   });
 
   appTest('Weight opens its tab and Today comes back', (tester) async {

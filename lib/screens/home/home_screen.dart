@@ -13,6 +13,7 @@ import '../../data/goal_data.dart';
 import '../../data/nutrients.dart';
 import '../../data/settings_data.dart';
 import '../../data/weight_data.dart';
+import '../../data/workout_data.dart';
 import '../../math/calorie_budget.dart';
 import '../../math/weight_trend.dart';
 import '../../strings.dart';
@@ -22,6 +23,8 @@ import '../food/confirm_bar.dart';
 import '../food/food_entry_screen.dart';
 import '../goals/goals_screen.dart';
 import '../weight/weight_sheet.dart';
+import '../workouts/workout_screen.dart';
+import '../workouts/workout_widgets.dart';
 
 /// The Today tab: the date, the meals, the weight row and the bottom action
 /// bar. The budget card and the exercise rows come in later steps.
@@ -52,6 +55,7 @@ class HomeScreenState extends State<HomeScreen> {
   Stream<DayLog>? _day;
   Stream<DayBudget?>? _budget;
   Stream<GoalsForDay?>? _goals;
+  Stream<WorkoutSummary?>? _running;
   String? _dayFor;
 
   // The one message above the action bar, with its Undo. The Undo of a deleted
@@ -74,6 +78,7 @@ class HomeScreenState extends State<HomeScreen> {
       _trend = db.watchTrend();
       _units = db.watchUnits();
       _slots = db.watchMealSlots();
+      _running = db.watchRunningWorkout();
     }
     // The meals follow the day: a new stream when "today" changes.
     if (_dayFor != widget.today) {
@@ -264,7 +269,10 @@ class HomeScreenState extends State<HomeScreen> {
   ) => StreamBuilder<T>(stream: stream, builder: (_, snap) => build(snap));
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      _watch<WorkoutSummary?>(_running, (running) => _body(running.data));
+
+  Widget _body(WorkoutSummary? running) {
     final theme = Theme.of(context);
     return Column(
       children: [
@@ -307,6 +315,12 @@ class HomeScreenState extends State<HomeScreen> {
           ConfirmBar(
             message: _notice!.message(),
             onUndo: _notice!.undo == null ? null : _undo,
+          ),
+        if (running != null)
+          _WorkoutBar(
+            running: running,
+            today: widget.today,
+            onReturn: () => openWorkoutScreen(context, running.workout.id),
           ),
         Material(
           color: theme.colorScheme.surfaceContainer,
@@ -417,6 +431,65 @@ class _Notice {
   final String Function() message;
   final Future<void> Function()? undo;
   final String failed;
+}
+
+/// "Workout running, 23 min. Return" above the three buttons (home.html note
+/// 2), for a workout that is not finished. A workout left from an earlier day
+/// is named by its day. Tapping Return opens the workout; nothing is started.
+class _WorkoutBar extends StatelessWidget {
+  const _WorkoutBar({
+    required this.running,
+    required this.today,
+    required this.onReturn,
+  });
+
+  final WorkoutSummary running;
+  final String today;
+  final VoidCallback onReturn;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = running.workout;
+    final isToday = w.localDate == today;
+    final earlier = S.earlierWorkoutName(w.localDate, today);
+    return Material(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: ContentWidth(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: MinuteTick(
+                  builder: (context) {
+                    final ms =
+                        AppScope.of(context).clock().utcMs - w.startedAtMs;
+                    return Text(
+                      isToday
+                          ? S.workoutRunning(ms <= 0 ? 0 : ms ~/ 60000)
+                          : S.earlierStillRunning(earlier),
+                    );
+                  },
+                ),
+              ),
+              Semantics(
+                container: true,
+                button: true,
+                label: isToday ? S.returnToWorkout : S.returnToEarlier(earlier),
+                excludeSemantics: true,
+                onTap: onReturn,
+                child: TextButton(
+                  style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+                  onPressed: onReturn,
+                  child: const Text(S.homeReturn),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 const _barButton = ButtonStyle(

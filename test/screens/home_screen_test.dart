@@ -15,6 +15,8 @@ import 'package:daybook/strings.dart';
 import 'package:daybook/screens/food/food_entry_screen.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
+import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/screens/weight/weight_sheet.dart';
 import 'package:daybook/screens/weight/weight_tab.dart';
 import 'package:daybook/util/units.dart';
@@ -1038,4 +1040,125 @@ void main() {
     expect(find.text(S.homeBudgetFailed), findsNothing);
     expect(find.text('1,538'), findsOneWidget);
   });
+
+  // The workout bar (task 4.3, home.html note 2) and decision 81.
+
+  Future<int> startWorkout(
+    WidgetTester tester,
+    Now when, {
+    bool logOne = false,
+  }) async {
+    return (await tester.runAsync(() async {
+      final r = await db.startEmptyWorkout(when);
+      final id = r.workout!.id;
+      await db.addExercise(id, 'wger:192', 'Bench press', sets: 2);
+      if (logOne) {
+        final v = (await db.loadWorkout(id))!;
+        await db.adjustSet(v.nextSet!.row.id, weightKg: 80, reps: 8);
+        await db.logSet(v.nextSet!.row.id, when);
+      }
+      return id;
+    }))!;
+  }
+
+  Finder returnButton() => find.widgetWithText(TextButton, 'Return');
+
+  appTest('no workout bar when no workout runs', (tester) async {
+    await openApp(tester);
+    expect(find.textContaining('Workout running'), findsNothing);
+    expect(returnButton(), findsNothing);
+  });
+
+  appTest('a running workout shows "Workout running, N min" and Return '
+      'above the three buttons, and Return opens it', (tester) async {
+    await startWorkout(tester, at('2026-11-12', 6, 39, -360));
+    await openApp(tester);
+    expect(find.text('Workout running, 23 min'), findsOneWidget);
+    final bar = tester.getTopLeft(find.text('Workout running, 23 min')).dy;
+    expect(bar, lessThan(tester.getTopLeft(find.text('+ Food')).dy));
+    expect(tester.getSize(returnButton()).height, greaterThanOrEqualTo(48));
+
+    await tester.tap(returnButton());
+    await settle(tester);
+    expect(find.byType(WorkoutScreen), findsOneWidget);
+    expect(find.text('Bench press'), findsWidgets);
+  });
+
+  appTest('a fast double tap on Return opens one screen', (tester) async {
+    await startWorkout(tester, nowFixed);
+    await openApp(tester);
+    await tester.tap(returnButton());
+    await tester.tap(returnButton(), warnIfMissed: false);
+    await settle(tester);
+    expect(find.byType(WorkoutScreen), findsOneWidget);
+    await tester.pageBack();
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(WorkoutScreen), findsNothing);
+  });
+
+  appTest('a workout left from an earlier day is named by its day, with the '
+      'spoken label too', (tester) async {
+    final handle = tester.ensureSemantics();
+    await startWorkout(tester, at('2026-11-09', 17, 0, -360));
+    await openApp(tester);
+    expect(find.text("Monday's workout is still running."), findsOneWidget);
+    expect(find.bySemanticsLabel("Return to Monday's workout"), findsOneWidget);
+    handle.dispose();
+  });
+
+  appTest('a finished workout has no bar, and the bar follows a new start '
+      'at once', (tester) async {
+    await openApp(tester);
+    expect(returnButton(), findsNothing);
+    await startWorkout(tester, nowFixed);
+    await settle(tester);
+    expect(returnButton(), findsOneWidget);
+    await tester.runAsync(() async {
+      final running = await db.runningWorkout();
+      await db.finishWorkout(running!.workout.id, nowFixed);
+    });
+    await settle(tester);
+    expect(returnButton(), findsNothing);
+  });
+
+  appTest('a running workout adds nothing to the budget, with logged sets '
+      'and even with the user\'s own calorie number (decision 81)', (
+    tester,
+  ) async {
+    await tester.runAsync(
+      () => db.saveGoals(
+        const GoalInput(
+          activity: ActivityLevel.sedentary,
+          rate: WeeklyRate.stay,
+          ownCalories: 2000,
+        ),
+        nowFixed,
+      ),
+    );
+    final id = await startWorkout(tester, nowFixed, logOne: true);
+    await tester.runAsync(() => db.setWorkoutKcal(id, 500));
+    await openApp(tester);
+    expect(find.text('Workout running, 0 min'), findsOneWidget);
+    expect(find.text('Goal 2,000 + exercise 0 - food 0'), findsOneWidget);
+    expect(find.text('2,000'), findsOneWidget);
+
+    // Finished, the user's number counts.
+    await tester.runAsync(() => db.finishWorkout(id, nowFixed));
+    await settle(tester);
+    expect(find.text('Goal 2,000 + exercise 500 - food 0'), findsOneWidget);
+  });
+
+  for (final size in [const Size(344, 700), const Size(673, 700)]) {
+    appTest('the workout bar at ${size.width.round()} dp and text scale 2 '
+        'does not overflow and Return stays 48 dp', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await startWorkout(tester, at('2026-11-09', 17, 0, -360));
+      await openApp(tester, size: size);
+      final s = tester.getSize(returnButton());
+      expect(s.height, greaterThanOrEqualTo(48));
+      expect(s.width, greaterThanOrEqualTo(48));
+    });
+  }
 }
