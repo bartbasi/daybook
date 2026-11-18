@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens are built and committed on this computer only (3a16ba5), reviewed by reading, with changes needed. See "Workout screens: where they stand" below |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. Next: the routine editor, the exercise picker, exercise detail and the weekly volume screen |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -112,6 +112,10 @@ Each is the recommended option from the plan's open questions, or a small call m
 80. **Weekly volume counts sets in ten muscle groups**: chest, shoulders, triceps, back, biceps, quads, hamstrings, glutes, calves and abs. The wireframe shows eight; glutes and abs are added so those sets are counted. The grouping is Daybook's own: lats and trapezius count as back, brachialis as biceps, soleus as calves, the obliques as abs, serratus anterior as chest. An exercise with no muscles on record uses its wger category when that names one group; 94 exercises have neither (their category is Legs, Arms or Cardio) and their sets count toward no group.
 81. **A workout still running adds nothing to the day's budget**, also when you have typed your own calorie number on it. It counts once it is finished.
 82. **Starting a workout while one from an earlier day is still running finishes the old one first.** Its time still ends at its last logged set, so a forgotten Finish costs nothing. Without this, Thursday's sets would be logged into Monday's workout and Monday would get days of calories. A workout from earlier today still blocks a new start; "Return to workout" continues it. One edge: someone training across midnight who taps Start by mistake finds the earlier workout finished. Its logged sets are kept, but its planned sets that were not logged are dropped, and there is no way to continue it. An earlier version of this note said Resume brings it back; the reviewer showed that is wrong. Say if you would rather be asked first, or want a way to take the start back.
+83. **Removing a set or an exercise from a running workout offers Undo.** The frames show no Undo there, but the plan's rule is that every delete offers one, and a single stray tap could wipe logged sets. Undo puts the same sets back in their old place. It is refused in plain words if the workout was finished in between or the same exercise was added again.
+84. **"Empty workout" stays hidden until the exercise picker exists** (the next task), because until then it would start a workout nothing can be added to.
+85. **On the finish screen, Change then Save without typing keeps the estimate.** Before a review fix it stored the estimate as "your number", which then stayed frozen if you resumed and logged more.
+86. **A workout left running from an earlier day shows "Started Mon 5:00 pm"** on its screen, with no running minute count.
 
 ## Open questions from the plan: answered
 
@@ -198,18 +202,6 @@ Two more behaviors to know about:
 
 - **A workout continued days after it started counts the whole span.** Time and calories run from the start to the last logged set, and the database has no place for breaks. Resume is offered only right after Finish, so this takes leaving a workout open for days and then logging another set. Typing your own calorie number, or deleting the workout, fixes it.
 
-## Workout screens: where they stand
-
-The workout screens (the Workouts tab, the running workout, the set sheet, the rest timer, the finish summary and Home's way back to a workout) are in commit 3a16ba5 on this computer. They are not pushed.
-
-- **Not checked by the lead's own test run.** The implementer reported 3,253 tests passing. The lead's run was stopped by the computer for lack of memory before the tests finished, and was not started again.
-- **Reviewed by reading only.** The reviewer ran nothing, for the same reason. Verdict: changes needed.
-- **Two findings block the merge.** Removing a set or an exercise from a running workout cannot be undone, which breaks the rule that deletes offer Undo. And the running workout screen ignores the phone's bottom bar, so the rest timer's buttons can sit under it.
-- **Smaller findings to fix.** The message after an old workout is finished by a new start says "Nothing was lost", which is not true of planned sets. Tapping Change then Save on the finish screen without typing turns the estimate into "your number". The rest timer of a workout that ended elsewhere keeps running and can buzz later. "Empty workout" starts a workout that cannot hold anything until the exercise picker exists.
-- **To check on the phone later.** Whether the buzz at the end of a rest is strong enough, and whether it works with touch vibration turned off.
-
-None of these is fixed yet. Each fix needs test runs.
-
 ## Not finished
 
 - MyFitnessPal import: skipped by Bart's decision in Phase 1.
@@ -249,6 +241,10 @@ Barcode scanning (step 2), on the Z Fold 5. None of this has run on a real camer
 - Fold and unfold while the camera is open.
 - Type a not found food, tap its line, and use "Scan its barcode" there.
 - On the cover screen with the largest font size and the keyboard up, scan something in airplane mode: the message should be readable in full or scroll with a visible scrollbar, the text box and Save should stay in view, and the totals should come back when the message goes.
+
+Workouts (step 4, what is built so far), on the Z Fold 5. There is no way to make a routine or add an exercise yet, so this waits for the next build:
+- At the end of a rest the phone should buzz once. Tell me if the buzz is too weak to notice with the phone on a bench, and whether it still comes with touch vibration turned off in the phone's settings.
+- On the running workout screen, the rest timer's buttons and the last "+ Add set" should sit clear of the phone's bottom bar, with button navigation and with gestures.
 
 Weight (step 1), on the iPhone, once there is a signed build (see docs/ios-widget.md for the Apple Developer steps):
 - The widget appears in the widget gallery, in the small and medium sizes.
