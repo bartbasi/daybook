@@ -31,6 +31,20 @@ import 'weight_flow.dart' show appDatabase, waitFor;
 
 late AppDatabase _db;
 
+// The height of the on-screen keyboard to simulate while a text field has the
+// cursor. Zero on a device, where the real keyboard comes up by itself.
+var _keyboardHeight = 0.0;
+
+Future<void> _keyboard(WidgetTester tester, {required bool up}) async {
+  if (_keyboardHeight == 0) return;
+  if (up) {
+    tester.view.viewInsets = FakeViewPadding(bottom: _keyboardHeight);
+  } else {
+    tester.view.resetViewInsets();
+  }
+  await tester.pump(const Duration(milliseconds: 100));
+}
+
 const _routineName = 'Flow test routine';
 
 // Two exercises that are in assets/exercises/wger_exercises.json.
@@ -67,9 +81,18 @@ Future<void> _waitUntilGone(WidgetTester tester, Finder f, String what) async {
 }
 
 /// One counted tap on something that may be below the fold of a small phone.
+/// With a keyboard up on a small screen, the list also scrolls by itself (the
+/// field with the cursor is brought back into view), and a list ignores
+/// touches while it scrolls like that. A person would tap again a moment
+/// later, so this waits until a touch at the target would reach it.
 Future<void> _tap(WidgetTester tester, TapCounter taps, Finder f) async {
-  await tester.ensureVisible(f);
-  await tester.pump();
+  for (var i = 0; i < 20; i++) {
+    await tester.ensureVisible(f);
+    await tester.pump(const Duration(milliseconds: 100));
+    final target = tester.renderObject(f);
+    final hit = tester.hitTestOnBinding(tester.getCenter(f));
+    if (hit.path.any((e) => identical(e.target, target))) break;
+  }
   await taps.tap(f);
   await tester.pump(const Duration(milliseconds: 100));
 }
@@ -141,13 +164,26 @@ Future<void> _finishAndClose(WidgetTester tester, TapCounter taps) async {
     find.byType(WorkoutScreen),
     'the workout screen to close',
   );
+  // The tab is as it was left: scrolled down to the routine's Start on a small
+  // screen, with "Start again" above and not built. A person swipes down.
+  final list = find.byType(ListView).first;
+  for (var i = 0; i < 5; i++) {
+    if (find.text(S.startAgainTitle).evaluate().isNotEmpty) break;
+    await taps.swipe(list, const Offset(0, 400));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
   await _waitForWidget(tester, find.text(S.startAgainTitle), 'Start again');
 }
 
 /// Speed targets 4 and 5, then a short check of the whole path from a new
 /// routine to "Start again". Never looks at a date. At the end it deletes the
 /// workouts and the routine it made, and goes back to Home.
-Future<void> runWorkoutFlow(WidgetTester tester) async {
+///
+/// [keyboard] is for a run without a device: the height (dp) of a keyboard to
+/// show while a text field has the cursor, as a phone does. On a device leave
+/// it at zero.
+Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
+  _keyboardHeight = keyboard;
   final db = appDatabase(tester);
   // The screens that are pushed over Home hide it from a finder, so the
   // helpers use this handle, taken while Home is on screen.
@@ -172,6 +208,7 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     final name = find.widgetWithText(TextField, S.routineNameLabel);
     await _waitForWidget(tester, name, 'the routine editor');
     await taps.tap(name);
+    await _keyboard(tester, up: true);
     await tester.pump();
     await taps.type(name, _routineName);
 
@@ -201,8 +238,9 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
       'the picker to close',
     );
 
-    // Save.
+    // Save. The editor's name field has the cursor again.
     await _tap(tester, taps, find.widgetWithText(FilledButton, S.routineSave));
+    await _keyboard(tester, up: false);
     late int routineId;
     await _until(tester, () async {
       final found = [
@@ -246,6 +284,7 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
       final reps = find.widgetWithText(TextField, S.setRepsLabel);
       await _waitForWidget(tester, reps, 'the set sheet');
       await taps.tap(reps);
+      await _keyboard(tester, up: true);
       await tester.pump();
       await taps.type(reps, '8');
       final weight = find.widgetWithText(TextField, S.setWeightLabel);
@@ -258,6 +297,7 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
         find.widgetWithText(FilledButton, S.setSheetDone),
       );
       await _waitUntilGone(tester, reps, 'the set sheet to close');
+      await _keyboard(tester, up: false);
     }
     // Log it.
     await _tap(tester, taps, find.byKey(ValueKey('check-${firstSet.id}')));
@@ -324,6 +364,7 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
       'the second workout under Start again',
     );
   } finally {
+    await _keyboard(tester, up: false);
     // CI removes the app after each entry file. This is for a phone or a
     // simulator that is kept: what the flow added is taken out. Each delete
     // is one statement, with frames in between, because the screens reload

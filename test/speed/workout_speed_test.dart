@@ -393,4 +393,24 @@ void main() {
     await runWorkoutFlow(tester);
     expect(h.permissionCalls, isEmpty);
   });
+
+  // The emulator is a small phone, and a phone shows a keyboard while a field
+  // has the cursor. The list in the routine editor then scrolls by itself and
+  // ignores touches while it does, which is how the first emulator run missed
+  // "+ Add exercise". The 320 x 480 size has no keyboard: with one there is no
+  // room left for the list.
+  for (final (size, keyboard) in [
+    (const Size(320, 568), 260.0),
+    (const Size(360, 640), 260.0),
+    (const Size(320, 480), 0.0),
+  ]) {
+    h.appTest('the device flow runs on a ${size.width.toInt()} x '
+        '${size.height.toInt()} phone, keyboard ${keyboard.toInt()}', (
+      tester,
+    ) async {
+      await h.openApp(tester, size: size);
+      await runWorkoutFlow(tester, keyboard: keyboard);
+      expect(h.permissionCalls, isEmpty);
+    });
+  }
 }
