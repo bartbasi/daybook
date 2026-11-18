@@ -139,7 +139,9 @@ Changed in Phase 4, for the owner to confirm at the gate: the approved text belo
 About screen text:
 > Exercise data from the wger project (https://wger.de), by wger.de contributors, licensed under Creative Commons (CC BY-SA 4.0, CC BY-SA 3.0 and CC0; see each exercise for author and license). Descriptions were changed from HTML to plain text.
 
-Each exercise detail screen also shows its own author and license, for example "Text by wger.de contributor, CC BY-SA 4.0" with a link to the exercise on wger.de. The data file keeps wger's own license names ("CC-BY-SA 4", "CC-BY-SA 3", "CC0") and the license URL; the screen shows the license by its usual name ("CC BY-SA 4.0", "CC BY-SA 3.0", "CC0 1.0"), linked to that URL. Two authors read "A and B"; three or more read "A, B, and C".
+Each exercise detail screen also shows its own author and license, for example "Text by wger.de contributor, CC BY-SA 4.0." Under it are two lines: "License:" with the license's web address, and "Source:" with the address of the exercise on wger.de. The data file keeps wger's own license names ("CC-BY-SA 4", "CC-BY-SA 3", "CC0") and the license URL; the screen shows the license by its usual name ("CC BY-SA 4.0", "CC BY-SA 3.0", "CC0 1.0").
+
+Changed in Phase 4, for the owner to confirm at the gate: the two addresses are shown as plain text that can be selected and copied. They become links that open in the browser when the About screen is built (task 8.3), which is when the app gets its link opener. The licenses accept a written address in place of a link. The app must not be released before the About screen carries the sentence "Descriptions were changed from HTML to plain text.", because the licenses ask us to say the text was changed. Two authors read "A and B"; three or more read "A, B, and C".
 
 ### Other exercise lists checked
 

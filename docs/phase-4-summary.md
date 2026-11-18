@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. Next: the routine editor, the exercise picker, exercise detail and the weekly volume screen |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. Next: the alert when a rest ends, then the workout speed tests |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -116,6 +116,14 @@ Each is the recommended option from the plan's open questions, or a small call m
 84. **"Empty workout" stays hidden until the exercise picker exists** (the next task), because until then it would start a workout nothing can be added to.
 85. **On the finish screen, Change then Save without typing keeps the estimate.** Before a review fix it stored the estimate as "your number", which then stayed frozen if you resumed and logged more.
 86. **A workout left running from an earlier day shows "Started Mon 5:00 pm"** on its screen, with no running minute count.
+87. **Leaving the routine editor with unsaved changes takes two Backs.** The first Back keeps the editor open and says "Your changes are not saved. Tap Save, or go back again to leave without them." The second leaves. There is no popup. If you change something more after the warning, the next Back warns again. The saved meal and food editors do not guard Back at all today; say if they should follow this.
+88. **Each wger credit shows two addresses as plain text: the license and the exercise's page on wger.de.** Your 2026-11-08 decision asked for a link. The app cannot open links until the About screen is built (step 8), so for now the addresses can be selected and copied, and they become links then. The reviewer read both Creative Commons licenses as accepting a written address.
+89. **An exercise of your own cannot have the same name as one already in the list.** Case, accents and extra spaces are ignored, so "bénch  press" is refused beside "Bench Press". Your own exercises cannot be edited or deleted yet; no frame shows that.
+90. **"Create as your own exercise" appears only once something is typed in the picker**, as the frame shows. Tapping a row in the picker opens the exercise's detail; Add is its own button.
+91. **The new exercise form lists muscles by wger's names**, and a few are Latin ("Obliquus externus abdominis", "Serratus anterior"). Say if you want plain names there.
+92. **The weekly volume screen leaves out the frame's last line** ("This week so far: Pull A (Mon), Legs (Wed), Push A (Thu)."). It needs a new read of the week's workouts. Say if you want it.
+93. **A routine can be saved with no exercises.** The tab then says it has none.
+94. **A rest of 0 in a routine reads "3 sets, no rest".** Sets go from 1 to 30 and rest from none to 10:00, in steps of 15 seconds.
 
 ## Open questions from the plan: answered
 
@@ -242,7 +250,11 @@ Barcode scanning (step 2), on the Z Fold 5. None of this has run on a real camer
 - Type a not found food, tap its line, and use "Scan its barcode" there.
 - On the cover screen with the largest font size and the keyboard up, scan something in airplane mode: the message should be readable in full or scroll with a visible scrollbar, the text box and Save should stay in view, and the totals should come back when the message goes.
 
-Workouts (step 4, what is built so far), on the Z Fold 5. There is no way to make a routine or add an exercise yet, so this waits for the next build:
+Workouts (step 4, what is built so far), on the Z Fold 5:
+- Make a routine: Workouts, + New routine, name it, + Add exercise, add three or four, Save. Drag one exercise to a new place and save again.
+- Start the routine, log a few sets with one tap each, and finish. The next day, "Start again" should offer it with the same numbers.
+- In the picker, type a name that is not there and create your own exercise. On the cover screen with the largest font size, the muscle names should wrap and none should be cut off.
+- Open an exercise's detail. Under "About this exercise" the credit, the license address and the wger.de address should all be readable, and you should be able to select and copy the addresses.
 - At the end of a rest the phone should buzz once. Tell me if the buzz is too weak to notice with the phone on a bench, and whether it still comes with touch vibration turned off in the phone's settings.
 - On the running workout screen, the rest timer's buttons and the last "+ Add set" should sit clear of the phone's bottom bar, with button navigation and with gestures.
 
