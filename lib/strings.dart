@@ -1414,4 +1414,12 @@ class S {
 
   static const moreExercises = 'Exercises';
   static const moreExercisesSub = 'The exercise list and your own exercises';
+
+  // The alert when a rest ends (task 4.5).
+  static const restAlertChannel = 'Rest timer';
+  static const restAlertOff = 'Alert me when rest ends';
+  static const restAlertOn = 'Alert on when rest ends. Tap to turn off.';
+  static const restAlertRefused =
+      'Notifications are turned off for Daybook. To get the alert, turn them '
+      'on in your phone settings, under Notifications.';
 }

@@ -156,15 +156,28 @@ class _RoutineEditorState extends State<RoutineEditor> {
     });
   }
 
-  Future<void> _addExercises() => openExercisePicker(
-    context,
-    alreadyIn: {for (final e in _entries) e.ref},
-    onPick: (ref, name) async {
-      if (_entries.any((e) => e.ref == ref)) return S.problemDuplicateRoutine;
-      setState(() => _entries.add(_Entry(ref, name)));
-      return null;
-    },
-  );
+  // A second tap before the first picker is up must not push another.
+  var _picking = false;
+
+  Future<void> _addExercises() async {
+    if (_picking) return;
+    _picking = true;
+    try {
+      await openExercisePicker(
+        context,
+        alreadyIn: {for (final e in _entries) e.ref},
+        onPick: (ref, name) async {
+          if (_entries.any((e) => e.ref == ref)) {
+            return S.problemDuplicateRoutine;
+          }
+          setState(() => _entries.add(_Entry(ref, name)));
+          return null;
+        },
+      );
+    } finally {
+      _picking = false;
+    }
+  }
 
   Future<void> _replace(int index) {
     final old = _entries[index];

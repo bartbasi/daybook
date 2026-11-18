@@ -5,6 +5,7 @@ import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/screens/workouts/exercise_picker.dart';
 import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/util/units.dart';
 import 'package:flutter/material.dart';
@@ -393,6 +394,12 @@ void main() {
     );
     add.onPressed!();
     add.onPressed!();
+    await tester.pump();
+    expect(
+      find.byType(ExercisePickerScreen, skipOffstage: false),
+      findsOneWidget,
+      reason: 'the guard, not the slide timing, keeps it to one picker',
+    );
     await settle(tester);
     expect(find.widgetWithText(TextField, 'Search exercises'), findsOneWidget);
     // The slide in has to finish before Back is tapped.

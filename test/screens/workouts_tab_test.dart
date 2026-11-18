@@ -5,6 +5,8 @@ import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/screens/workouts/exercise_picker.dart';
+import 'package:daybook/screens/workouts/weekly_volume_screen.dart';
 import 'package:daybook/screens/workouts/workouts_tab.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -184,6 +186,12 @@ void main() {
     );
     card.onTap!();
     card.onTap!();
+    await tester.pump();
+    expect(
+      find.byType(WeeklyVolumeScreen, skipOffstage: false),
+      findsOneWidget,
+      reason: 'the guard, not the slide timing, keeps it to one screen',
+    );
     await waitFor(tester, find.text('Sets by muscle'));
     expect(find.text('Sets by muscle'), findsOneWidget);
     await h.back(tester);
@@ -198,6 +206,12 @@ void main() {
     );
     button.onPressed!();
     button.onPressed!();
+    await tester.pump();
+    expect(
+      find.byType(ExercisePickerScreen, skipOffstage: false),
+      findsOneWidget,
+      reason: 'the guard, not the slide timing, keeps it to one screen',
+    );
     await waitFor(tester, find.text('Search exercises'));
     expect(find.text('Search exercises'), findsOneWidget);
     await h.back(tester);

@@ -18,6 +18,14 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- The "Rest done" alert (task 4.5). POST_NOTIFICATIONS is asked for only
+         when the user taps "Alert me when rest ends". The alert is scheduled
+         inexactly, so no exact alarm permission is declared, and it does not
+         come back after a reboot, so RECEIVE_BOOT_COMPLETED (removed above)
+         and the plugin's boot receiver are left out. The plugin also declares
+         VIBRATE, which a notification does not need: the channel handles it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE" tools:node="remove"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.any" android:required="false" tools:node="replace"/>
@@ -66,6 +74,11 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/weight_widget_info"/>
         </receiver>
+        <!-- Shows the scheduled "Rest done" notification (the plugin's README
+             asks for it). -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
         <!-- image_picker adds this service so that Google Play services can
              install a photo picker. Daybook never picks photos. -->
         <service

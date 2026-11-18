@@ -13,6 +13,7 @@ import 'data/off_client.dart';
 import 'data/settings_data.dart';
 import 'data/weight_data.dart';
 import 'platform/barcode.dart';
+import 'platform/rest_alert.dart';
 import 'platform/weight_widget.dart';
 import 'screens/food/food_entry_screen.dart' show FoodEntryScreenState;
 import 'screens/home/home_screen.dart';
@@ -33,6 +34,7 @@ class DaybookApp extends StatefulWidget {
     this.workerFactory,
     this.camera = const ZxingCamera(),
     this.offClient,
+    this.restAlert = const LocalRestAlert(),
   });
 
   final AppDatabase db;
@@ -52,6 +54,9 @@ class DaybookApp extends StatefulWidget {
   /// passes one over a mock HTTP client.
   final OffClient? offClient;
 
+  /// The "Rest done" notification. A test passes a fake.
+  final RestAlert restAlert;
+
   @override
   State<DaybookApp> createState() => _DaybookAppState();
 }
@@ -64,7 +69,11 @@ class _DaybookAppState extends State<DaybookApp> {
   );
 
   // The rest timer of the running workout lives here, above every screen.
-  late final RestTimer _restTimer = RestTimer(widget.clock);
+  late final RestTimer _restTimer = RestTimer(
+    widget.clock,
+    alert: widget.restAlert,
+    db: widget.db,
+  );
 
   late final OffClient _off =
       widget.offClient ??

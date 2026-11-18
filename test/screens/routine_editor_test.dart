@@ -3,6 +3,7 @@
 
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
+import 'package:daybook/screens/workouts/exercise_picker.dart';
 import 'package:daybook/screens/workouts/routine_editor.dart';
 import 'package:daybook/data/exercise_library.dart';
 import 'package:daybook/data/database.dart';
@@ -462,6 +463,22 @@ void main() {
     final saved = (await h.real(tester, () => h.db.listRoutines())).single;
     expect(saved.exercises.single.exerciseName, 'Zq press');
     expect(saved.exercises.single.exerciseRef, startsWith('local:'));
+  });
+
+  h.appTest('a double tap on + Add exercise opens one picker', (tester) async {
+    await h.seedSample(tester);
+    await openEditorOfPush(tester);
+    final add = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '+ Add exercise'),
+    );
+    // Two presses before the next frame, as two quick taps would be.
+    add.onPressed!();
+    add.onPressed!();
+    await tester.pump();
+    expect(
+      find.byType(ExercisePickerScreen, skipOffstage: false),
+      findsOneWidget,
+    );
   });
 
   h.appTest('a Save the database refuses says so and keeps the editor and '

@@ -8,6 +8,9 @@ import 'package:flutter/services.dart';
 
 import '../../app.dart';
 import '../../clock.dart';
+import '../../data/database.dart';
+import '../../data/settings_data.dart';
+import '../../platform/rest_alert.dart';
 import '../../strings.dart';
 
 /// Seconds of rest when the routine gives none, and for an exercise added
@@ -22,13 +25,23 @@ const restStepSeconds = 15;
 /// tab is changed. It is driven by the app's clock, not by the length of a
 /// timer tick, so a test can move time. It is not kept if the app is closed.
 ///
-/// It makes no notification and asks for no permission. At zero it vibrates
-/// once with Flutter's own haptic call (task 4.5 adds the alert when the app
-/// is in the background).
+/// It asks for no permission by itself. At zero it vibrates once with
+/// Flutter's own haptic call. The "Rest done" notification for when the app is
+/// in the background is off until the user taps "Alert me when rest ends" in
+/// the bar ([toggleAlert]); with it off, [alert] is never called.
 class RestTimer extends ChangeNotifier {
-  RestTimer(this._clock);
+  RestTimer(this._clock, {this.alert = const LocalRestAlert(), this.db}) {
+    _loadSetting();
+  }
 
   final Clock _clock;
+  final RestAlert alert;
+
+  /// Where the "alert me" setting is kept. Null in a test that never taps it.
+  final AppDatabase? db;
+  bool _alertOn = false;
+  bool _asking = false;
+  bool _refused = false;
   int? _workoutId;
   int _endMs = 0;
   int _totalMs = 0;
@@ -53,10 +66,65 @@ class RestTimer extends ChangeNotifier {
     return left < 0 ? 0 : left;
   }
 
+  /// True when the user has the "Rest done" alert on.
+  bool get alertOn => _alertOn;
+
+  /// True after the phone refused notifications to the last tap on the row.
+  bool get alertRefused => _refused;
+
+  Future<void> _loadSetting() async {
+    try {
+      final on = await db?.getRestAlert() ?? false;
+      if (on == _alertOn) return;
+      _alertOn = on;
+      notifyListeners();
+    } catch (_) {
+      // No setting read means the alert stays off.
+    }
+  }
+
+  /// The row in the bar. Off to on: asks the phone for permission (this is
+  /// the only place it is asked), keeps the setting and schedules the alert
+  /// for this rest. On to off: keeps the setting and cancels the alert.
+  Future<void> toggleAlert() async {
+    if (_asking) return;
+    if (_alertOn) {
+      _alertOn = false;
+      notifyListeners();
+      unawaited(alert.cancel());
+      await _saveSetting(false);
+      return;
+    }
+    _asking = true;
+    final granted = await alert.requestPermission();
+    _asking = false;
+    _refused = !granted;
+    if (!granted) {
+      notifyListeners();
+      return;
+    }
+    _alertOn = true;
+    if (isActive && !_over) unawaited(alert.schedule(_endMs));
+    notifyListeners();
+    await _saveSetting(true);
+  }
+
+  Future<void> _saveSetting(bool on) async {
+    try {
+      await db?.setRestAlert(on);
+    } catch (_) {
+      // It then holds until the app is closed.
+    }
+  }
+
   /// Starts a rest of [seconds], replacing any that is running. A rest of zero
   /// or less means no rest: nothing starts and an old rest is dropped.
   void start(int workoutId, int seconds) {
+    final was = isActive;
     _stop();
+    _refused = false;
+    // The old rest's alert goes first, which also removes one that showed.
+    if (was && _alertOn) unawaited(alert.cancel());
     if (seconds <= 0) {
       notifyListeners();
       return;
@@ -66,6 +134,7 @@ class RestTimer extends ChangeNotifier {
     _endMs = _clock().utcMs + _totalMs;
     _over = false;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    if (_alertOn) unawaited(alert.schedule(_endMs));
     notifyListeners();
   }
 
@@ -79,22 +148,31 @@ class RestTimer extends ChangeNotifier {
       _ticker?.cancel();
       _ticker = null;
       _over = true;
+      if (_alertOn) unawaited(alert.cancel());
     } else {
       _endMs = end;
       _totalMs += seconds * 1000;
       if (_totalMs < end - now) _totalMs = end - now;
+      if (_alertOn) unawaited(alert.schedule(_endMs));
     }
     notifyListeners();
   }
 
-  /// Hides the timer (Skip, or Hide once the rest is over).
+  /// Hides the timer (Skip, or Hide once the rest is over) and cancels the
+  /// alert, which also removes a "Rest done" that already showed.
+  ///
+  /// Import (task 8.2) replaces every workout: it must end the rest through
+  /// this (or [clearFor]) so the pending alert is cancelled too.
   void skip() {
     final was = isActive;
     _stop();
+    if (was && _alertOn) unawaited(alert.cancel());
     if (was) notifyListeners();
   }
 
-  /// Hides the timer when it belongs to [workoutId].
+  /// Hides the timer when it belongs to [workoutId]. Finish, a workout deleted
+  /// or finished elsewhere, and (in task 8.2) an import all come through here
+  /// or [skip], so each cancels the alert.
   void clearFor(int workoutId) {
     if (_workoutId == workoutId) skip();
   }
@@ -115,10 +193,19 @@ class RestTimer extends ChangeNotifier {
     _ticker?.cancel();
     _ticker = null;
     _over = true;
+    // With the app in front the buzz has done the job, so the alert goes. In
+    // the background (the timer can still tick for a while) it must stay: it
+    // is the only thing that tells the user.
+    if (_alertOn && _inFront) unawaited(alert.cancel());
     // Flutter's own haptic call: no package and no permission. A phone with
     // no vibration motor answers with an error, which is not worth a message.
     unawaited(HapticFeedback.vibrate().catchError((Object _) {}));
     notifyListeners();
+  }
+
+  bool get _inFront {
+    final state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
   }
 
   @override
@@ -251,6 +338,29 @@ class RestTimerBar extends StatelessWidget {
                         ),
                       ],
                     ),
+                  if (!over) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        style: const ButtonStyle(
+                          minimumSize: WidgetStatePropertyAll(Size(48, 48)),
+                          alignment: Alignment.centerLeft,
+                        ),
+                        onPressed: timer.toggleAlert,
+                        child: Text(
+                          timer.alertOn ? S.restAlertOn : S.restAlertOff,
+                        ),
+                      ),
+                    ),
+                    if (timer.alertRefused)
+                      Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          S.restAlertRefused,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),

@@ -8,11 +8,13 @@ import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/exercise_library.dart';
 import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/platform/rest_alert.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // What the workout screen tests share (task 4.3): an in memory database, a
@@ -100,8 +102,48 @@ const permissionChannels = [
   'permission_handler',
 ];
 
+/// A rest alert that records what it is asked, for the rest timer tests.
+class FakeRestAlert extends RestAlert {
+  FakeRestAlert({this.grant = true});
+
+  /// What the user answers when asked for permission.
+  bool grant;
+
+  /// `request`, `schedule:` plus the UTC ms, and `cancel`, in order.
+  final calls = <String>[];
+
+  /// The times of the schedule calls, in order.
+  List<int> get scheduled => [
+    for (final c in calls)
+      if (c.startsWith('schedule:')) int.parse(c.substring(9)),
+  ];
+
+  @override
+  Future<bool> requestPermission() async {
+    calls.add('request');
+    return grant;
+  }
+
+  @override
+  Future<void> schedule(int endUtcMs) async => calls.add('schedule:$endUtcMs');
+
+  @override
+  Future<void> cancel() async => calls.add('cancel');
+}
+
 class WorkoutHarness {
-  late AppDatabase db;
+  AppDatabase? _db;
+
+  AppDatabase get db => _db!;
+
+  /// A test may put its own database in place of the one setUp opened. The
+  /// first is closed then, so it does not stay open in memory.
+  set db(AppDatabase value) {
+    final old = _db;
+    _db = value;
+    if (old != null && !identical(old, value)) unawaited(old.close());
+  }
+
   late Now now;
 
   /// Every method called on the platform channel (haptics, system calls).
@@ -116,7 +158,8 @@ class WorkoutHarness {
   void register() {
     driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
     setUp(() {
-      db = AppDatabase(NativeDatabase.memory());
+      // Not through the setter: the last test's database is closed already.
+      _db = AppDatabase(NativeDatabase.memory());
       now = at('2026-11-12', 17, 29);
       platformCalls.clear();
       permissionCalls.clear();
@@ -128,6 +171,9 @@ class WorkoutHarness {
   void appTest(String name, Future<void> Function(WidgetTester) body) {
     testWidgets(name, (tester) async {
       final messenger = tester.binding.defaultBinaryMessenger;
+      // In a test the notification plugin has not registered itself. With it
+      // registered, a real call to it shows up in [permissionCalls].
+      AndroidFlutterLocalNotificationsPlugin.registerWith();
       for (final c in ['home_widget', 'home_widget/updates']) {
         messenger.setMockMethodCallHandler(MethodChannel(c), (_) async => null);
       }
@@ -163,6 +209,7 @@ class WorkoutHarness {
     WidgetTester tester, {
     Size size = const Size(400, 800),
     double textScale = 1,
+    RestAlert? alert,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -174,7 +221,12 @@ class WorkoutHarness {
     // waiting for a later one.
     await tester.runAsync(() => ExerciseLibrary.load());
     await tester.pumpWidget(
-      DaybookApp(db: db, clock: () => now, foodsPath: Future.value('')),
+      DaybookApp(
+        db: db,
+        clock: () => now,
+        foodsPath: Future.value(''),
+        restAlert: alert ?? const LocalRestAlert(),
+      ),
     );
     await settle(tester);
   }

@@ -25,4 +25,17 @@ extension SettingsData on AppDatabase {
       into(settings).insertOnConflictUpdate(
         SettingsCompanion.insert(key: 'units', value: units.name),
       );
+
+  /// Whether the user asked to be alerted when a rest ends. Off if the row is
+  /// missing.
+  Future<bool> getRestAlert() async {
+    final row = await (select(
+      settings,
+    )..where((s) => s.key.equals('rest_alert'))).getSingleOrNull();
+    return row?.value == 'on';
+  }
+
+  Future<void> setRestAlert(bool on) => into(settings).insertOnConflictUpdate(
+    SettingsCompanion.insert(key: 'rest_alert', value: on ? 'on' : 'off'),
+  );
 }
