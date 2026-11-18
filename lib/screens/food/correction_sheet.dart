@@ -9,6 +9,7 @@ import '../../parser/parse_session.dart';
 import '../../parser/parse_worker.dart';
 import '../../strings.dart';
 import 'food_entry_screen.dart';
+import '../../util/insets.dart';
 
 /// One way of writing an amount: [quantity] of [unit] as text (empty for a
 /// bare count). The sheet gives a list of them, best first, and the screen
@@ -529,7 +530,7 @@ class _CorrectionSheetState extends State<CorrectionSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final insets = MediaQuery.viewInsetsOf(context).bottom;
+    final insets = keyboardInset(context);
     final theme = Theme.of(context);
     final body = <Widget>[
       _title(theme),

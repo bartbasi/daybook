@@ -433,4 +433,21 @@ void main() {
       });
     }
   }
+
+  for (final inset in [-0.5, -20.0]) {
+    h.appTest('a keyboard inset of $inset is no error and the sheet works', (
+      tester,
+    ) async {
+      await openPush(tester);
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      addTearDown(tester.view.resetViewInsets);
+      await openSet3(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Bench press, set 3'), findsOneWidget);
+      await tester.tap(step('+5'));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(tester.widget<TextField>(field('Weight')).controller!.text, '180');
+    });
+  }
 }

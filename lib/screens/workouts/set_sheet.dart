@@ -8,6 +8,7 @@ import '../../app_scope.dart';
 import '../../data/database.dart';
 import '../../data/workout_data.dart';
 import '../../strings.dart';
+import '../../util/insets.dart';
 import '../../util/units.dart';
 import '../my_foods/food_editor.dart'
     show foodNumberProblem, parseFoodNumber, popRouteOf;
@@ -289,9 +290,7 @@ class _SetSheetState extends State<_SetSheet> {
     return PopScope(
       canPop: !_saving,
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+        padding: EdgeInsets.only(bottom: keyboardInset(context)),
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           child: Column(

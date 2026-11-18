@@ -13,6 +13,7 @@ import '../../data/workout_data.dart';
 import '../../math/calorie_budget.dart';
 import '../../math/training.dart';
 import '../../strings.dart';
+import '../../util/insets.dart';
 import '../../util/units.dart';
 import '../my_foods/food_editor.dart'
     show foodNumberProblem, parseFoodNumber, popRouteOf;
@@ -560,9 +561,7 @@ class _KcalSheetState extends State<_KcalSheet> {
     return PopScope(
       canPop: !_saving,
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+        padding: EdgeInsets.only(bottom: keyboardInset(context)),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(

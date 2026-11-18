@@ -1876,4 +1876,26 @@ void main() {
       expect(await real(tester, () => db.myFoods()), isEmpty);
     });
   });
+
+  group('a keyboard inset below zero', () {
+    for (final inset in [-0.5, -20.0]) {
+      appTest('is no error and the sheet still opens ($inset)', (tester) async {
+        await openApp(tester);
+        await openFood(tester);
+        await type(tester, '$brief, 1 apple');
+        await tester.ensureVisible(
+          find.widgetWithText(FoodLineTile, 'Cream, half and half'),
+        );
+        await tester.pump();
+        tester.view.viewInsets = FakeViewPadding(bottom: inset);
+        await tap(
+          tester,
+          find.widgetWithText(FoodLineTile, 'Cream, half and half'),
+        );
+        expect(sheet(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        expect(amountField(), findsOneWidget);
+      });
+    }
+  });
 }

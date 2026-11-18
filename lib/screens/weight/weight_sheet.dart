@@ -11,6 +11,7 @@ import '../../data/settings_data.dart';
 import '../../data/weight_data.dart';
 import '../../strings.dart';
 import '../../util/dates.dart';
+import '../../util/insets.dart';
 import '../../util/units.dart';
 
 /// What the sheet hands back when it closes after a save: the stored row,
@@ -454,9 +455,7 @@ class _WeightSheetState extends State<WeightSheet> with WidgetsBindingObserver {
     return PopScope(
       canPop: !_saving,
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+        padding: EdgeInsets.only(bottom: keyboardInset(context)),
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           child: Column(

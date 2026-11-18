@@ -948,6 +948,23 @@ void main() {
       expect(deleteButton(), findsOneWidget);
     });
   });
+
+  group('a keyboard inset below zero', () {
+    for (final inset in [-0.5, -20.0]) {
+      testWidgets('is no error and the sheet still works ($inset)', (
+        tester,
+      ) async {
+        tester.view.viewInsets = FakeViewPadding(bottom: inset);
+        addTearDown(tester.view.resetViewInsets);
+        await openSheet(tester);
+        expect(tester.takeException(), isNull);
+        await tester.enterText(field(), '181.8');
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(saveEnabled(tester), isTrue);
+      });
+    }
+  });
 }
 
 int _noOffset(DateTime local) => -360;

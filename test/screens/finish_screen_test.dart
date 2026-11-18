@@ -500,4 +500,27 @@ void main() {
     expect(w.localDate, '2026-11-11');
     expect(w.kcalEstimated, closeTo(3.5 * lbToKg(181.8) * 22 / 60, 1e-9));
   });
+
+  for (final inset in [-0.5, -20.0]) {
+    h.appTest('a keyboard inset of $inset is no error on the finish screen', (
+      tester,
+    ) async {
+      await prepare(tester);
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      addTearDown(tester.view.resetViewInsets);
+      await finish(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Workout done'), findsOneWidget);
+      await tester.tap(find.text('Change'));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Calories for this workout'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '300');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+      expect((await row(tester)).kcalOverride, 300);
+    });
+  }
 }
