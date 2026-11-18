@@ -37,10 +37,13 @@ class WorkoutsTab extends StatefulWidget {
 
 /// A message above the tab bar, with "Return to workout" when it offers it.
 class _Msg {
-  const _Msg(this.text, {this.returnId});
+  const _Msg(this.text, {this.returnId, this.undo});
 
   final String text;
   final int? returnId;
+
+  /// Brings back a deleted routine.
+  final Future<void> Function()? undo;
 }
 
 class _WorkoutsTabState extends State<WorkoutsTab> {
@@ -56,6 +59,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   // The weekly volume needs the exercise library, which is loaded after the
   // first frame and never waited for by a start.
   MusclesOf? _musclesOf;
+  StreamSubscription<List<LibraryExercise>>? _userSub;
   var _libraryFailed = false;
 
   _Msg? _msg;
@@ -99,14 +103,25 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
 
   Future<void> _loadLibrary(AppDatabase db) async {
     try {
-      final library = await ExerciseLibrary.load(
-        userExercises: await db.userExercises(),
-      );
+      final library = await ExerciseLibrary.load();
       if (!mounted) return;
-      setState(() {
-        _musclesOf = (ref) => [for (final g in library.groupsOf(ref)) g.name];
-        _followDay(db);
-      });
+      // The user's own exercises are followed, so an exercise made after this
+      // tab was built counts in the week without a restart.
+      _userSub = db.watchUserExercises().listen(
+        (own) {
+          if (!mounted) return;
+          final merged = library.withUser(own);
+          setState(() {
+            _musclesOf = (ref) => [
+              for (final g in merged.groupsOf(ref)) g.name,
+            ];
+            _followDay(db);
+          });
+        },
+        onError: (Object _) {
+          if (mounted) setState(() => _libraryFailed = true);
+        },
+      );
     } catch (_) {
       if (mounted) setState(() => _libraryFailed = true);
     }
@@ -114,6 +129,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
 
   @override
   void dispose() {
+    _userSub?.cancel();
     _msgTimer?.cancel();
     super.dispose();
   }
@@ -170,6 +186,45 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     }
   }
 
+  Future<void> _openEditor(int? routineId) async {
+    if (_starting) return;
+    _starting = true;
+    final RoutineEdit? edit;
+    try {
+      edit = await WorkoutSeams.routineEditor!(context, routineId: routineId);
+    } finally {
+      _starting = false;
+    }
+    if (!mounted || edit == null) return;
+    // From the row read back by the editor.
+    switch (edit) {
+      case RoutineSaved(:final name):
+        _show(_Msg(S.routineSaved(name)));
+      case RoutineRemoved(:final id, :final name):
+        _show(
+          _Msg(
+            S.routineDeleted(name),
+            undo: () => AppScope.of(context).db.undoDeleteRoutine(id),
+          ),
+        );
+    }
+    _fadeMessage();
+  }
+
+  /// Single flight: the message is taken and cleared before anything is
+  /// awaited.
+  Future<void> _undoMsg() async {
+    final undo = _msg?.undo;
+    if (undo == null) return;
+    _msgTimer?.cancel();
+    setState(() => _msg = null);
+    try {
+      await undo();
+    } catch (_) {
+      if (mounted) _show(const _Msg(S.routineUndoFailed));
+    }
+  }
+
   Future<void> _return(int workoutId) async {
     if (_starting) return;
     _starting = true;
@@ -218,6 +273,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
         if (msg != null)
           ConfirmBar(
             message: msg.text,
+            onUndo: msg.undo == null ? null : _undoMsg,
             actionLabel: msg.returnId == null ? null : S.returnToWorkout,
             onAction: msg.returnId == null
                 ? null
@@ -310,10 +366,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                   _start((db, now) => db.startRoutine(r.routine.id, now)),
               onEdit: WorkoutSeams.routineEditor == null
                   ? null
-                  : () => WorkoutSeams.routineEditor!(
-                      context,
-                      routineId: r.routine.id,
-                    ),
+                  : () => _openEditor(r.routine.id),
             ),
           Padding(
             padding: const EdgeInsets.only(top: 12),
@@ -326,7 +379,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(48, 48),
                     ),
-                    onPressed: () => WorkoutSeams.routineEditor!(context),
+                    onPressed: () => _openEditor(null),
                     child: const Text(S.newRoutine),
                   ),
                 // An empty workout is only useful with the picker to fill it.
@@ -587,12 +640,11 @@ class _Weekly extends StatelessWidget {
           ),
       ],
     );
-    return Column(
+    final all = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        head,
-        if (onOpen == null) rows else InkWell(onTap: onOpen, child: rows),
-      ],
+      children: [head, rows],
     );
+    // The title and the bars both open the weekly screen.
+    return onOpen == null ? all : InkWell(onTap: onOpen, child: all);
   }
 }

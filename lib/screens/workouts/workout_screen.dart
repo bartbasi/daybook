@@ -81,6 +81,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   // The rows of the last removed set or exercise, for Undo. Dropped after one
   // Undo, on Finish, and with the screen.
   RemovedSets? _removed;
+  var _removedWhole = false;
+  Timer? _removedTimer;
+  static const _removedTime = Duration(seconds: 10);
 
   @override
   void initState() {
@@ -112,6 +115,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   @override
   void dispose() {
     _screenOpen = false;
+    _removedTimer?.cancel();
     _minuteTimer?.cancel();
     _viewSub?.cancel();
     _unitsSub?.cancel();
@@ -253,7 +257,21 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       notice: notice,
       focus: reps ? SetField.reps : SetField.weight,
     );
-    if (removed != null && mounted) setState(() => _removed = removed);
+    if (removed != null && mounted) _showRemoved(removed, whole: false);
+  }
+
+  /// Shows the Undo bar for 10 seconds. A removal clears an old error, so the
+  /// Undo is not hidden behind it.
+  void _showRemoved(RemovedSets removed, {required bool whole}) {
+    _removedTimer?.cancel();
+    _removedTimer = Timer(_removedTime, () {
+      if (mounted) setState(() => _removed = null);
+    });
+    setState(() {
+      _removed = removed;
+      _removedWhole = whole;
+      _message = null;
+    });
   }
 
   /// Undo for the last removal. Single flight: the rows are taken before
@@ -261,16 +279,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   Future<void> _undo() async {
     final removed = _removed;
     if (removed == null || _busy) return;
+    _removedTimer?.cancel();
     setState(() => _removed = null);
     await _run(() => AppScope.of(context).db.undoRemove(removed));
   }
 
-  String _removedText(RemovedSets r) => r.sets.length == 1
+  String _removedText(RemovedSets r) => !_removedWhole
       ? S.removedSetMessage(r.exerciseName, r.setNumber)
       : S.removedExerciseMessage(r.exerciseName, r.sets.length);
 
   Future<void> _finish() async {
     if (_finishing) return;
+    _removedTimer?.cancel();
     setState(() {
       _finishing = true;
       _message = null;
@@ -366,7 +386,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             block.exerciseRef,
           );
           if (mounted && removed.sets.isNotEmpty) {
-            setState(() => _removed = removed);
+            _showRemoved(removed, whole: true);
           }
         });
       case _Menu.replace:

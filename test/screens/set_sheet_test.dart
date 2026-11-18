@@ -4,6 +4,7 @@
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/screens/workouts/seams.dart';
 import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/util/units.dart';
 import 'package:flutter/material.dart';
@@ -257,6 +258,48 @@ void main() {
     expect(await sets(tester), before);
     expect(find.text('7 reps'), findsOneWidget);
     expect(find.text('Undo'), findsNothing);
+  });
+
+  h.appTest('Remove set in the sheet clears an old error, so its Undo is '
+      'seen', (tester) async {
+    WorkoutSeams.exercisePicker =
+        (
+          context, {
+          required onPick,
+          required alreadyIn,
+          bool single = false,
+        }) async {
+          await onPick(bench, 'Bench press');
+        };
+    addTearDown(() => WorkoutSeams.exercisePicker = null);
+    await openPush(tester);
+    // Remove bench, add it again, then Undo: an error is on the bar.
+    await tester.tap(find.byTooltip('Menu for Bench press'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('Remove exercise'));
+    await settle(tester);
+    await tester.ensureVisible(find.text('+ Add exercise'));
+    await tester.tap(find.text('+ Add exercise'));
+    await settle(tester);
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(
+      find.text('That exercise is already in this workout.'),
+      findsOneWidget,
+    );
+    // Remove a set in the sheet: the error goes, the Undo shows.
+    await tester.ensureVisible(find.text('175 lb').first);
+    await tester.pump();
+    await tester.tap(find.text('175 lb').first);
+    await settle(tester);
+    await tester.tap(find.text('Remove set'));
+    await settle(tester);
+    expect(
+      find.text('That exercise is already in this workout.'),
+      findsNothing,
+    );
+    expect(find.text('Undo'), findsOneWidget);
   });
 
   h.appTest('numbers that cannot be used are said so beside the field and '

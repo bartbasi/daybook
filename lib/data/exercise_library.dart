@@ -3,10 +3,12 @@
 
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/services.dart';
 
 import '../parser/normalize.dart';
 import 'database.dart';
+import 'food_data.dart' show liveQuery;
 
 // The exercise library: the bundled wger list (assets/exercises, built by
 // tools/build_exercise_data.py) plus the exercises the user made. No network.
@@ -364,4 +366,75 @@ extension ExerciseLibraryData on AppDatabase {
     for (final row in await select(exercises).get())
       LibraryExercise.fromUser(row),
   ];
+}
+
+/// Why a new exercise was refused. Carries no user data.
+enum ExerciseProblem {
+  /// No name, or only spaces.
+  blankName,
+
+  /// An exercise with this name is already listed (library or the user's own).
+  sameName,
+}
+
+class ExerciseRefused implements Exception {
+  const ExerciseRefused(this.problem);
+
+  final ExerciseProblem problem;
+
+  @override
+  String toString() => 'ExerciseRefused(${problem.name})';
+}
+
+/// The muscle names the create form offers: the library's own.
+List<String> get exerciseMuscleNames => volumeGroupOfMuscle.keys.toList();
+
+extension ExerciseCreate on AppDatabase {
+  /// Saves one of the user's own exercises and returns it as read back. The
+  /// name is trimmed and may not be blank, nor the same as a listed exercise
+  /// ([library] plus the user's own rows) once accents and case are ignored,
+  /// since two rows with one name cannot be told apart in a list. [primary] and
+  /// [secondary] must be names from [exerciseMuscleNames] (an [ArgumentError]
+  /// otherwise); a muscle in both stays primary only. [equipment] is optional.
+  Future<LibraryExercise> createExercise(
+    ExerciseLibrary library,
+    String name, {
+    List<String> primary = const [],
+    List<String> secondary = const [],
+    String? equipment,
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw const ExerciseRefused(ExerciseProblem.blankName);
+    }
+    final known = exerciseMuscleNames.toSet();
+    for (final m in [...primary, ...secondary]) {
+      if (!known.contains(m)) throw ArgumentError('Unknown muscle');
+    }
+    final key = foldText(trimmed);
+    final own = await userExercises();
+    final taken = [...library.all, ...own.where((e) => !e.archived)];
+    if (taken.any((e) => foldText(e.name) == key)) {
+      throw const ExerciseRefused(ExerciseProblem.sameName);
+    }
+    final eq = equipment?.trim() ?? '';
+    final id = await into(exercises).insert(
+      ExercisesCompanion.insert(
+        name: trimmed,
+        primaryMuscles: Value(primary.toSet().join(',')),
+        secondaryMuscles: Value(
+          secondary.where((m) => !primary.contains(m)).toSet().join(','),
+        ),
+        equipment: Value(eq.isEmpty ? null : eq),
+      ),
+    );
+    final row = await (select(
+      exercises,
+    )..where((e) => e.id.equals(id))).getSingle();
+    return LibraryExercise.fromUser(row);
+  }
+
+  /// The user's own exercises again after any change to the table.
+  Stream<List<LibraryExercise>> watchUserExercises() =>
+      liveQuery(this, [exercises], userExercises);
 }

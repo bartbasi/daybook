@@ -1271,4 +1271,141 @@ class S {
   static const kcalUseEstimate = 'Use the estimate';
   static const kcalNegative = 'Calories cannot be below 0.';
   static const kcalBad = 'Enter a number of calories, like 250.';
+
+  // Task 4.4: the exercise picker, create exercise, the routine editor,
+  // exercise detail and the weekly volume screen.
+  static const pickerTitle = 'Add exercise';
+  static const exerciseListTitle = 'Exercises';
+  static const pickerSearch = 'Search exercises';
+  static const pickerChips = ['Chest', 'Shoulders', 'Back', 'Legs', 'Arms'];
+  static const pickerRecent = 'Recent';
+  static const pickerAll = 'All exercises';
+  static const pickerResults = 'Results';
+  static const pickerLoading = 'Loading the exercise list.';
+  static const pickerLoadFailed = 'The exercise list could not be read.';
+  static const pickerNone = 'No exercises match.';
+  static const pickerAdd = 'Add';
+  static const pickerAdded = 'Added';
+  static String pickerAddSpoken(String name) => 'Add $name';
+  static String pickerAddedSpoken(String name) => '$name, already added';
+  static String pickerOpenSpoken(String name, String sub) =>
+      sub.isEmpty ? 'Details for $name' : 'Details for $name. $sub';
+  static String pickerCreate(String q) => '+ Create "$q" as your own exercise';
+
+  /// 'Chest, triceps, shoulders. Barbell' (muscles first, then equipment).
+  static String exerciseSub(
+    List<String> primary,
+    List<String> secondary,
+    List<String> equipment,
+  ) {
+    final muscles = [...primary, ...secondary];
+    final m = muscles.isEmpty
+        ? ''
+        : '${muscles.first}'
+              '${muscles.skip(1).map((x) => ', ${x.toLowerCase()}').join()}';
+    final e = equipment.join(', ');
+    if (m.isEmpty) return e;
+    return e.isEmpty ? m : '$m. $e';
+  }
+
+  static const createExerciseTitle = 'New exercise';
+  static const createExerciseName = 'Name';
+  static const createExercisePrimary = 'Primary muscles';
+  static const createExerciseSecondary = 'Secondary muscles';
+  static const createExerciseEquipment = 'Equipment (optional)';
+  static const createExerciseSave = 'Save';
+  static const problemExerciseBlank = 'Enter a name for the exercise.';
+  static const problemExerciseSame =
+      'An exercise with that name is already in the list.';
+  static const createExerciseFailed =
+      'Could not save the exercise. Nothing was changed.';
+
+  static const routineNewTitle = 'New routine';
+  static const routineNameLabel = 'Name';
+  static const routineExercises = 'Exercises';
+  static const routineNote =
+      'Weights and reps are not set here. Each workout takes them from the '
+      'last time you did each exercise.';
+  static const routineLoadFailed =
+      'Could not read this routine. Go back and try again.';
+  static const problemDuplicateRoutine =
+      'That exercise is already in this routine.';
+  static const routineSave = 'Save';
+  static const routineMenu = 'More options';
+  static const routineDelete = 'Delete routine';
+  static String routineFacts(int sets, String rest) =>
+      '${sets == 1 ? '1 set' : '$sets sets'}, rest $rest';
+  static const routineMenuSets = 'Number of sets';
+  static const routineMenuRest = 'Rest time';
+  static String routineDragSpoken(String name) => 'Drag to move $name';
+  static const routineBlankName = 'Give the routine a name.';
+  static const routineSaveFailed =
+      'Could not save the routine. Nothing was changed.';
+  static const routineLeaveWarn =
+      'Your changes are not saved. Tap Save, or go back again to leave '
+      'without them.';
+  static String routineSaved(String name) => 'Routine "$name" saved.';
+  static String routineDeleted(String name) => 'Routine "$name" deleted.';
+  static const routineUndoFailed = 'Could not bring the routine back.';
+  static String setsSheetTitle(String name) => 'Sets for $name';
+  static String restSheetTitle(String name) => 'Rest for $name';
+  static const setsFewer = 'One fewer set';
+  static const setsMore = 'One more set';
+  static const restShorter = 'Take 15 seconds off the rest';
+  static const restLonger = 'Add 15 seconds to the rest';
+  static const restNone = 'No rest';
+
+  /// '1:30' for 90 seconds.
+  static String restClock(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+
+  static const detailRecords = 'Records';
+  static const detailHeaviest = 'Heaviest';
+  static const detailEstimate = 'Est. 1-rep max';
+  static String detailSetOn(String set, String date) => '$set, $date';
+  static String detailFrom(String set, String date) => 'from $set, $date';
+  static const detailBySession = 'Est. 1-rep max by session';
+  static String detailBest(String set) => 'best $set';
+  static const detailHistory = 'History';
+  static const detailAbout = 'About this exercise';
+  static const detailNoSets = 'Nothing logged for this exercise yet.';
+  static const detailNoRecords = 'No records yet.';
+  static const detailLoadFailed = 'Could not read this exercise.';
+  static const detailNotListed = 'This exercise is no longer in the list.';
+  static String detailCredit(String authors, String? license) =>
+      license == null ? 'Text by $authors.' : 'Text by $authors, $license.';
+
+  /// 'Chest (primary). Triceps, shoulders (secondary). Barbell.'
+  static String detailMuscles(
+    List<String> primary,
+    List<String> secondary,
+    List<String> equipment,
+  ) {
+    String list(List<String> l) =>
+        '${l.first}${l.skip(1).map((x) => ', ${x.toLowerCase()}').join()}';
+    return [
+      if (primary.isNotEmpty) '${list(primary)} (primary).',
+      if (secondary.isNotEmpty) '${list(secondary)} (secondary).',
+      if (equipment.isNotEmpty) '${equipment.join(', ')}.',
+    ].join(' ');
+  }
+
+  static const weeklyScreenTitle = 'Sets by muscle';
+  static const weeklyNote =
+      'Completed sets, primary muscles only, Monday to Sunday.';
+  static const weeklyThisWeek = 'This week';
+  static const weeklySoFar = 'so far';
+  static String weeklyRowSpoken(
+    String group,
+    int now,
+    String a,
+    int an,
+    String b,
+    int bn,
+  ) =>
+      '$group: this week so far ${weeklySets(now)}, week of $a '
+      '${weeklySets(an)}, week of $b ${weeklySets(bn)}';
+
+  static const moreExercises = 'Exercises';
+  static const moreExercisesSub = 'The exercise list and your own exercises';
 }

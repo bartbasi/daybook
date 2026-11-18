@@ -28,6 +28,30 @@ typedef ExercisePicker = Future<void> Function(
   bool single,
 });
 
+/// What the routine editor tells the Workouts tab when it closes with a change,
+/// so the tab can say so (with Undo for a delete).
+sealed class RoutineEdit {
+  const RoutineEdit();
+}
+
+class RoutineSaved extends RoutineEdit {
+  const RoutineSaved(this.name);
+  final String name;
+}
+
+class RoutineRemoved extends RoutineEdit {
+  const RoutineRemoved(this.id, this.name);
+  final int id;
+  final String name;
+}
+
+/// Opens the routine editor (a new routine, or [routineId]). Completes when it
+/// closes, with what changed or null.
+typedef RoutineEditor = Future<RoutineEdit?> Function(
+  BuildContext context, {
+  int? routineId,
+});
+
 abstract final class WorkoutSeams {
   /// "+ Add exercise" in the active workout (and Replace exercise, which picks
   /// one exercise). Null until task 4.4.
@@ -40,7 +64,7 @@ abstract final class WorkoutSeams {
 
   /// "+ New routine", and editing a routine when [routineId] is given. Null
   /// until task 4.4.
-  static void Function(BuildContext context, {int? routineId})? routineEditor;
+  static RoutineEditor? routineEditor;
 
   /// The "Exercises" button on the Workouts tab (the exercise list). Null
   /// until task 4.4.

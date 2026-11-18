@@ -10,6 +10,7 @@ import '../../strings.dart';
 import '../goals/goals_screen.dart';
 import '../my_foods/my_foods_screen.dart';
 import '../saved_meals/saved_meals_screen.dart';
+import '../workouts/exercise_picker.dart' show openExerciseList;
 
 /// Things set up once and changed rarely: the saved meals, the foods and
 /// recipes you made.
@@ -81,6 +82,13 @@ class _MoreScreenState extends State<MoreScreen> {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const MyFoodsScreen()),
             ),
+          ),
+          ListTile(
+            minTileHeight: 56,
+            title: const Text(S.moreExercises),
+            subtitle: const Text(S.moreExercisesSub),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openExerciseList(context),
           ),
         ],
       ),

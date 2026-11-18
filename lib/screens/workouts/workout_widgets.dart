@@ -48,7 +48,7 @@ String workoutProblemText(WorkoutProblem p) => switch (p) {
   WorkoutProblem.notRunning => S.problemNotRunning,
   WorkoutProblem.needsReps => S.problemNeedsReps,
   WorkoutProblem.badNumber => S.problemBadNumber,
-  WorkoutProblem.blankName => S.problemBadNumber,
+  WorkoutProblem.blankName => S.routineBlankName,
   WorkoutProblem.duplicateExercise => S.problemDuplicate,
   WorkoutProblem.loggedSetsInExercise => S.problemLoggedSets,
 };

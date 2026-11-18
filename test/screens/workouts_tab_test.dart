@@ -188,8 +188,10 @@ void main() {
   ) async {
     await h.seedSample(tester);
     final calls = <String>[];
-    WorkoutSeams.routineEditor = (context, {routineId}) =>
-        calls.add('editor $routineId');
+    WorkoutSeams.routineEditor = (context, {routineId}) async {
+      calls.add('editor $routineId');
+      return null;
+    };
     WorkoutSeams.exercises = (context) => calls.add('exercises');
     await openTab(tester);
     await tester.tap(find.text('+ New routine'));

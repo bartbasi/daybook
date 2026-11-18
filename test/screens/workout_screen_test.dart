@@ -600,6 +600,40 @@ void main() {
     expect(added.where((s) => before.any((b) => b.id == s.id)), hasLength(3));
   });
 
+  h.appTest('the Undo bar goes away after 10 seconds and the rows stay '
+      'removed', (tester) async {
+    final id = await startPush(tester);
+    await openRunning(tester);
+    await removeExerciseFromMenu(tester, 'Bench press');
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 9));
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('Undo'), findsNothing);
+    expect(find.textContaining('Removed'), findsNothing);
+    expect(
+      (await sets(tester, id)).where((s) => s.exerciseRef == bench),
+      isEmpty,
+    );
+  });
+
+  h.appTest('Remove exercise on an exercise with one set says "Removed Bench '
+      'press, 1 set."', (tester) async {
+    final id = await startPush(tester);
+    final benchRows = (await sets(
+      tester,
+      id,
+    )).where((s) => s.exerciseRef == bench).toList();
+    await h.real(tester, () async {
+      await h.db.removeSet(benchRows[1].id);
+      await h.db.removeSet(benchRows[2].id);
+    });
+    await openRunning(tester);
+    await removeExerciseFromMenu(tester, 'Bench press');
+    expect(find.text('Removed Bench press, 1 set.'), findsOneWidget);
+    expect(find.textContaining('Removed set'), findsNothing);
+  });
+
   h.appTest('Finish drops the Undo: after Resume nothing can be undone', (
     tester,
   ) async {

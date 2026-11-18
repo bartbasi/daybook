@@ -9,10 +9,12 @@ import 'data/database.dart';
 import 'data/food_reference.dart';
 import 'error_log.dart';
 import 'parser/parse_worker.dart';
+import 'screens/workouts/install_seams.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   installErrorHandlers();
+  installWorkoutSeams();
   runApp(
     DaybookApp(
       db: AppDatabase.open(),
