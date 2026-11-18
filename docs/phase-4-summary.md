@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. Next: the alert when a rest ends, then the workout speed tests |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. The alert when a rest ends is built and reviewed; its first Android and iOS builds are running in CI on a branch. Next: the workout speed tests |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -124,6 +124,12 @@ Each is the recommended option from the plan's open questions, or a small call m
 92. **The weekly volume screen leaves out the frame's last line** ("This week so far: Pull A (Mon), Legs (Wed), Push A (Thu)."). It needs a new read of the week's workouts. Say if you want it.
 93. **A routine can be saved with no exercises.** The tab then says it has none.
 94. **A rest of 0 in a routine reads "3 sets, no rest".** Sets go from 1 to 30 and rest from none to 10:00, in steps of 15 seconds.
+95. **"Alert me when rest ends" is a one-time row.** The design says "shown once", and that can be read two ways. Built: the row shows on every rest until you tap it and allow notifications; then it is gone for good, and turning the alert off is done in the phone's notification settings. If you refuse, the row stays and can be tapped again. The other reading: the row shows on the very first rest only, whatever you do, which would leave no way to turn the alert on later. The first version built was a permanent on and off switch, from a note of mine that contradicted the design; it was changed after review. Say if you would rather have the switch.
+96. **The alert uses Android's inexact timing that still works when the phone is idle.** It needs no extra permission. See the note under open question 6 below about how late it may be.
+97. **While Daybook is open, the end of a rest is the buzz in the app, not a notification.** On Android a notification that already arrived is removed at that moment; on iPhone it is not shown at all while the app is open. A notification that arrives late or is still waiting is removed when you come back to the app.
+98. **The notification says "Rest done" and nothing else.** No exercise, weight or reps. It does not come back after the phone restarts.
+99. **The notification's small icon is the app icon for now.** Android may draw it as a plain white shape in the status bar until there is a one-colour icon.
+100. **One Android build library has a license that is not a permissive one.** The notification plugin needs "core library desugaring", which adds Google's desugar_jdk_libs to the app. It is expected to be GPL version 2 with the Classpath Exception, which may be combined with GPL version 3 code. This is from the reviewer's memory and is not confirmed yet; it will be read from the library's own file at the first build, and the License page in step 8 needs its notice. The other libraries the plugin adds are Apache-2.0, BSD and MIT, all recorded in docs/dependencies.md.
 
 ## Open questions from the plan: answered
 
@@ -133,7 +139,7 @@ Bart approved the recommended option for each on 2026-11-13 ("your recommendatio
 - **Compendium permission (3):** cardio is built with the 2024 values now, and the reply (or your decision to go ahead without one) is a condition of release in Phase 6. The email is still yours to send.
 - **Cardio with no distance typed (4):** the Compendium's general entry for the activity (Running 12145, Walking 17190, Bicycling 01014).
 - **Imported workouts (5):** every session from Health Connect or Apple Health is imported; a strength session logged in both places counts twice until one is deleted.
-- **Rest alert on Android (6):** no extra permission; the alert may be a few seconds late.
+- **Rest alert on Android (6):** no extra permission; the alert may be a few seconds late. **This may need a second look.** The reviewer of the alert points out that Android allows an alert of this kind to arrive late by up to three quarters of the wait, so a 90 second rest could alert up to about 67 seconds late. That is from Android's rules and has not been measured. The phone list below has a timed check. If it is that late, the other option (asking for the exact alarm permission, a second prompt on a system settings page) comes back to you with the numbers.
 - **Exercise images (7):** none shipped, and the "Some illustrations by Everkinetic" sentence is dropped from About.
 - **Items missing from the brief (8):** only a one-line "Daybook collects no data" statement in About is added. First-run setup, hiding the weight on the widget, a weight typo check and calorie quick-add wait for the Phase 5 friction log.
 
@@ -209,6 +215,8 @@ Two more behaviors to know about:
 - **Editing a meal inside the 10 seconds after saving it replaces the Undo for the first save.** The edit has no Undo of its own; to remove the meal, open it and delete it (which does have Undo).
 
 - **A workout continued days after it started counts the whole span.** Time and calories run from the start to the last logged set, and the database has no place for breaks. Resume is offered only right after Finish, so this takes leaving a workout open for days and then logging another set. Typing your own calorie number, or deleting the workout, fixes it.
+- **The rest alert can be on in the database on a phone that never allowed notifications.** That happens after a phone backup is restored to a new phone, and later after an import. The row that asks is then hidden, so nothing in the app can ask, and on an iPhone the Settings app does not list Daybook's notifications until it has asked once. Fix planned in the next task: when a rest starts with the alert on, check quietly whether notifications are allowed, and show the row again if they are not.
+- **If you turn Daybook's notifications off in the phone's settings later, the app does not notice.** No alert comes and nothing says why. The fix above covers this too.
 
 ## Not finished
 
@@ -255,6 +263,10 @@ Workouts (step 4, what is built so far), on the Z Fold 5:
 - Start the routine, log a few sets with one tap each, and finish. The next day, "Start again" should offer it with the same numbers.
 - In the picker, type a name that is not there and create your own exercise. On the cover screen with the largest font size, the muscle names should wrap and none should be cut off.
 - Open an exercise's detail. Under "About this exercise" the credit, the license address and the wger.de address should all be readable, and you should be able to select and copy the addresses.
+- Rest alert: start a rest and tap "Alert me when rest ends". The phone should ask to allow notifications then, and never before. After you allow it the row should be gone.
+- Rest alert timing, the important one: with the alert on, log a set with a 90 second rest, turn the screen off and leave the phone still on a table. Time how long after the 90 seconds "Rest done" arrives. Do it again with a 3 minute rest. Tell me both numbers.
+- With Daybook open at the end of a rest, there should be a buzz and no notification left in the shade. Come back to the app after a rest ended in the background: the notification should go away.
+- Does the "Rest done" notification vibrate, and how does its small icon look in the status bar?
 - At the end of a rest the phone should buzz once. Tell me if the buzz is too weak to notice with the phone on a bench, and whether it still comes with touch vibration turned off in the phone's settings.
 - On the running workout screen, the rest timer's buttons and the last "+ Add set" should sit clear of the phone's bottom bar, with button navigation and with gestures.
 
