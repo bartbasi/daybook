@@ -42,6 +42,12 @@ class RestTimer extends ChangeNotifier {
   bool _alertOn = false;
   bool _asking = false;
   bool _refused = false;
+
+  /// The phone's answer to the quiet check for this rest: null until it
+  /// answers (or when the setting is off), true to schedule, false when the
+  /// setting is on but the phone does not allow notifications.
+  bool? _allowed;
+  int _serial = 0;
   int? _workoutId;
   int _endMs = 0;
   int _totalMs = 0;
@@ -69,6 +75,10 @@ class RestTimer extends ChangeNotifier {
   /// True when the user has the "Rest done" alert on.
   bool get alertOn => _alertOn;
 
+  /// True when the "Alert me when rest ends" row is shown: the setting is off,
+  /// or it is on but the phone does not allow notifications for this rest.
+  bool get showAlertRow => !_alertOn || _allowed == false;
+
   /// True after the phone refused notifications to the last tap on the row.
   bool get alertRefused => _refused;
 
@@ -89,7 +99,7 @@ class RestTimer extends ChangeNotifier {
   /// then gone. If refused, the row stays and can be tapped again. Turning it
   /// off again is done in the phone's notification settings.
   Future<void> enableAlert() async {
-    if (_asking || _alertOn) return;
+    if (_asking || !showAlertRow) return;
     _asking = true;
     var granted = false;
     try {
@@ -105,6 +115,7 @@ class RestTimer extends ChangeNotifier {
       return;
     }
     _alertOn = true;
+    _allowed = true;
     if (isActive && !_over) unawaited(alert.schedule(_endMs));
     notifyListeners();
     await _saveSetting(true);
@@ -141,7 +152,23 @@ class RestTimer extends ChangeNotifier {
     _endMs = _clock().utcMs + _totalMs;
     _over = false;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-    if (_alertOn) unawaited(alert.schedule(_endMs));
+    if (_alertOn) unawaited(_scheduleIfAllowed(_serial));
+    notifyListeners();
+  }
+
+  /// The setting is on: ask the phone quietly, then schedule this rest. The
+  /// rest has already started. A rest that was skipped, replaced or finished
+  /// while the check was out gets nothing.
+  Future<void> _scheduleIfAllowed(int serial) async {
+    var allowed = false;
+    try {
+      allowed = await alert.isAllowed();
+    } catch (_) {
+      // A check that fails counts as not allowed.
+    }
+    if (serial != _serial || !isActive) return;
+    _allowed = allowed;
+    if (allowed && !_over) unawaited(alert.schedule(_endMs));
     notifyListeners();
   }
 
@@ -160,7 +187,7 @@ class RestTimer extends ChangeNotifier {
       _endMs = end;
       _totalMs += seconds * 1000;
       if (_totalMs < end - now) _totalMs = end - now;
-      if (_alertOn) unawaited(alert.schedule(_endMs));
+      if (_alertOn && _allowed == true) unawaited(alert.schedule(_endMs));
     }
     notifyListeners();
   }
@@ -185,6 +212,8 @@ class RestTimer extends ChangeNotifier {
   }
 
   void _stop() {
+    _serial++;
+    _allowed = null;
     _ticker?.cancel();
     _ticker = null;
     _workoutId = null;
@@ -345,7 +374,7 @@ class RestTimerBar extends StatelessWidget {
                         ),
                       ],
                     ),
-                  if (!over && !timer.alertOn) ...[
+                  if (!over && timer.showAlertRow) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(

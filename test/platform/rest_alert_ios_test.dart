@@ -14,14 +14,17 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('dexterous.com/flutter/local_notifications');
   final calls = <MethodCall>[];
+  Object? checkAnswer;
 
   setUp(() {
     calls.clear();
+    checkAnswer = {'isEnabled': true};
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     IOSFlutterLocalNotificationsPlugin.registerWith();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          if (call.method == 'checkPermissions') return checkAnswer;
           if (call.method == 'initialize') return false;
           return null;
         });
@@ -47,6 +50,26 @@ void main() {
       expect(a[k], isFalse, reason: k);
     }
     expect(calls.where((c) => c.method == 'requestPermissions'), isEmpty);
+  });
+
+  test('on iOS, the quiet check sends only checkPermissions, never a request, '
+      'and no answer or an error is "not allowed"', () async {
+    expect(await const LocalRestAlert().isAllowed(), isTrue);
+    expect(calls.where((c) => c.method != 'initialize').map((c) => c.method), [
+      'checkPermissions',
+    ]);
+    checkAnswer = {'isEnabled': false};
+    expect(await const LocalRestAlert().isAllowed(), isFalse);
+    checkAnswer = null;
+    expect(await const LocalRestAlert().isAllowed(), isFalse);
+    expect(calls.where((c) => c.method == 'requestPermissions'), isEmpty);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'x'),
+        );
+    expect(await const LocalRestAlert().isAllowed(), isFalse);
   });
 
   test('on iOS, "Rest done" is not shown while Daybook is in front', () async {

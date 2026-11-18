@@ -27,6 +27,10 @@ abstract class RestAlert {
   /// Asks the phone for permission to show notifications. True if granted.
   Future<bool> requestPermission();
 
+  /// A quiet check: true if the phone lets Daybook show notifications right
+  /// now. It never shows a prompt. Any error counts as not allowed.
+  Future<bool> isAllowed();
+
   /// Shows "Rest done" at [endUtcMs] (milliseconds since the epoch, UTC),
   /// replacing the one that is waiting. The phone may be a few seconds late.
   Future<void> schedule(int endUtcMs);
@@ -83,6 +87,27 @@ class LocalRestAlert extends RestAlert {
             AndroidFlutterLocalNotificationsPlugin
           >();
       return await android?.requestNotificationsPermission() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> isAllowed() async {
+    try {
+      await _init();
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final ios = _plugin
+            .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin
+            >();
+        return (await ios?.checkPermissions())?.isEnabled ?? false;
+      }
+      final android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      return await android?.areNotificationsEnabled() ?? false;
     } catch (_) {
       return false;
     }

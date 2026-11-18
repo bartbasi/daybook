@@ -49,6 +49,26 @@ class ThrowingRestAlert extends FakeRestAlert {
   }
 }
 
+/// A fake whose quiet check waits until the test gives it an answer.
+class HeldCheckAlert extends FakeRestAlert {
+  final answer = Completer<bool>();
+
+  @override
+  Future<bool> isAllowed() {
+    checks++;
+    return answer.future;
+  }
+}
+
+/// A fake whose quiet check fails.
+class ThrowingCheckAlert extends FakeRestAlert {
+  @override
+  Future<bool> isAllowed() async {
+    checks++;
+    throw StateError('no');
+  }
+}
+
 void main() {
   final h = WorkoutHarness()..register();
 
@@ -387,6 +407,7 @@ void main() {
     await tester.tap(find.text('Skip'));
     await tester.pump();
     expect(alert.calls, isEmpty);
+    expect(alert.checks, 0, reason: 'with the setting off, no check either');
     expect(await savedSetting(tester), isFalse);
   });
 
@@ -709,6 +730,112 @@ void main() {
     expect(alert.scheduled, isEmpty);
   });
 
+  // The setting is on but the phone may not allow notifications (a restored
+  // backup, an import, or notifications turned off in the phone's settings).
+
+  Future<List<WorkoutSet>> openPushOn(
+    WidgetTester tester,
+    FakeRestAlert alert,
+  ) async {
+    await h.real(tester, () => h.db.setRestAlert(true));
+    return openPushWith(tester, alert);
+  }
+
+  h.appTest('setting on and allowed: the rest is scheduled after one quiet '
+      'check, and there is no row', (tester) async {
+    final alert = FakeRestAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    expect(alert.checks, 1);
+    expect(alert.calls, ['schedule:${h.now.utcMs + 120000}']);
+    expect(alertRow, findsNothing);
+  });
+
+  h.appTest('setting on and not allowed: nothing is scheduled, the row is '
+      'back, a tap asks, and a yes schedules this rest and hides the row', (
+    tester,
+  ) async {
+    final alert = FakeRestAlert(allowed: false);
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    expect(alert.calls, isEmpty);
+    expect(find.text('Rest 2:00 of 2:00'), findsOneWidget);
+    expect(alertRow, findsOneWidget);
+
+    final end = h.now.utcMs + 120000;
+    await tapAlertRow(tester);
+    expect(alert.calls, ['request', 'schedule:$end']);
+    expect(alertRow, findsNothing);
+    expect(await savedSetting(tester), isTrue);
+
+    // The grant holds: the next rest checks again and is allowed.
+    alert.allowed = true;
+    alert.calls.clear();
+    await log(tester, all[1]);
+    expect(alert.calls.where((c) => c == 'request'), isEmpty);
+    expect(alert.scheduled, [h.now.utcMs + 120000]);
+    expect(alertRow, findsNothing);
+  });
+
+  h.appTest('setting on and not allowed, then refused: the refusal sentence '
+      'shows, the row stays and the setting stays on', (tester) async {
+    final alert = FakeRestAlert(grant: false, allowed: false);
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await tapAlertRow(tester);
+    expect(alert.calls, ['request']);
+    expect(alertRow, findsOneWidget);
+    expect(find.textContaining('Notifications are turned off'), findsOneWidget);
+    expect(await savedSetting(tester), isTrue);
+  });
+
+  h.appTest('a quiet check that throws counts as not allowed', (tester) async {
+    final alert = ThrowingCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    expect(alert.calls, isEmpty);
+    expect(alertRow, findsOneWidget);
+    expect(find.text('Rest 2:00 of 2:00'), findsOneWidget);
+  });
+
+  h.appTest('the rest starts at once while the quiet check is still out', (
+    tester,
+  ) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    expect(find.text('Rest 2:00 of 2:00'), findsOneWidget);
+    expect(alert.scheduled, isEmpty);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, [h.now.utcMs + 120000]);
+  });
+
+  h.appTest('Skip while the quiet check is out leaves no schedule behind', (
+    tester,
+  ) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await tester.tap(find.text('Skip'));
+    await tester.pump();
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, isEmpty);
+  });
+
+  h.appTest('the next set while the quiet check is out schedules only the new '
+      'rest', (tester) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await advance(tester, 30);
+    await log(tester, all[1]);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, [h.now.utcMs + 120000]);
+  });
+
   h.appTest('with the real wrapper over a mocked channel, the log path calls '
       'nothing, and tapping the row is the first call: it sets the plugin up '
       'and asks', (tester) async {
@@ -737,7 +864,7 @@ void main() {
     expect(
       h.permissionCalls.where((c) => c.contains('request')),
       isEmpty,
-      reason: 'setting up and scheduling must not ask',
+      reason: 'the quiet check, setting up and scheduling must not ask',
     );
   });
 

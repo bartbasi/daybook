@@ -104,7 +104,13 @@ const permissionChannels = [
 
 /// A rest alert that records what it is asked, for the rest timer tests.
 class FakeRestAlert extends RestAlert {
-  FakeRestAlert({this.grant = true});
+  FakeRestAlert({this.grant = true, this.allowed = true});
+
+  /// What the quiet check answers.
+  bool allowed;
+
+  /// How many times the quiet check was made. Kept out of [calls].
+  int checks = 0;
 
   /// What the user answers when asked for permission.
   bool grant;
@@ -122,6 +128,12 @@ class FakeRestAlert extends RestAlert {
   Future<bool> requestPermission() async {
     calls.add('request');
     return grant;
+  }
+
+  @override
+  Future<bool> isAllowed() async {
+    checks++;
+    return allowed;
   }
 
   @override
