@@ -11,7 +11,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
 | 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. The alert when a rest ends, the workout speed tests and the workout device flow are done and reviewed. Step 4 is complete apart from the checks on your phone |
-| 5 Cardio | In progress. The Compendium MET table and its loader are done, reviewed and pushed. The estimate and cardio data are next |
+| 5 Cardio | In progress. The Compendium MET table, the estimate and the cardio data layer are done, reviewed and pushed. The cardio screen is next |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
 | 8 About, settings, units | Not started |
@@ -133,6 +133,12 @@ Each is the recommended option from the plan's open questions, or a small call m
 101. **The Compendium table has 1,111 activities, not 1,114.** The plan took 1,114 from the Compendium's own figure. The PDF we build from and the website's 22 heading pages both list the same 1,111 codes. The reviewer checked every row of our file against the PDF by two independent readings and found no mismatch. As far as the reviewer could read the journal article, two of the three missing are Sports activities that neither the PDF nor the website lists, and the third looks like a counting slip in the article. Nothing was guessed or added. Your email to the Compendium team could ask which two Sports activities are meant.
 102. **Running, Walking and Bicycling pick a speed band only from the plain, level rows.** Running has 18, Walking 8 (level, firm surface) and Bicycling 6. Rows for uphill, downhill, treadmill, backpack, stroller, backward and Nordic walking keep their place in the "Other..." search but are never picked by pace. Two leisure cycling rows are left out because they sit inside the "under 10 mph" row: 5.5 mph (3.5 MET) and 9.4 mph (5.8 MET). So a 9.4 mph ride is estimated at 4.0 MET, not 5.8. Say if you want those two rows used when the pace matches them exactly.
 103. **A row that says "less than 10 mph" does not include 10.** A ride at exactly 10.0 mph uses the "10 to 11.9 mph" row (6.8 MET), not the "under 10" row (4.0). The same holds for walking at exactly 2.0 mph. This is how the Compendium's own rows meet.
+104. **The Workouts tab goes back to the top** when a workout's screen closes back to it and when you open the tab from another tab. Before this it kept its place, so after starting a routine from lower down, "Start again" was out of view the next time and the one tap target took a swipe. A side effect: if you scroll down, open a workout and back out, you lose your place in the list.
+105. **Editing a cardio session keeps its estimate unless you change the duration, the distance, the entry or the day.** Changing only your own calorie number, the heart rate or the time of day leaves the estimate as it was, even if a weigh-in was added or corrected since. One exception: a session saved with no estimate (no weigh-in yet) gets one the next time it is edited and saved. The screen shows exactly the number that will be stored.
+106. **When your pace falls between two speed bands, the nearest band is used and the screen will say so**: "Nearest to your pace, 6.5 mph." instead of "Your pace is in this band." The wording is mine.
+107. **A hand-picked entry is kept on edit.** If you choose an entry with Change, a later edit of only the heart rate or calories keeps it. It is picked again by pace only when you change the duration or distance.
+108. **"Used last time" means the most recent session of that activity by start time**, sessions read from Health Connect or Apple Health included.
+109. **Cardio has no upper limits.** Duration and distance must be above 0 and a heart rate, when given, above 0. A typo of 300 minutes for 30 is accepted. Say if you want limits or a "that looks long" line.
 
 ## Open questions from the plan: answered
 
@@ -271,6 +277,7 @@ Workouts (step 4, what is built so far), on the Z Fold 5:
 - Does the "Rest done" notification vibrate, and how does its small icon look in the status bar?
 - Turn Daybook's notifications off in the phone's settings, then start a rest: "Alert me when rest ends" should be back. Tap it: the phone either asks again or the app says notifications are turned off. Tell me which.
 - Log two sets quickly, one right after the other, on rows near the bottom of the screen. Tell me if the second tap ever lands on Skip.
+- Scroll the Workouts tab down, start a routine from there, finish it and tap Done: the tab should be back at the top with "Start again" in view. Do the same by switching to another tab and back.
 - At the end of a rest the phone should buzz once. Tell me if the buzz is too weak to notice with the phone on a bench, and whether it still comes with touch vibration turned off in the phone's settings.
 - On the running workout screen, the rest timer's buttons and the last "+ Add set" should sit clear of the phone's bottom bar, with button navigation and with gestures.
 
