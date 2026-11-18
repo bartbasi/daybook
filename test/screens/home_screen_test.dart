@@ -1107,6 +1107,26 @@ void main() {
     handle.dispose();
   });
 
+  appTest('the bar changes its words at midnight with the app open: a '
+      'workout from before midnight is then named by its day', (tester) async {
+    await startWorkout(tester, at('2026-11-12', 23, 30, -360));
+    clockNow = at('2026-11-12', 23, 50, -360);
+    await openApp(tester);
+    expect(find.text('Workout running, 20 min'), findsOneWidget);
+
+    clockNow = at('2026-11-13', 0, 30, -360);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await settle(tester);
+    expect(find.text("Thursday's workout is still running."), findsOneWidget);
+    expect(find.textContaining('Workout running'), findsNothing);
+  });
+
   appTest('a finished workout has no bar, and the bar follows a new start '
       'at once', (tester) async {
     await openApp(tester);

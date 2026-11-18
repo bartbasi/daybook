@@ -244,6 +244,21 @@ void main() {
     expect(old.where((s) => s.workoutId != workoutId), hasLength(3));
   });
 
+  h.appTest('Remove set offers Undo on the workout screen, and Undo puts the '
+      'set back as set 3', (tester) async {
+    await openPush(tester);
+    final before = await sets(tester);
+    await openSet3(tester);
+    await tester.tap(find.text('Remove set'));
+    await settle(tester);
+    expect(find.text('Removed set 3 of Bench press.'), findsOneWidget);
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(await sets(tester), before);
+    expect(find.text('7 reps'), findsOneWidget);
+    expect(find.text('Undo'), findsNothing);
+  });
+
   h.appTest('numbers that cannot be used are said so beside the field and '
       'nothing is written', (tester) async {
     await openPush(tester);

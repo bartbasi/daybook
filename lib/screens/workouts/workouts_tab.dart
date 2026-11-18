@@ -149,6 +149,8 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
       }
       final earlier = result.finishedEarlier;
       if (earlier != null) {
+        // Its rest must not buzz during the new workout.
+        scope.restTimer?.clearFor(earlier.workout.id);
         _show(
           _Msg(
             S.finishedEarlier(
@@ -327,14 +329,16 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                     onPressed: () => WorkoutSeams.routineEditor!(context),
                     child: const Text(S.newRoutine),
                   ),
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 48),
+                // An empty workout is only useful with the picker to fill it.
+                if (WorkoutSeams.exercisePicker != null)
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                    ),
+                    onPressed: () =>
+                        _start((db, now) => db.startEmptyWorkout(now)),
+                    child: const Text(S.emptyWorkout),
                   ),
-                  onPressed: () =>
-                      _start((db, now) => db.startEmptyWorkout(now)),
-                  child: const Text(S.emptyWorkout),
-                ),
               ],
             ),
           ),

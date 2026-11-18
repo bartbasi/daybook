@@ -20,9 +20,10 @@ enum SetField { weight, reps }
 /// 4): -5 and +5 lb (-2.5 and +2.5 kg), -1 and +1 reps, either number typed,
 /// Remove set and Done. The sheet writes through the data layer itself, so a
 /// closed sheet has already saved; the workout screen sees the change in its
-/// own stream. [notice] is a plain sentence shown at the top (the check was
+/// own stream. Returns the set it removed, if Remove set was used, so the
+/// workout screen can offer Undo. [notice] is a plain sentence shown at the top (the check was
 /// tapped on a set with no reps).
-Future<void> showSetSheet(
+Future<RemovedSets?> showSetSheet(
   BuildContext context, {
   required SetView set,
   required String exerciseName,
@@ -31,10 +32,10 @@ Future<void> showSetSheet(
   SetField focus = SetField.weight,
   String? notice,
 }) async {
-  if (_sheetOpen) return;
+  if (_sheetOpen) return null;
   _sheetOpen = true;
   try {
-    await showModalBottomSheet<void>(
+    return await showModalBottomSheet<RemovedSets>(
       context: context,
       isScrollControlled: true,
       // A drag would close the sheet while a write is in flight; PopScope in
@@ -241,9 +242,9 @@ class _SetSheetState extends State<_SetSheet> {
       _failure = null;
     });
     try {
-      await scope.db.removeSet(_row.id);
+      final removed = await scope.db.removeSet(_row.id);
       if (!mounted) return;
-      popRouteOf<void>(context, null);
+      popRouteOf<RemovedSets?>(context, removed);
     } on WorkoutRefused catch (e) {
       if (!mounted) return;
       setState(() {

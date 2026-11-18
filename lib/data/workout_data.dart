@@ -383,6 +383,37 @@ class DeletedWorkout {
   final List<WorkoutSet> sets;
 }
 
+/// Sets removed by [WorkoutData.removeSet] or [WorkoutData.removeExercise],
+/// kept so Undo can put back exactly the same rows. It lives in memory only.
+class RemovedSets {
+  const RemovedSets._(
+    this.workoutId,
+    this.exerciseRef,
+    this.exerciseName,
+    this.sets,
+    this._exerciseIndex,
+    this._indexInBlock,
+    this._exerciseGone,
+  );
+
+  final int workoutId;
+  final String exerciseRef;
+  final String exerciseName;
+
+  /// The rows removed, in their old order. Empty when there was nothing to
+  /// remove.
+  final List<WorkoutSet> sets;
+
+  /// The number of the (first) set removed within its exercise, from 1.
+  int get setNumber => _indexInBlock + 1;
+
+  // Where they were. Positions are not trusted on Undo: the rows go back by
+  // order, then the whole workout is renumbered.
+  final int _exerciseIndex;
+  final int _indexInBlock;
+  final bool _exerciseGone;
+}
+
 typedef _Plan = ({String ref, String name, int sets});
 typedef _LastTime = ({String? date, List<SetValues> sets});
 typedef _DoneRow = ({
@@ -796,11 +827,23 @@ extension WorkoutData on AppDatabase {
   });
 
   /// Removes a set from this workout only. An exercise left with no sets
-  /// leaves the workout.
-  Future<void> removeSet(int setId) => transaction(() async {
+  /// leaves the workout. Returns the row for [undoRemove].
+  Future<RemovedSets> removeSet(int setId) => transaction(() async {
     final s = await _setById(setId);
     await _openWorkout(s.workoutId);
+    final groups = _group(await _setRows(s.workoutId));
+    final at = groups.indexWhere((g) => g.first.exerciseRef == s.exerciseRef);
+    final block = groups[at];
     await (delete(workoutSets)..where((x) => x.id.equals(setId))).go();
+    return RemovedSets._(
+      s.workoutId,
+      s.exerciseRef,
+      s.exerciseName,
+      [s],
+      at,
+      block.indexWhere((x) => x.id == setId),
+      block.length == 1,
+    );
   });
 
   /// Adds one planned set at the end of an exercise ("+ Add set"). It takes
@@ -905,17 +948,76 @@ extension WorkoutData on AppDatabase {
     return [for (final s in old) await _setById(s.id)];
   });
 
-  /// Removes an exercise with all its sets from this workout.
-  Future<void> removeExercise(int workoutId, String exerciseRef) =>
+  /// Removes an exercise with all its sets from this workout. Returns the
+  /// rows for [undoRemove].
+  Future<RemovedSets> removeExercise(int workoutId, String exerciseRef) =>
       transaction(() async {
         await _openWorkout(workoutId);
+        final groups = _group(await _setRows(workoutId));
+        final at = groups.indexWhere((g) => g.first.exerciseRef == exerciseRef);
+        final block = at < 0 ? <WorkoutSet>[] : groups[at];
         await (delete(workoutSets)..where(
               (s) =>
                   s.workoutId.equals(workoutId) &
                   s.exerciseRef.equals(exerciseRef),
             ))
             .go();
+        return RemovedSets._(
+          workoutId,
+          exerciseRef,
+          block.isEmpty ? '' : block.first.exerciseName,
+          block,
+          at < 0 ? 0 : at,
+          0,
+          true,
+        );
       });
+
+  /// Puts back what [removeSet] or [removeExercise] removed, with the same
+  /// ids and values, so records and times come back by themselves. A set goes
+  /// back into its exercise at its old place (or the end, if that exercise
+  /// has fewer sets now); an exercise that is gone goes back at its old place
+  /// among the exercises (or last). Then the whole workout is renumbered. One
+  /// transaction. Throws [WorkoutRefused] when the workout was finished since
+  /// ([WorkoutProblem.notRunning]) or when the exercise was added again
+  /// ([WorkoutProblem.duplicateExercise]), and [StateError] when the workout
+  /// is gone; nothing is written then. Undoing twice does nothing the second
+  /// time.
+  Future<void> undoRemove(RemovedSets removed) => transaction(() async {
+    if (removed.sets.isEmpty) return;
+    await _openWorkout(removed.workoutId);
+    final rows = await _setRows(removed.workoutId);
+    final back = [for (final s in removed.sets) s.id];
+    if (rows.any((s) => back.contains(s.id))) return;
+    final order = [
+      for (final g in _group(rows)) [for (final s in g) s.id],
+    ];
+    final at = _group(rows)
+        .indexWhere((g) => g.first.exerciseRef == removed.exerciseRef);
+    if (at >= 0 && removed._exerciseGone) {
+      throw const WorkoutRefused(WorkoutProblem.duplicateExercise);
+    }
+    for (final s in removed.sets) {
+      await into(workoutSets).insert(s.toCompanion(false));
+    }
+    if (at >= 0) {
+      final block = order[at];
+      block.insertAll(
+        removed._indexInBlock > block.length
+            ? block.length
+            : removed._indexInBlock,
+        back,
+      );
+    } else {
+      order.insert(
+        removed._exerciseIndex > order.length
+            ? order.length
+            : removed._exerciseIndex,
+        back,
+      );
+    }
+    await _renumber([for (final g in order) ...g]);
+  });
 
   /// Moves an exercise one place up ([delta] -1) or down (1). At either end
   /// nothing changes.

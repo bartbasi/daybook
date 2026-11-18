@@ -2211,4 +2211,160 @@ void main() {
       },
     );
   });
+  group('Undo for a removed set or exercise', () {
+    late int id;
+
+    Future<List<WorkoutSet>> allRows() =>
+        (db.select(db.workoutSets)..orderBy([
+              (s) => OrderingTerm.asc(s.position),
+              (s) => OrderingTerm.asc(s.id),
+            ]))
+            .get();
+
+    setUp(() async {
+      final r = await db.createRoutine('R', [
+        ex(bench, 'Bench press', sets: 3),
+        ex(press, 'Overhead press', sets: 2),
+        ex(row, 'Row', sets: 2),
+      ], at('2026-11-01', 9, 0));
+      id = (await db.startRoutine(
+        r.routine.id,
+        at('2026-11-12', 17, 30),
+      )).workout!.id;
+    });
+
+    List<String> refs(WorkoutView v) => [
+      for (final e in v.exercises) e.exerciseRef,
+    ];
+
+    test('a removed set comes back with the same row, in its place', () async {
+      final second = setsOf(await view(id), bench)[1];
+      await db.adjustSet(second.row.id, weightKg: 80, reps: 9);
+      await db.logSet(second.row.id, at('2026-11-12', 17, 40));
+      final before = await allRows();
+      final removed = await db.removeSet(second.row.id);
+      expect(setsOf(await view(id), bench), hasLength(2));
+      await db.undoRemove(removed);
+      expect(await allRows(), before);
+    });
+
+    test(
+      'remove set 2, move another exercise up, then Undo: it is set 2 again',
+      () async {
+        final bs = setsOf(await view(id), bench);
+        final removed = await db.removeSet(bs[1].row.id);
+        await db.moveExercise(id, row, -1);
+        await db.undoRemove(removed);
+        final v = await view(id);
+        expect(refs(v), [bench, row, press]);
+        expect(setsOf(v, bench).map((s) => s.row.id), [
+          bs[0].row.id,
+          bs[1].row.id,
+          bs[2].row.id,
+        ]);
+        final positions = [
+          for (final e in v.exercises)
+            for (final s in e.sets) s.row.position,
+        ];
+        expect(positions, [0, 1, 2, 3, 4, 5, 6]);
+      },
+    );
+
+    test(
+      'a removed last set brings its exercise back in its old place',
+      () async {
+        for (final s in setsOf(await view(id), press).skip(1)) {
+          await db.removeSet(s.row.id);
+        }
+        final only = setsOf(await view(id), press).single;
+        final removed = await db.removeSet(only.row.id);
+        expect(refs(await view(id)), [bench, row]);
+        await db.undoRemove(removed);
+        expect(refs(await view(id)), [bench, press, row]);
+        expect(setsOf(await view(id), press).single.row.id, only.row.id);
+      },
+    );
+
+    test(
+      'a removed exercise comes back with logged sets and records',
+      () async {
+        await db.saveWeight(180, imp, at('2026-11-10', 7, 0));
+        final ps = setsOf(await view(id), press);
+        for (final s in ps) {
+          await db.adjustSet(s.row.id, weightKg: 60, reps: 8);
+          await db.logSet(s.row.id, at('2026-11-12', 17, 40));
+        }
+        final before = await allRows();
+        final removed = await db.removeExercise(id, press);
+        expect(removed.sets.map((s) => s.id), ps.map((s) => s.row.id));
+        expect(refs(await view(id)), [bench, row]);
+        // Another exercise is added while the bar is up.
+        await db.addExercise(id, squat, 'Squat', sets: 1);
+        await db.undoRemove(removed);
+        final v = await view(id);
+        expect(refs(v), [bench, press, row, squat]);
+        expect(
+          (await allRows()).where((s) => s.exerciseRef == press),
+          before.where((s) => s.exerciseRef == press),
+        );
+        expect(setsOf(v, press).every((s) => s.isDone), isTrue);
+        final positions = [
+          for (final e in v.exercises)
+            for (final s in e.sets) s.row.position,
+        ];
+        expect(positions, [for (var i = 0; i < positions.length; i++) i]);
+      },
+    );
+
+    test('Undo twice puts nothing back twice', () async {
+      final removed = await db.removeExercise(id, press);
+      await db.undoRemove(removed);
+      final once = await allRows();
+      await db.undoRemove(removed);
+      expect(await allRows(), once);
+    });
+
+    test('Undo is refused when the exercise was added again', () async {
+      final removed = await db.removeExercise(id, press);
+      await db.addExercise(id, press, 'Overhead press', sets: 1);
+      final before = await allRows();
+      await expectLater(
+        db.undoRemove(removed),
+        throwsA(
+          isA<WorkoutRefused>().having(
+            (e) => e.problem,
+            'problem',
+            WorkoutProblem.duplicateExercise,
+          ),
+        ),
+      );
+      expect(await allRows(), before);
+    });
+
+    test('Undo after Finish is refused and writes nothing', () async {
+      final removed = await db.removeSet(
+        setsOf(await view(id), bench)[1].row.id,
+      );
+      await db.finishWorkout(id, at('2026-11-12', 18, 0));
+      final before = await allRows();
+      await expectLater(
+        db.undoRemove(removed),
+        throwsA(
+          isA<WorkoutRefused>().having(
+            (e) => e.problem,
+            'problem',
+            WorkoutProblem.notRunning,
+          ),
+        ),
+      );
+      expect(await allRows(), before);
+    });
+
+    test('Undo after the workout is deleted writes nothing', () async {
+      final removed = await db.removeExercise(id, press);
+      await db.deleteWorkout(id);
+      await expectLater(db.undoRemove(removed), throwsA(isA<StateError>()));
+      expect(await db.select(db.workoutSets).get(), isEmpty);
+    });
+  });
 }

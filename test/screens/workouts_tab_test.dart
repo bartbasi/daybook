@@ -1,10 +1,12 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
 import 'package:daybook/screens/workouts/seams.dart';
+import 'package:daybook/screens/workouts/workouts_tab.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:flutter/material.dart';
@@ -76,7 +78,8 @@ void main() {
 
     expect(find.text('Routines'), findsOneWidget);
     expect(find.text('Bench press, Overhead press'), findsOneWidget);
-    expect(find.text('Empty workout'), findsOneWidget);
+    // An empty workout needs the picker to add exercises, so no button yet.
+    expect(find.text('Empty workout'), findsNothing);
     // Four Start buttons: two to start again, two routines.
     expect(find.widgetWithText(FilledButton, 'Start'), findsNWidgets(4));
   });
@@ -141,15 +144,30 @@ void main() {
     expect(find.text('225 lb'), findsNWidgets(3));
   });
 
-  h.appTest('an empty workout starts with no exercises, and no Add exercise '
-      'button until the picker exists', (tester) async {
+  Future<void> noPicker(
+    BuildContext context, {
+    required PickExercise onPick,
+    required Set<String> alreadyIn,
+    bool single = false,
+  }) async {}
+
+  h.appTest('Empty workout is not offered until the picker exists, so there '
+      'is never an empty workout nothing can be added to', (tester) async {
+    await openTab(tester);
+    expect(find.text('No routines yet.'), findsOneWidget);
+    expect(find.text('Empty workout'), findsNothing);
+  });
+
+  h.appTest('an empty workout starts with no exercises and an Add exercise '
+      'button once the picker exists', (tester) async {
+    WorkoutSeams.exercisePicker = noPicker;
     await openTab(tester);
     expect(find.text('No routines yet.'), findsOneWidget);
     await tester.tap(find.text('Empty workout'));
     await settle(tester);
 
     expect(find.text('No exercises yet.'), findsOneWidget);
-    expect(find.text('+ Add exercise'), findsNothing);
+    expect(find.text('+ Add exercise'), findsOneWidget);
     final rows = await h.workoutRows(tester);
     expect(rows.single.routineId, isNull);
     expect(rows.single.endedAtMs, isNull);
@@ -220,6 +238,7 @@ void main() {
       'task 4.4 has put it there', (tester) async {
     await openTab(tester);
     await waitFor(tester, find.text('This week, sets by muscle'));
+    expect(find.text('Chest'), findsOneWidget);
     expect(
       find.ancestor(of: find.text('Chest'), matching: find.byType(InkWell)),
       findsNothing,
@@ -307,7 +326,7 @@ void main() {
     expect(
       find.text(
         "Monday's workout was still running, so it was finished first. "
-        'Nothing was lost.',
+        'Its logged sets are kept.',
       ),
       findsOneWidget,
     );
@@ -317,6 +336,26 @@ void main() {
     final oldSets = await h.allSets(tester, oldId);
     expect(oldSets.where((s) => s.completedAtMs != null), hasLength(1));
     expect(rows.where((w) => w.endedAtMs == null), hasLength(1));
+  });
+
+  h.appTest('a start that finishes an earlier workout ends its rest', (
+    tester,
+  ) async {
+    final ids = await h.seedSample(tester);
+    final oldId = await h.real(tester, () async {
+      final r = await h.db.startRoutine(ids.pushId, at('2026-11-09', 17, 0));
+      return r.workout!.id;
+    });
+    await openTab(tester);
+    final timer = AppScope.of(tester.element(find.byType(WorkoutsTab)))
+        .restTimer!;
+    timer.start(oldId, 120);
+    expect(timer.isActive, isTrue);
+    await tester.tap(startButton(0));
+    await settle(tester);
+    expect(timer.isActive, isFalse);
+    await tester.pump(const Duration(seconds: 130));
+    expect(h.vibrations, 0);
   });
 
   h.appTest('a double tap on a Start again row starts one workout', (
@@ -382,6 +421,7 @@ void main() {
     for (final scale in [1.0, 2.0]) {
       h.appTest('layout at ${size.width.round()} dp and text scale $scale: '
           'nothing overflows and every target is 48 dp', (tester) async {
+        WorkoutSeams.exercisePicker = noPicker;
         await h.seedSample(tester);
         await h.real(
           tester,

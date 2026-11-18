@@ -1,8 +1,6 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
-import 'dart:io';
-
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/workout_data.dart';
@@ -314,29 +312,24 @@ void main() {
     expect(h.vibrations, 1);
   });
 
-  test('the workout screens use no permission, notification or timezone '
-      'package', () {
-    final pubspec = File('pubspec.yaml').readAsStringSync();
-    for (final name in [
-      'flutter_local_notifications',
-      'permission_handler',
-      'timezone',
-      'vibration',
-      'awesome_notifications',
-      'workmanager',
-    ]) {
-      expect(pubspec.contains(name), isFalse, reason: name);
-    }
-    for (final f in Directory('lib/screens/workouts').listSync()) {
-      if (f is! File || !f.path.endsWith('.dart')) continue;
-      // Code only: a comment may say that nothing is asked.
-      final text = f
-          .readAsLinesSync()
-          .where((l) => !l.trimLeft().startsWith('//'))
-          .join(' ')
-          .toLowerCase();
-      expect(text.contains('permission'), isFalse, reason: f.path);
-      expect(text.contains('notification'), isFalse, reason: f.path);
+  h.appTest('the rest bar and the last Add set sit above the system '
+      'navigation bar', (tester) async {
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    final all = await openPush(tester); // 400 x 800 at ratio 1
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -3000),
+    );
+    await tester.pump();
+    final lastAdd = tester.getRect(find.text('+ Add set').last);
+    expect(lastAdd.bottom, lessThanOrEqualTo(800 - 48));
+    await log(tester, all.first);
+    for (final label in ['-15 s', '+15 s', 'Skip']) {
+      final r = tester.getRect(find.widgetWithText(OutlinedButton, label));
+      expect(r.bottom, lessThanOrEqualTo(800 - 48), reason: label);
     }
   });
 

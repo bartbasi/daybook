@@ -449,4 +449,55 @@ void main() {
       });
     }
   }
+  h.appTest('Change, then Save with the number untouched, writes nothing and '
+      'keeps the estimate', (tester) async {
+    await prepare(tester);
+    await finish(tester);
+    await tester.tap(find.text('Change'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect((await row(tester)).kcalOverride, isNull);
+    expect(find.text('250 kcal estimate'), findsOneWidget);
+  });
+
+  h.appTest('a weigh-in after the workout day is not used, also for a '
+      'workout finished after midnight', (tester) async {
+    final ids = await h.seedSample(tester);
+    final start = at('2026-11-11', 23, 30); // Wed
+    final id = await h.real(tester, () async {
+      await h.db.saveWeight(181.8, UnitSystem.imperial, at('2026-11-10', 7, 0));
+      // Thursday, after the workout's day: must not be used.
+      await h.db.saveWeight(250, UnitSystem.imperial, at('2026-11-12', 0, 5));
+      final r = await h.db.startRoutine(ids.pushId, start);
+      final first = (await h.db.loadWorkout(r.workout!.id))!.nextSet!;
+      await h.db.logSet(
+        first.row.id,
+        Now(utcMs: start.utcMs + 22 * 60000, offsetMinutes: -360),
+      );
+      return r.workout!.id;
+    });
+    h.now = at('2026-11-12', 0, 20); // Thu, 00:20
+    await h.openApp(tester);
+    await tester.tap(find.widgetWithText(TextButton, 'Return'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(
+      find.text('MET 3.5, 181.8 lb (weighed Nov 10), 22 min'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('250.0 lb'), findsNothing);
+    final w = await h.real(
+      tester,
+      () => (h.db.select(
+        h.db.workouts,
+      )..where((x) => x.id.equals(id))).getSingle(),
+    );
+    expect(w.localDate, '2026-11-11');
+    expect(w.kcalEstimated, closeTo(3.5 * lbToKg(181.8) * 22 / 60, 1e-9));
+  });
 }

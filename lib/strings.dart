@@ -1074,7 +1074,7 @@ class S {
       'Return to it, or finish it first.';
   static String finishedEarlier(String name) =>
       '${_cap(name)} was still running, so it was finished first. '
-      'Nothing was lost.';
+      'Its logged sets are kept.';
   static const startFailed =
       'Could not start the workout. Nothing was changed.';
   static const weeklyTitle = 'This week, sets by muscle';
@@ -1105,6 +1105,19 @@ class S {
   // The active workout (workout.html frames 2 to 5).
   static String workoutStarted(String time, int minutes) =>
       'Started $time, $minutes min';
+
+  /// For a workout that started on an earlier day: 'Started Wed 5:00 pm'.
+  static String workoutStartedOn(String localDate, String today, String time) {
+    final day = localDate.compareTo(addDays(today, -6)) >= 0
+        ? _weekdays[parseDate(localDate).weekday - 1]
+        : monthDay(localDate, today);
+    return 'Started $day $time';
+  }
+
+  static String removedSetMessage(String exercise, int number) =>
+      'Removed set $number of $exercise.';
+  static String removedExerciseMessage(String exercise, int sets) =>
+      'Removed $exercise, ${weeklySets(sets)}.';
   static const finish = 'Finish';
   static const workoutLoadFailed =
       'Could not read this workout. Go back and try again.';

@@ -537,4 +537,133 @@ void main() {
     );
     expect(find.textContaining(' lb'), findsNothing);
   });
+  Future<void> removeExerciseFromMenu(WidgetTester tester, String name) async {
+    await tester.ensureVisible(find.byTooltip('Menu for $name'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Menu for $name'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('Remove exercise'));
+    await settle(tester);
+  }
+
+  h.appTest('Remove exercise says so with Undo, and Undo puts back the same '
+      'rows in the same place', (tester) async {
+    final id = await startPush(tester);
+    await openRunning(tester);
+    final before = await sets(tester, id);
+    await removeExerciseFromMenu(tester, 'Bench press');
+    expect(find.text('Removed Bench press, 3 sets.'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('Bench press'), findsNothing);
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(await sets(tester, id), before);
+    expect(find.text('Bench press'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Bench press')).dy,
+      lessThan(tester.getTopLeft(find.text('Overhead press')).dy),
+    );
+    // One Undo only: the bar is gone.
+    expect(find.text('Undo'), findsNothing);
+    expect(find.textContaining('Removed'), findsNothing);
+  });
+
+  h.appTest('Undo after the exercise was added again is refused in plain '
+      'words and doubles nothing', (tester) async {
+    final id = await startPush(tester);
+    WorkoutSeams.exercisePicker =
+        (
+          context, {
+          required onPick,
+          required alreadyIn,
+          bool single = false,
+        }) async {
+          await onPick(bench, 'Bench press');
+        };
+    await openRunning(tester);
+    final before = await sets(tester, id);
+    await removeExerciseFromMenu(tester, 'Bench press');
+    await tester.ensureVisible(find.text('+ Add exercise'));
+    await tester.tap(find.text('+ Add exercise'));
+    await settle(tester);
+    final added = await sets(tester, id);
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(
+      find.text('That exercise is already in this workout.'),
+      findsOneWidget,
+    );
+    expect(await sets(tester, id), added);
+    expect(added.where((s) => before.any((b) => b.id == s.id)), hasLength(3));
+  });
+
+  h.appTest('Finish drops the Undo: after Resume nothing can be undone', (
+    tester,
+  ) async {
+    final id = await startPush(tester);
+    await openRunning(tester);
+    await removeExerciseFromMenu(tester, 'Bench press');
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.tap(find.text('Finish'));
+    await settle(tester);
+    await tester.tap(find.text('Resume'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(WorkoutScreen), findsOneWidget);
+    expect(find.text('Undo'), findsNothing);
+    expect(
+      (await sets(tester, id)).where((s) => s.exerciseRef == bench),
+      isEmpty,
+    );
+  });
+  h.appTest('a workout left running from an earlier day names the day, not '
+      'minutes in the thousands', (tester) async {
+    final ids = await h.seedSample(tester);
+    await h.real(
+      tester,
+      () => h.db.startRoutine(ids.pushId, at('2026-11-09', 17, 0)),
+    );
+    await openRunning(tester);
+    expect(find.text('Started Mon 5:00 pm'), findsOneWidget);
+    expect(find.textContaining(' min'), findsNothing);
+  });
+
+  h.appTest('Changed, from compares what is shown: a weight that differs '
+      'only beyond what the screen shows is not a change', (tester) async {
+    final id = await startPush(tester);
+    await h.real(tester, () async {
+      final all = (await h.db.loadWorkout(id))!.exercises.first.sets;
+      // 175 lb plus a speck: the same 175 on screen. Set 2 is really changed.
+      await h.db.adjustSet(
+        all[0].row.id,
+        weightKg: all[0].row.weightKg! + 1e-6,
+        reps: 8,
+      );
+      await h.db.adjustSet(all[1].row.id, weightKg: lbToKg(180), reps: 8);
+    });
+    await openRunning(tester);
+    expect(find.text('Changed'), findsOneWidget);
+    expect(find.text('Changed, from 175 x 8'), findsOneWidget);
+  });
+
+  h.appTest('a workout finished somewhere else takes its rest with it', (
+    tester,
+  ) async {
+    final id = await startPush(tester);
+    await openRunning(tester);
+    final all = await sets(tester, id);
+    await tester.tap(check(all.first));
+    await settle(tester);
+    final timer = AppScope.of(tester.element(find.byType(WorkoutScreen)))
+        .restTimer!;
+    expect(timer.isActive, isTrue);
+    await tester.runAsync(() => h.db.finishWorkout(id, h.now));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(WorkoutScreen), findsNothing);
+    expect(timer.isActive, isFalse);
+  });
 }

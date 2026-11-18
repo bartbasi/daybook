@@ -78,6 +78,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   var _closing = false;
   String? _message;
 
+  // The rows of the last removed set or exercise, for Undo. Dropped after one
+  // Undo, on Finish, and with the screen.
+  RemovedSets? _removed;
+
   @override
   void initState() {
     super.initState();
@@ -131,6 +135,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
     if (!view.isRunning && !_finishing) {
       // Finished somewhere else: a finished workout cannot be changed here.
+      AppScope.of(context).restTimer?.clearFor(widget.workoutId);
       _closeSelf();
       return;
     }
@@ -239,7 +244,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }) async {
     final units = _units;
     if (units == null) return;
-    await showSetSheet(
+    final removed = await showSetSheet(
       context,
       set: set,
       exerciseName: block.exerciseName,
@@ -248,13 +253,28 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       notice: notice,
       focus: reps ? SetField.reps : SetField.weight,
     );
+    if (removed != null && mounted) setState(() => _removed = removed);
   }
+
+  /// Undo for the last removal. Single flight: the rows are taken before
+  /// anything is awaited, so a second tap finds nothing.
+  Future<void> _undo() async {
+    final removed = _removed;
+    if (removed == null || _busy) return;
+    setState(() => _removed = null);
+    await _run(() => AppScope.of(context).db.undoRemove(removed));
+  }
+
+  String _removedText(RemovedSets r) => r.sets.length == 1
+      ? S.removedSetMessage(r.exerciseName, r.setNumber)
+      : S.removedExerciseMessage(r.exerciseName, r.sets.length);
 
   Future<void> _finish() async {
     if (_finishing) return;
     setState(() {
       _finishing = true;
       _message = null;
+      _removed = null;
     });
     final scope = AppScope.of(context);
     try {
@@ -340,9 +360,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           () => db.moveExercise(widget.workoutId, block.exerciseRef, 1),
         );
       case _Menu.remove:
-        return _run(
-          () => db.removeExercise(widget.workoutId, block.exerciseRef),
-        );
+        return _run(() async {
+          final removed = await db.removeExercise(
+            widget.workoutId,
+            block.exerciseRef,
+          );
+          if (mounted && removed.sets.isNotEmpty) {
+            setState(() => _removed = removed);
+          }
+        });
       case _Menu.replace:
         return _replace(block);
       case _Menu.details:
@@ -361,12 +387,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   String _subtitle(WorkoutView view) {
     final w = view.workout;
     final now = AppScope.of(context).clock();
+    final time = S.timeOfDay(minuteOfDayOf(w.startedAtMs, w.tzOffsetMinutes));
+    // A workout left running from an earlier day names the day, not a count
+    // of minutes in the thousands.
+    if (w.localDate != now.localDate) {
+      return S.workoutStartedOn(w.localDate, now.localDate, time);
+    }
     final ms = now.utcMs - w.startedAtMs;
-    final minutes = ms <= 0 ? 0 : ms ~/ 60000;
-    return S.workoutStarted(
-      S.timeOfDay(minuteOfDayOf(w.startedAtMs, w.tzOffsetMinutes)),
-      minutes,
-    );
+    return S.workoutStarted(time, ms <= 0 ? 0 : ms ~/ 60000);
   }
 
   /// 'Up next: set 2, 175 lb x 8' for the first set not logged.
@@ -397,53 +425,59 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     final timer = scope.restTimer;
     final ready = view != null && units != null;
     return Scaffold(
-      body: Column(
-        children: [
-          WorkoutHeader(
-            title: ready ? _title(view) : S.workoutDefaultName,
-            subtitle: ready ? _subtitle(view) : null,
-            trailing: FilledButton(
-              style: FilledButton.styleFrom(minimumSize: const Size(72, 48)),
-              onPressed: ready && !_finishing ? _finish : null,
-              child: const Text(S.finish),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            WorkoutHeader(
+              title: ready ? _title(view) : S.workoutDefaultName,
+              subtitle: ready ? _subtitle(view) : null,
+              trailing: FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size(72, 48)),
+                onPressed: ready && !_finishing ? _finish : null,
+                child: const Text(S.finish),
+              ),
             ),
-          ),
-          Expanded(
-            child: ContentWidth(
-              child: !ready
-                  ? Center(
-                      child: _failed
-                          ? const Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Text(S.workoutLoadFailed),
-                            )
-                          : const CircularProgressIndicator(),
-                    )
-                  : _list(view, units),
+            Expanded(
+              child: ContentWidth(
+                child: !ready
+                    ? Center(
+                        child: _failed
+                            ? const Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Text(S.workoutLoadFailed),
+                              )
+                            : const CircularProgressIndicator(),
+                      )
+                    : _list(view, units),
+              ),
             ),
-          ),
-          if (_message != null) ConfirmBar(message: _message!),
-          if (timer != null && ready)
-            ListenableBuilder(
-              listenable: timer,
-              builder: (context, _) => timer.workoutId == widget.workoutId
-                  // Never taller than half the screen: at a very large text
-                  // size the bar scrolls inside its space, and the sets keep
-                  // theirs.
-                  ? ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: MediaQuery.sizeOf(context).height * 0.5,
-                      ),
-                      child: SingleChildScrollView(
-                        child: RestTimerBar(
-                          timer: timer,
-                          upNext: _upNext(view, units),
+            if (_message != null)
+              ConfirmBar(message: _message!)
+            else if (_removed != null)
+              ConfirmBar(message: _removedText(_removed!), onUndo: _undo),
+            if (timer != null && ready)
+              ListenableBuilder(
+                listenable: timer,
+                builder: (context, _) => timer.workoutId == widget.workoutId
+                    // Never taller than half the screen: at a very large text
+                    // size the bar scrolls inside its space, and the sets keep
+                    // theirs.
+                    ? ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.sizeOf(context).height * 0.5,
                         ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-        ],
+                        child: SingleChildScrollView(
+                          child: RestTimerBar(
+                            timer: timer,
+                            upNext: _upNext(view, units),
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -797,7 +831,12 @@ class _SetRow extends StatelessWidget {
             ],
           ),
         ),
-        if (set.changed && set.previous != null)
+        // Compared as shown, in the user's units: a weight that differs only
+        // beyond what the screen shows is not a change.
+        if (set.changed &&
+            set.previous != null &&
+            setValuesText(set.previous!, units) !=
+                setValuesText((weightKg: w, reps: reps), units))
           Padding(
             padding: const EdgeInsets.only(left: 32, bottom: 4),
             child: Wrap(

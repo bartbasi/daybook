@@ -535,6 +535,13 @@ class _KcalSheetState extends State<_KcalSheet> {
   void _save() {
     if (_saving) return;
     final t = _text.text.trim();
+    if (!widget.hasOwn && t == widget.start) {
+      // The estimate, untouched: it is not the user's own number, so nothing
+      // is written (a written number would stop the estimate following a
+      // Resume).
+      popRouteOf<bool>(context, false);
+      return;
+    }
     if (t.startsWith('-')) {
       setState(() => _error = S.kcalNegative);
       return;
