@@ -169,7 +169,7 @@ Terms, quoted from pacompendium.com:
 
 There is no formal license name. The journal article itself is under CC BY-NC-ND (Elsevier), so values should come from the website or its downloadable PDF, under the website's permission, not from the article's tables.
 
-Content: 1,114 activities under 22 headings, for adults 19 to 59.
+Content: 1,111 activities under 22 headings in the PDF and on the website's heading pages, for adults 19 to 59. The journal article says 1,114 (see "As built" below).
 
 Conditions:
 - Cite the Compendium.
@@ -192,7 +192,7 @@ About screen text:
 As built (task 5.1, 2026-11-17):
 - Fetched: the PDF at https://pacompendium.com/wp-content/uploads/2025/02/1_2024-adult-compendium_1_2024.pdf on 2026-11-17. 563,091 bytes, SHA-256 `ac30234b8f8f813837e282773cfcb3e0fe062334777c2f7b3213429c4fbc251c`, the same as the plan's pin. The script refuses any other file. The PDF is not committed.
 - Built by `tools/build_met_table.py` into `assets/met/compendium_2024.csv` (code, heading, MET, description, min and max mph), with the citation above and "values unchanged" in `assets/met/README.txt`. Only the PDF, not the journal article, was used.
-- Rows: 1,111, under the same 22 headings. The website says 1,114. Every code in the PDF's text was read (a plain text read of the whole PDF finds no other code), no row was dropped and no line failed to parse, so the 3 missing activities are not in this PDF and the PDF does not say which. Needs a decision from Bart (the email to the Compendium team could ask).
+- Rows: 1,111, under the same 22 headings. The reviewer checked every row (code, heading, MET and description) against the PDF by two independent text extractions and found no mismatch, and found the same 1,111 codes on the website's 22 heading pages. The figure 1,114 comes from the journal article. As far as the reviewer could read it, the article's own table of counts per heading agrees with this file for 21 of the 22 headings, gives Sports 158 where the PDF and the website list 156, and adds up to 1,113, not 1,114. So two of the three are Sports activities that neither the PDF nor the website lists, and the third looks like a counting slip in the article. That reading of the article came through a summarising tool and should be checked against the article itself. The only other 5-digit codes in the PDF are two former codes named inside descriptions (11200 and 17120). Nothing was dropped and no line failed to parse. For Bart: the email to the Compendium team could ask which two Sports activities are meant.
 - Left out: nothing. Values and descriptions are as printed (18290 is printed "8.00"; spelling mistakes in descriptions are kept). Two whitespace changes only: runs of spaces became one, and a description that wraps onto a second line is joined with a space.
 - The speed bands of Running, Walking and Bicycling, and the general entries (Running 12145, "Running, self-selected pace", 10.5; Walking 17190, 3.8; Bicycling 01014, "Bicycling, general", 7.0), are in `lib/data/met_table.dart`. A pace in min/mile or a speed in km/h written beside the mph is ignored, never converted.
 

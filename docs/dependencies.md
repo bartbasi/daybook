@@ -61,7 +61,8 @@ Flutter's `LicenseRegistry` collects the notices of the Dart packages and the Fl
 | flutter_test (SDK) | BSD-3-Clause | Tests |
 | integration_test (SDK) | BSD-3-Clause | Part of the Flutter SDK. Runs the app on the Android emulator and iOS simulator in CI |
 | flutter_lints | BSD-3-Clause | Lint rules |
-| Python 3 standard library | PSF-2.0 | `tools/build_food_db.py` builds the USDA asset |
+| Python 3 standard library | PSF-2.0 | `tools/build_food_db.py` builds the USDA asset; `tools/build_exercise_data.py` and `tools/build_met_table.py` build the exercise and MET assets |
+| pdftotext (Xpdf 4.00 as shipped with Git for Windows; poppler-utils on Linux) | GPL (version 2 or later) | Used by `tools/build_met_table.py` to read the Compendium PDF. A build tool only: it is run by hand when the asset is rebuilt and is not part of the app |
 | actions/checkout, actions/setup-java, actions/upload-artifact | MIT | GitHub Actions CI |
 | subosito/flutter-action | MIT | Installs Flutter in CI |
 | flutter_driver (SDK), fuchsia_remote_debug_protocol (SDK), process, sync_http (pulled in by integration_test) | BSD-3-Clause | Dev only |
