@@ -75,42 +75,6 @@ Future<void> _waitForWidget(WidgetTester tester, Finder f, String what) async {
   await tester.pump(const Duration(milliseconds: 500));
 }
 
-/// Waits for [f] to be built in a lazy list, scrolling [list] a little at a
-/// time as a person does, because a small screen or a long list builds only
-/// the rows in view. The scrolling is not counted: it is a setup step, never
-/// part of the two taps a speed number counts.
-Future<void> _scrolledTo(
-  WidgetTester tester,
-  TapCounter taps,
-  Finder list,
-  Finder f,
-  String what,
-) async {
-  for (var i = 0; i < 40; i++) {
-    if (await taps.scrollTo(f, list: list)) {
-      // Let a route finish sliding in.
-      await tester.pump(const Duration(milliseconds: 500));
-      return;
-    }
-    // The rows may not have arrived yet.
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 25)),
-    );
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-  fail('Gave up waiting for $what in the list');
-}
-
-/// The list of the Workouts tab: the list a touch in the middle of the screen
-/// reaches (the other tabs are out of play).
-Finder get _tabList => find.byType(ListView).hitTestable();
-
-/// The results list of the exercise picker.
-Finder get _pickerList => find.descendant(
-  of: find.byType(ExercisePickerScreen),
-  matching: find.byType(ListView),
-);
-
 Future<void> _waitUntilGone(WidgetTester tester, Finder f, String what) async {
   await waitFor(tester, () => f.evaluate().isEmpty, what);
   await tester.pump(const Duration(milliseconds: 500));
@@ -248,13 +212,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
       taps,
       find.widgetWithText(NavigationDestination, S.tabWorkouts),
     );
-    await _scrolledTo(
-      tester,
-      taps,
-      _tabList,
-      find.text(S.newRoutine),
-      'New routine',
-    );
+    await _waitForWidget(tester, find.text(S.newRoutine), 'the Workouts tab');
     await _tap(tester, taps, find.text(S.newRoutine));
 
     // Name it. The field has the cursor already, but a tap makes sure.
@@ -280,7 +238,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
         of: find.byKey(ValueKey('row-$ref')),
         matching: find.text(S.pickerAdd),
       );
-      await _scrolledTo(tester, taps, _pickerList, add, query);
+      await _waitForWidget(tester, add, '$query in the list');
       await _tap(tester, taps, add);
       await tester.pump(const Duration(milliseconds: 300));
     }
@@ -315,13 +273,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
 
     // Start it: one tap on its row.
     final row = 'routine-$routineId';
-    await _scrolledTo(
-      tester,
-      taps,
-      _tabList,
-      find.byKey(ValueKey(row)),
-      'the routine row',
-    );
+    await _waitForWidget(tester, find.byKey(ValueKey(row)), 'the routine row');
     await _tap(tester, taps, _startIn(row));
     final firstId = await _newWorkout(tester, workoutsBefore);
     await _waitForWidget(

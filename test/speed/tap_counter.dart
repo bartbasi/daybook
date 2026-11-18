@@ -33,29 +33,6 @@ class TapCounter {
     await tester.testTextInput.receiveAction(action);
   }
 
-  /// Scrolls [list] the way a person does, a little at a time, until [target]
-  /// is built (a lazy list builds only the rows in view and a little beyond).
-  /// Not counted: it is for setup steps, never inside the taps a speed target
-  /// counts. Answers whether [target] is built; it does not fail, so the tap
-  /// that follows fails with its own message.
-  Future<bool> scrollTo(
-    Finder target, {
-    required Finder list,
-    int rounds = 20,
-  }) async {
-    for (var i = 0; i < rounds; i++) {
-      if (target.evaluate().isNotEmpty) return true;
-      if (list.evaluate().isEmpty) return false;
-      await tester.drag(
-        list.first,
-        const Offset(0, -120),
-        warnIfMissed: false,
-      );
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    return target.evaluate().isNotEmpty;
-  }
-
   /// Typing is free, but only into a field that already has focus: enterText
   /// would focus any field by itself and hide a tap the user would need.
   /// Replaces the text in the field.
