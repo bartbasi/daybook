@@ -33,10 +33,6 @@ class TapCounter {
     await tester.testTextInput.receiveAction(action);
   }
 
-  /// A swipe to scroll a list. Not counted: it is not a tap, and the flows use
-  /// it only to bring a list back to the top, never to reach a target.
-  Future<void> swipe(Finder list, Offset by) => tester.drag(list, by);
-
   /// Typing is free, but only into a field that already has focus: enterText
   /// would focus any field by itself and hide a tap the user would need.
   /// Replaces the text in the field.

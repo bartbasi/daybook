@@ -28,10 +28,14 @@ import 'workout_widgets.dart';
 /// Like Home, each stream is read by one builder that stays above the list and
 /// hands plain values down; the cards below never listen.
 class WorkoutsTab extends StatefulWidget {
-  const WorkoutsTab({super.key, required this.today});
+  const WorkoutsTab({super.key, required this.today, required this.selected});
 
   /// Today's date from the clock. The shell computes it on every redraw.
   final String today;
+
+  /// Whether this is the tab on screen. Choosing the tab from another one
+  /// brings its list back to the top.
+  final bool selected;
 
   @override
   State<WorkoutsTab> createState() => _WorkoutsTabState();
@@ -68,6 +72,15 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   Timer? _msgTimer;
   var _starting = false;
 
+  // The tab is kept alive, so it keeps its scroll position. Speed target 4
+  // needs "Start again" in view, so the list goes back to the top when the
+  // tab is chosen and when a workout opened from it has closed.
+  final _scroll = ScrollController();
+
+  void _toTop() {
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -87,6 +100,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   @override
   void didUpdateWidget(WorkoutsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.selected && !oldWidget.selected) _toTop();
     // A new day (the shell moved past midnight): "Start again" and the week
     // are worked out for it, with new streams.
     if (_dayFor != widget.today) {
@@ -133,6 +147,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   void dispose() {
     _userSub?.cancel();
     _msgTimer?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -180,6 +195,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
         setState(() => _msg = null);
       }
       await openWorkoutScreen(context, result.workout!.id);
+      _toTop();
       if (mounted && earlier != null) _fadeMessage();
     } catch (_) {
       if (mounted) _show(const _Msg(S.startFailed));
@@ -256,6 +272,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     _starting = true;
     try {
       await openWorkoutScreen(context, workoutId);
+      _toTop();
     } finally {
       _starting = false;
     }
@@ -321,6 +338,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     // offered. One left from an earlier day does not (a start finishes it).
     final blocked = running != null && running.workout.localDate == today;
     return ListView(
+      controller: _scroll,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       children: [
         Padding(

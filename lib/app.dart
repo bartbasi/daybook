@@ -277,7 +277,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             ),
             const SizedBox.shrink(),
             _workoutsOpened
-                ? WorkoutsTab(today: today)
+                ? WorkoutsTab(today: today, selected: _index == _workouts)
                 : const SizedBox.shrink(),
             WeightTab(today: today),
             const MoreScreen(),

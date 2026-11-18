@@ -7,6 +7,7 @@ import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
 import 'package:daybook/screens/workouts/exercise_picker.dart';
 import 'package:daybook/screens/workouts/weekly_volume_screen.dart';
+import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/screens/workouts/workouts_tab.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -420,6 +421,86 @@ void main() {
     // 225 lb is 102.1 kg.
     expect(find.text('102.1 kg'), findsNWidgets(3));
     expect(find.textContaining(' lb'), findsNothing);
+  });
+  // Speed target 4: yesterday's and last week's workouts are the first rows,
+  // in view without scrolling. The tab is kept alive, so it must not stay
+  // scrolled down.
+  Future<int> seedManyRoutines(WidgetTester tester) async {
+    await h.seedSample(tester);
+    late int lastId;
+    for (var i = 1; i <= 8; i++) {
+      final r = await h.real(
+        tester,
+        () => h.db.createRoutine('Extra $i', const [
+          RoutineExerciseInput(
+            exerciseRef: squat,
+            exerciseName: 'Squat',
+            targetSets: 1,
+          ),
+        ], at('2026-11-02', 9, i)),
+      );
+      lastId = r.routine.id;
+    }
+    return lastId;
+  }
+
+  double offset(WidgetTester tester) => tester
+      .state<ScrollableState>(find.byType(Scrollable).first)
+      .position
+      .pixels;
+
+  void expectAtTop(WidgetTester tester) {
+    expect(offset(tester), 0);
+  }
+
+  h.appTest('after a workout started from far down the list, the tab is back '
+      'at the top with Start again in view', (tester) async {
+    final lastId = await seedManyRoutines(tester);
+    await openTab(tester, size: const Size(320, 568));
+    final start = find.descendant(
+      of: find.byKey(ValueKey('routine-$lastId')),
+      matching: find.widgetWithText(FilledButton, 'Start'),
+    );
+    await tester.scrollUntilVisible(
+      start,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(start);
+    await settle(tester);
+    final running = (await h.workoutRows(tester))
+        .singleWhere((w) => w.endedAtMs == null);
+    final sets = await h.allSets(tester, running.id);
+    await tester.tap(find.byKey(ValueKey('check-${sets.first.id}')));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Done'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(find.byType(WorkoutScreen), findsNothing);
+    // The first Start button is on the first row under "Start again".
+    expect(
+      tester.getRect(find.text('Start again')).top,
+      greaterThanOrEqualTo(0),
+    );
+    final box = tester.getRect(startButton(0));
+    expect(box.top >= 0 && box.bottom <= 568, isTrue, reason: '$box');
+    expectAtTop(tester);
+  });
+
+  h.appTest('choosing the Workouts tab from another tab shows its list at the '
+      'top', (tester) async {
+    await seedManyRoutines(tester);
+    await openTab(tester, size: const Size(320, 568));
+    await tester.drag(find.byType(ListView).first, const Offset(0, -2000));
+    await settle(tester);
+    expect(offset(tester), greaterThan(0));
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
+    await settle(tester);
+    await h.openWorkoutsTab(tester);
+    expectAtTop(tester);
   });
 }
 

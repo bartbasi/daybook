@@ -80,19 +80,37 @@ Future<void> _waitUntilGone(WidgetTester tester, Finder f, String what) async {
   await tester.pump(const Duration(milliseconds: 500));
 }
 
-/// One counted tap on something that may be below the fold of a small phone.
-/// With a keyboard up on a small screen, the list also scrolls by itself (the
+/// Whether a touch at the centre of [f] would reach it.
+bool _hits(WidgetTester tester, Finder f) {
+  final target = tester.renderObject(f);
+  final hit = tester.hitTestOnBinding(tester.getCenter(f));
+  return hit.path.any((e) => identical(e.target, target));
+}
+
+/// With a keyboard up on a small screen, a list also scrolls by itself (the
 /// field with the cursor is brought back into view), and a list ignores
 /// touches while it scrolls like that. A person would tap again a moment
-/// later, so this waits until a touch at the target would reach it.
-Future<void> _tap(WidgetTester tester, TapCounter taps, Finder f) async {
+/// later, so this waits, for up to two seconds, until a touch at the centre
+/// of [f] would reach it. It does not scroll.
+Future<void> _waitForHit(WidgetTester tester, Finder f) async {
   for (var i = 0; i < 20; i++) {
+    if (_hits(tester, f)) return;
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  fail('A touch on $f would not reach it after 2 seconds');
+}
+
+/// One counted tap on something that may be below the fold of a small phone:
+/// it is scrolled into view first, then the tap waits for the target to be
+/// hittable (see [_waitForHit]).
+Future<void> _tap(WidgetTester tester, TapCounter taps, Finder f) async {
+  var ready = false;
+  for (var i = 0; i < 20 && !ready; i++) {
     await tester.ensureVisible(f);
     await tester.pump(const Duration(milliseconds: 100));
-    final target = tester.renderObject(f);
-    final hit = tester.hitTestOnBinding(tester.getCenter(f));
-    if (hit.path.any((e) => identical(e.target, target))) break;
+    ready = _hits(tester, f);
   }
+  if (!ready) fail('A touch on $f would not reach it after 20 tries');
   await taps.tap(f);
   await tester.pump(const Duration(milliseconds: 100));
 }
@@ -149,6 +167,7 @@ Future<void> _tapInView(WidgetTester tester, TapCounter taps, Finder f) async {
         'the target is in view without scrolling: ${box.top} to ${box.bottom} '
         'of ${view.height}',
   );
+  await _waitForHit(tester, f);
   await taps.tap(f);
   await tester.pump(const Duration(milliseconds: 100));
 }
@@ -164,14 +183,6 @@ Future<void> _finishAndClose(WidgetTester tester, TapCounter taps) async {
     find.byType(WorkoutScreen),
     'the workout screen to close',
   );
-  // The tab is as it was left: scrolled down to the routine's Start on a small
-  // screen, with "Start again" above and not built. A person swipes down.
-  final list = find.byType(ListView).first;
-  for (var i = 0; i < 5; i++) {
-    if (find.text(S.startAgainTitle).evaluate().isNotEmpty) break;
-    await taps.swipe(list, const Offset(0, 400));
-    await tester.pump(const Duration(milliseconds: 500));
-  }
   await _waitForWidget(tester, find.text(S.startAgainTitle), 'Start again');
 }
 
@@ -220,6 +231,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
       (_benchRef, _benchName),
       (_secondRef, _secondName),
     ]) {
+      await _waitForHit(tester, search);
       await taps.tap(search);
       await tester.pump();
       await taps.type(search, query);
@@ -288,6 +300,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
       await tester.pump();
       await taps.type(reps, '8');
       final weight = find.widgetWithText(TextField, S.setWeightLabel);
+      await _waitForHit(tester, weight);
       await taps.tap(weight);
       await tester.pump();
       await taps.type(weight, '135');
