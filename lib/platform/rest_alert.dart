@@ -44,6 +44,10 @@ class LocalRestAlert extends RestAlert {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static Future<void>? _ready;
 
+  /// For a test: forget that the plugin was set up.
+  @visibleForTesting
+  static void resetForTest() => _ready = null;
+
   /// Sets the plugin up once. On iOS every "request permission" flag is off,
   /// so setting up asks for nothing.
   static Future<void> _init() => _ready ??= _plugin
@@ -88,7 +92,12 @@ class LocalRestAlert extends RestAlert {
   Future<void> schedule(int endUtcMs) async {
     try {
       await _init();
-      final end = tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, endUtcMs);
+      // Both phones drop the milliseconds, so round up: the alert must never
+      // come before the end in the app.
+      final end = tz.TZDateTime.fromMillisecondsSinceEpoch(
+        tz.UTC,
+        ((endUtcMs + 999) ~/ 1000) * 1000,
+      );
       // Nothing to wait for when the time has come.
       if (!end.isAfter(DateTime.now())) {
         await _plugin.cancel(id: restAlertId);
@@ -103,7 +112,13 @@ class LocalRestAlert extends RestAlert {
             restAlertChannelId,
             S.restAlertChannel,
           ),
-          iOS: DarwinNotificationDetails(),
+          // Nothing is shown while Daybook is in front: the buzz does that.
+          iOS: DarwinNotificationDetails(
+            presentAlert: false,
+            presentBanner: false,
+            presentList: false,
+            presentSound: false,
+          ),
         ),
         // Inexact: no exact alarm permission, so it may be a few seconds late.
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,

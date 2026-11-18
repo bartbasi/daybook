@@ -1,6 +1,8 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:async';
+
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
@@ -17,6 +19,35 @@ import 'workouts_harness.dart';
 // the exercise's rest by the app's clock, has -15 s, +15 s and Skip, is ended
 // and replaced by the next set, survives leaving the screen and switching
 // tabs, vibrates once at zero, and never asks for a permission.
+
+/// A fake whose permission answer waits until the test gives it.
+class HeldRestAlert extends FakeRestAlert {
+  final answer = Completer<bool>();
+
+  @override
+  Future<bool> requestPermission() {
+    calls.add('request');
+    return answer.future;
+  }
+}
+
+/// A fake whose first permission request fails and whose next ones are
+/// refused.
+class ThrowingRestAlert extends FakeRestAlert {
+  ThrowingRestAlert() : super(grant: false);
+
+  var _first = true;
+
+  @override
+  Future<bool> requestPermission() async {
+    calls.add('request');
+    if (_first) {
+      _first = false;
+      throw StateError('no');
+    }
+    return false;
+  }
+}
 
 void main() {
   final h = WorkoutHarness()..register();
@@ -319,7 +350,6 @@ void main() {
   // covers the wrapper itself.
 
   final alertRow = find.text('Alert me when rest ends');
-  const alertOnText = 'Alert on when rest ends. Tap to turn off.';
 
   /// Push A running with its screen open and [alert] in place.
   Future<List<WorkoutSet>> openPushWith(
@@ -385,8 +415,7 @@ void main() {
     await tapAlertRow(tester);
     expect(alert.calls, ['request', 'schedule:$end']);
     expect(await savedSetting(tester), isTrue);
-    expect(find.text(alertOnText), findsOneWidget);
-    expect(alertRow, findsNothing);
+    expect(alertRow, findsNothing, reason: 'the row is gone for good');
   });
 
   h.appTest('-15 s and +15 s move the scheduled time', (tester) async {
@@ -428,8 +457,8 @@ void main() {
 
     await log(tester, all[1]);
     expect(alert.calls, ['cancel', 'schedule:${h.now.utcMs + 120000}']);
-    // The row is on for the next rest too, without another tap.
-    expect(find.text(alertOnText), findsOneWidget);
+    // On for the next rest too, without another tap, and no row.
+    expect(alertRow, findsNothing);
   });
 
   h.appTest('Finish cancels the alert', (tester) async {
@@ -513,7 +542,7 @@ void main() {
 
     expect(alert.calls, ['request']);
     expect(await savedSetting(tester), isFalse);
-    expect(alertRow, findsOneWidget, reason: 'the row stays off');
+    expect(alertRow, findsOneWidget, reason: 'the row stays');
     expect(
       find.text(
         'Notifications are turned off for Daybook. To get the alert, turn '
@@ -527,24 +556,109 @@ void main() {
     expect(find.textContaining('Notifications are turned off'), findsNothing);
   });
 
-  h.appTest('tapping the row when it is on turns it off, cancels, and the '
-      'next rests schedule nothing', (tester) async {
+  h.appTest('after a refusal the row can be tapped again, and a yes then '
+      'schedules this rest', (tester) async {
+    final alert = FakeRestAlert(grant: false);
+    final all = await openPushWith(tester, alert);
+    await log(tester, all.first);
+    await tapAlertRow(tester);
+    expect(alertRow, findsOneWidget);
+
+    alert.grant = true;
+    final end = h.now.utcMs + 120000;
+    await tapAlertRow(tester);
+    expect(alert.calls, ['request', 'request', 'schedule:$end']);
+    expect(alertRow, findsNothing);
+    expect(find.textContaining('Notifications are turned off'), findsNothing);
+  });
+
+  h.appTest('once on, the row is gone from the bar: no row and no height '
+      'for it', (tester) async {
+    final all = await openPushWith(tester, FakeRestAlert());
+    await log(tester, all.first);
+    final before = tester.getSize(find.byType(RestTimerBar)).height;
+    await tapAlertRow(tester);
+    final after = tester.getSize(find.byType(RestTimerBar)).height;
+    expect(before - after, greaterThanOrEqualTo(48));
+  });
+
+  h.appTest('a request that throws leaves the row there and tappable', (
+    tester,
+  ) async {
+    final alert = ThrowingRestAlert();
+    final all = await openPushWith(tester, alert);
+    await log(tester, all.first);
+    await tester.tap(find.textContaining('when rest ends'));
+    await settle(tester);
+    expect(alertRow, findsOneWidget);
+    await tester.tap(find.textContaining('when rest ends'));
+    await settle(tester);
+    expect(alert.calls, ['request', 'request'], reason: 'not stuck asking');
+    expect(await savedSetting(tester), isFalse);
+  });
+
+  h.appTest('a second tap while the phone is asking asks nothing more', (
+    tester,
+  ) async {
+    final alert = HeldRestAlert();
+    final all = await openPushWith(tester, alert);
+    await log(tester, all.first);
+    await tester.tap(find.textContaining('when rest ends'));
+    await tester.pump();
+    await tester.tap(find.textContaining('when rest ends'));
+    await tester.pump();
+    expect(alert.calls, ['request']);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.calls.where((c) => c == 'request'), hasLength(1));
+  });
+
+  h.appTest('a rest skipped while the phone is asking gets no alert when the '
+      'answer is yes', (tester) async {
+    final alert = HeldRestAlert();
+    final all = await openPushWith(tester, alert);
+    await log(tester, all.first);
+    await tester.tap(find.textContaining('when rest ends'));
+    await tester.pump();
+    await tester.tap(find.text('Skip'));
+    await tester.pump();
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, isEmpty);
+    expect(await savedSetting(tester), isTrue);
+  });
+
+  h.appTest('when the app comes back to the front after the rest ended in the '
+      'background, the alert is cancelled once', (tester) async {
     final alert = FakeRestAlert();
     final all = await openPushWith(tester, alert);
     await log(tester, all.first);
     await tapAlertRow(tester);
     alert.calls.clear();
-
-    await tapAlertRow(tester);
-    expect(alert.calls, ['cancel']);
-    expect(await savedSetting(tester), isFalse);
-    expect(alertRow, findsOneWidget);
-
-    alert.calls.clear();
-    await log(tester, all[1]);
-    await tester.tap(find.text('Skip'));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    addTearDown(
+      () => tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      ),
+    );
+    await advance(tester, 121);
+    expect(alert.calls, isEmpty);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
-    expect(alert.calls, isEmpty, reason: 'setting off means no calls at all');
+    expect(alert.calls, ['cancel']);
+  });
+
+  h.appTest('coming back to the front while the rest still runs cancels '
+      'nothing', (tester) async {
+    final alert = FakeRestAlert();
+    final all = await openPushWith(tester, alert);
+    await log(tester, all.first);
+    await tapAlertRow(tester);
+    alert.calls.clear();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(alert.calls, isEmpty);
   });
 
   h.appTest('the setting survives a restart: the next rest is scheduled with '
@@ -565,7 +679,7 @@ void main() {
     final again = await sets(tester);
     await log(tester, again[1]);
     expect(second.calls, ['schedule:${h.now.utcMs + 120000}']);
-    expect(find.text(alertOnText), findsOneWidget);
+    expect(alertRow, findsNothing, reason: 'gone after a restart too');
   });
 
   h.appTest('a rest of 0 schedules nothing, even with the alert on', (
@@ -612,6 +726,19 @@ void main() {
       (c) => c.endsWith('requestNotificationsPermission'),
     );
     expect(asked, hasLength(1));
+  });
+
+  h.appTest('with the real wrapper and the setting already on, logging a set '
+      'puts no permission request on the channel', (tester) async {
+    await h.real(tester, () => h.db.setRestAlert(true));
+    final all = await openPush(tester);
+    await log(tester, all.first);
+    await log(tester, all[1]);
+    expect(
+      h.permissionCalls.where((c) => c.contains('request')),
+      isEmpty,
+      reason: 'setting up and scheduling must not ask',
+    );
   });
 
   h.appTest('the rest bar and the last Add set sit above the system '

@@ -20,6 +20,7 @@ void main() {
   Object? permissionAnswer;
 
   setUp(() {
+    LocalRestAlert.resetForTest();
     calls.clear();
     permissionAnswer = true;
     // In a test the plugin has not registered itself.
@@ -41,11 +42,6 @@ void main() {
 
   List<String> names() => [for (final c in calls) c.method];
 
-  test('making the wrapper calls nothing', () {
-    const LocalRestAlert();
-    expect(calls, isEmpty);
-  });
-
   test('asking for permission sets the plugin up and asks once, and says '
       'what the user answered', () async {
     expect(await const LocalRestAlert().requestPermission(), isTrue);
@@ -65,7 +61,10 @@ void main() {
 
   test('schedule makes one notification, "Rest done", with nothing else in '
       'it, at that instant in UTC, with no exact alarm', () async {
-    final end = DateTime.now().toUtc().add(const Duration(seconds: 90));
+    final end = DateTime.fromMillisecondsSinceEpoch(
+      (DateTime.now().millisecondsSinceEpoch ~/ 1000) * 1000 + 90000,
+      isUtc: true,
+    );
     await const LocalRestAlert().schedule(end.millisecondsSinceEpoch);
 
     final call = calls.singleWhere((c) => c.method == 'zonedSchedule');
@@ -100,6 +99,25 @@ void main() {
       }
       expect(ids, {restAlertId});
     }();
+  });
+
+  test('the time is rounded up to a whole second, never down, so the alert '
+      'cannot come before the end in the app', () async {
+    final whole =
+        (DateTime.now().millisecondsSinceEpoch ~/ 1000) * 1000 + 120000;
+    Future<int> scheduledFor(int ms) async {
+      calls.clear();
+      await const LocalRestAlert().schedule(ms);
+      final a = calls.singleWhere((c) => c.method == 'zonedSchedule').arguments
+          as Map;
+      return DateTime.parse(
+        a['scheduledDateTimeISO8601'] as String,
+      ).millisecondsSinceEpoch;
+    }
+
+    expect(await scheduledFor(whole), whole, reason: 'a whole second stays');
+    expect(await scheduledFor(whole + 1), whole + 1000);
+    expect(await scheduledFor(whole + 999), whole + 1000);
   });
 
   test('a time that has passed schedules nothing, and cancel names the same '

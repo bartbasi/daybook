@@ -255,6 +255,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
+      AppScope.of(context).restTimer?.appResumed();
       setState(() {});
       _syncWidget();
       _scheduleMidnight();

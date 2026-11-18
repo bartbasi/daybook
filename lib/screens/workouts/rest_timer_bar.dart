@@ -28,7 +28,7 @@ const restStepSeconds = 15;
 /// It asks for no permission by itself. At zero it vibrates once with
 /// Flutter's own haptic call. The "Rest done" notification for when the app is
 /// in the background is off until the user taps "Alert me when rest ends" in
-/// the bar ([toggleAlert]); with it off, [alert] is never called.
+/// the bar ([enableAlert]); with it off, [alert] is never called.
 class RestTimer extends ChangeNotifier {
   RestTimer(this._clock, {this.alert = const LocalRestAlert(), this.db}) {
     _loadSetting();
@@ -83,22 +83,23 @@ class RestTimer extends ChangeNotifier {
     }
   }
 
-  /// The row in the bar. Off to on: asks the phone for permission (this is
-  /// the only place it is asked), keeps the setting and schedules the alert
-  /// for this rest. On to off: keeps the setting and cancels the alert.
-  Future<void> toggleAlert() async {
-    if (_asking) return;
-    if (_alertOn) {
-      _alertOn = false;
-      notifyListeners();
-      unawaited(alert.cancel());
-      await _saveSetting(false);
-      return;
-    }
+  /// The row in the bar, shown while the setting is off. Asks the phone for
+  /// permission (this is the only place it is asked). If granted, keeps the
+  /// setting on for good and schedules the alert for this rest; the row is
+  /// then gone. If refused, the row stays and can be tapped again. Turning it
+  /// off again is done in the phone's notification settings.
+  Future<void> enableAlert() async {
+    if (_asking || _alertOn) return;
     _asking = true;
-    final granted = await alert.requestPermission();
-    _asking = false;
-    _refused = !granted;
+    var granted = false;
+    try {
+      granted = await alert.requestPermission();
+    } catch (_) {
+      // A request that fails counts as a refusal.
+    } finally {
+      _asking = false;
+      _refused = !granted;
+    }
     if (!granted) {
       notifyListeners();
       return;
@@ -107,6 +108,12 @@ class RestTimer extends ChangeNotifier {
     if (isActive && !_over) unawaited(alert.schedule(_endMs));
     notifyListeners();
     await _saveSetting(true);
+  }
+
+  /// The app came back to the front. A "Rest done" that is about to arrive
+  /// late, or is sitting in the shade, is no use now: the bar says it.
+  void appResumed() {
+    if (_alertOn && _over) unawaited(alert.cancel());
   }
 
   Future<void> _saveSetting(bool on) async {
@@ -338,7 +345,7 @@ class RestTimerBar extends StatelessWidget {
                         ),
                       ],
                     ),
-                  if (!over) ...[
+                  if (!over && !timer.alertOn) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
@@ -346,10 +353,8 @@ class RestTimerBar extends StatelessWidget {
                           minimumSize: WidgetStatePropertyAll(Size(48, 48)),
                           alignment: Alignment.centerLeft,
                         ),
-                        onPressed: timer.toggleAlert,
-                        child: Text(
-                          timer.alertOn ? S.restAlertOn : S.restAlertOff,
-                        ),
+                        onPressed: timer.enableAlert,
+                        child: const Text(S.restAlertOff),
                       ),
                     ),
                     if (timer.alertRefused)
