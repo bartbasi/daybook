@@ -10,7 +10,7 @@ Draft. Phase 4 is in progress, and this file is filled in as each step lands. Th
 | 1 Weight entry and widget | Done. Reviewed and pushed. Widgets and timings still need your phones |
 | 2 Food parser and meal entry | In progress. Parser, food data layer, live re-parsing, the food entry screen, the correction sheet, the chips row, saved meals, barcode scanning, the food and recipe editors and the food speed tests are done, reviewed and pushed, and the temporary Data check screen is removed. Step 2 is complete |
 | 3 Goals and daily budget | Done. Reviewed and pushed: the budget math, the Goals screen, Other nutrients, Home's budget card and meters, "left today" on the food screen, and the budget scenario tests |
-| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. The alert when a rest ends is done, reviewed and pushed, and CI built it for Android and iOS. The workout speed tests and device flow are built and in review |
+| 4 Resistance training | In progress. The exercise library and the workout data layer are done, reviewed and pushed. The workout screens (the tab, the running workout, the set sheet, the rest timer in the app, the finish summary, and the way back from Home) are done, reviewed and pushed. The routine editor, the exercise picker, your own exercises, exercise detail and the weekly volume screen are done, reviewed and pushed. The alert when a rest ends, the workout speed tests and the workout device flow are done and reviewed. Step 4 is complete apart from the checks on your phone |
 | 5 Cardio | Not started |
 | 6 Summaries | Not started |
 | 7 Health sync | Not started |
@@ -266,7 +266,7 @@ Workouts (step 4, what is built so far), on the Z Fold 5:
 - Rest alert timing, the important one: with the alert on, log a set with a 90 second rest, turn the screen off and leave the phone still on a table. Time how long after the 90 seconds "Rest done" arrives. Do it again with a 3 minute rest. Tell me both numbers.
 - With Daybook open at the end of a rest, there should be a buzz and no notification left in the shade. Come back to the app after a rest ended in the background: the notification should go away.
 - Does the "Rest done" notification vibrate, and how does its small icon look in the status bar?
-- Turn Daybook's notifications off in the phone's settings, then start a rest: "Alert me when rest ends" should be back. Tap it: it should say notifications are turned off, and no alert should come.
+- Turn Daybook's notifications off in the phone's settings, then start a rest: "Alert me when rest ends" should be back. Tap it: the phone either asks again or the app says notifications are turned off. Tell me which.
 - Log two sets quickly, one right after the other, on rows near the bottom of the screen. Tell me if the second tap ever lands on Skip.
 - At the end of a rest the phone should buzz once. Tell me if the buzz is too weak to notice with the phone on a bench, and whether it still comes with touch vibration turned off in the phone's settings.
 - On the running workout screen, the rest timer's buttons and the last "+ Add set" should sit clear of the phone's bottom bar, with button navigation and with gestures.
