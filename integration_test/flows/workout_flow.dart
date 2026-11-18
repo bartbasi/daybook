@@ -11,6 +11,12 @@
 //
 // It never taps "Alert me when rest ends": that would ask the phone for a
 // permission, and the system dialog would stop the test.
+//
+// It needs no workout running on the device: a running workout hides every
+// Start button. Other history is fine, because the flow looks only at its own
+// rows. It checks the database and the workout screen, not Home's calories,
+// because goals are not guaranteed to be set. It ends on Home, as the header
+// of flows_test.dart says each flow must start from there.
 
 import 'package:daybook/data/database.dart';
 import 'package:daybook/screens/workouts/exercise_picker.dart';
@@ -108,6 +114,22 @@ Future<int> _newWorkout(WidgetTester tester, Set<int> before) async {
   return now.difference(before).single;
 }
 
+/// One counted tap on a target of a speed number: it must already be in view
+/// without scrolling, as on a phone, so no scroll is hidden in the count.
+Future<void> _tapInView(WidgetTester tester, TapCounter taps, Finder f) async {
+  final box = tester.getRect(f);
+  final view = tester.view.physicalSize / tester.view.devicePixelRatio;
+  expect(
+    box.top >= 0 && box.bottom <= view.height,
+    isTrue,
+    reason:
+        'the target is in view without scrolling: ${box.top} to ${box.bottom} '
+        'of ${view.height}',
+  );
+  await taps.tap(f);
+  await tester.pump(const Duration(milliseconds: 100));
+}
+
 /// Finishes the open workout and closes its summary: Finish, then Done. Two
 /// counted taps. Ends on the Workouts tab.
 Future<void> _finishAndClose(WidgetTester tester, TapCounter taps) async {
@@ -123,8 +145,8 @@ Future<void> _finishAndClose(WidgetTester tester, TapCounter taps) async {
 }
 
 /// Speed targets 4 and 5, then a short check of the whole path from a new
-/// routine to "Start again". Does not assume an empty database and never looks
-/// at a date. At the end it deletes the workouts and the routine it made.
+/// routine to "Start again". Never looks at a date. At the end it deletes the
+/// workouts and the routine it made, and goes back to Home.
 Future<void> runWorkoutFlow(WidgetTester tester) async {
   final db = appDatabase(tester);
   // The screens that are pushed over Home hide it from a finder, so the
@@ -134,10 +156,10 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     () async => {for (final r in await db.select(db.routines).get()) r.id},
   ))!;
   final workoutsBefore = await _workoutIds(tester);
+  var taps = TapCounter(tester);
 
   try {
     // Workouts tab > + New routine.
-    var taps = TapCounter(tester);
     await _tap(
       tester,
       taps,
@@ -214,17 +236,22 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     expect(sets.map((s) => s.exerciseRef).toSet(), {_benchRef, _secondRef});
     expect(sets.every((s) => s.completedAtMs == null), isTrue);
 
-    // The first set. A first-time set has no reps, so type them: tap the reps
-    // cell, type, Done. If the exercise was done on this phone before, the
-    // set already has its reps and this step is skipped.
+    // The first set. A first-time set has no reps, so type a weight and reps:
+    // tap the reps cell, type, Done. If the exercise was done on this phone
+    // before, the set already has its numbers and this step is skipped.
     final firstSet = sets.first;
-    if (firstSet.reps == null) {
+    final typed = firstSet.reps == null;
+    if (typed) {
       await _tap(tester, taps, find.text(S.repsCellEmpty).first);
       final reps = find.widgetWithText(TextField, S.setRepsLabel);
       await _waitForWidget(tester, reps, 'the set sheet');
       await taps.tap(reps);
       await tester.pump();
       await taps.type(reps, '8');
+      final weight = find.widgetWithText(TextField, S.setWeightLabel);
+      await taps.tap(weight);
+      await tester.pump();
+      await taps.type(weight, '135');
       await _tap(
         tester,
         taps,
@@ -241,9 +268,11 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     sets = await _setsOf(tester, firstId);
     expect(sets.first.reps, isNotNull);
     expect(sets.first.reps! >= 1, isTrue);
+    if (typed) expect(sets.first.weightKg, isNotNull);
     expect(sets.skip(1).every((s) => s.completedAtMs == null), isTrue);
     final repsLogged = sets.first.reps;
     final weightLogged = sets.first.weightKg;
+    if (typed) expect(weightLogged! > 0, isTrue);
 
     // Finish > Done. The workout is then under "Start again".
     await _finishAndClose(tester, taps);
@@ -258,7 +287,7 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     // Start again: 1 counted tap, and the one set that was logged comes back
     // prefilled from it. Logging that is 1 counted tap.
     taps = TapCounter(tester);
-    await _tap(tester, taps, _startIn('again-$firstId'));
+    await _tapInView(tester, taps, _startIn('again-$firstId'));
     taps.expectCount(1, flow: 'Start again');
     final secondId = await _newWorkout(tester, {...workoutsBefore, firstId});
     await _waitForWidget(
@@ -273,7 +302,11 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
     expect(sets.single.completedAtMs, isNull);
 
     taps = TapCounter(tester);
-    await _tap(tester, taps, find.byKey(ValueKey('check-${sets.single.id}')));
+    await _tapInView(
+      tester,
+      taps,
+      find.byKey(ValueKey('check-${sets.single.id}')),
+    );
     taps.expectCount(1, flow: 'one prefilled set');
     await _until(tester, () async {
       final s = await _rawSets(secondId);
@@ -313,6 +346,13 @@ Future<void> runWorkoutFlow(WidgetTester tester) async {
               .go(),
     );
     await _pumpSome(tester);
+    // End on Home, whatever the order of the flows (the workout screen closes
+    // by itself when its workout is deleted).
+    if (find.byType(WorkoutScreen).evaluate().isEmpty &&
+        find.byType(NavigationBar).evaluate().isNotEmpty) {
+      await taps.tap(find.widgetWithText(NavigationDestination, S.tabToday));
+      await _pumpSome(tester);
+    }
   }
 }
 

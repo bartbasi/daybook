@@ -60,6 +60,19 @@ class HeldCheckAlert extends FakeRestAlert {
   }
 }
 
+/// A fake whose every quiet check waits until the test answers it.
+class HeldEachCheckAlert extends FakeRestAlert {
+  final answers = <Completer<bool>>[];
+
+  @override
+  Future<bool> isAllowed() {
+    checks++;
+    final c = Completer<bool>();
+    answers.add(c);
+    return c.future;
+  }
+}
+
 /// A fake whose quiet check fails.
 class ThrowingCheckAlert extends FakeRestAlert {
   @override
@@ -374,12 +387,13 @@ void main() {
   /// Push A running with its screen open and [alert] in place.
   Future<List<WorkoutSet>> openPushWith(
     WidgetTester tester,
-    FakeRestAlert alert,
-  ) async {
+    FakeRestAlert alert, {
+    Size size = const Size(400, 800),
+  }) async {
     final ids = await h.seedSample(tester);
     final r = await h.real(tester, () => h.db.startRoutine(ids.pushId, h.now));
     workoutId = r.workout!.id;
-    await h.openApp(tester, alert: alert);
+    await h.openApp(tester, alert: alert, size: size);
     await tester.tap(find.widgetWithText(TextButton, 'Return'));
     await settle(tester);
     return sets(tester);
@@ -735,10 +749,11 @@ void main() {
 
   Future<List<WorkoutSet>> openPushOn(
     WidgetTester tester,
-    FakeRestAlert alert,
-  ) async {
+    FakeRestAlert alert, {
+    Size size = const Size(400, 800),
+  }) async {
     await h.real(tester, () => h.db.setRestAlert(true));
-    return openPushWith(tester, alert);
+    return openPushWith(tester, alert, size: size);
   }
 
   h.appTest('setting on and allowed: the rest is scheduled after one quiet '
@@ -836,6 +851,117 @@ void main() {
     expect(alert.scheduled, [h.now.utcMs + 120000]);
   });
 
+  h.appTest('-15 s that ends the rest while the quiet check is out schedules '
+      'nothing', (tester) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await advance(tester, 110);
+    await tester.tap(find.text('-15 s'));
+    await tester.pump();
+    expect(find.text('Rest done'), findsOneWidget);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, isEmpty);
+  });
+
+  h.appTest('+15 s while the quiet check is out: the schedule that follows '
+      'uses the moved end', (tester) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    final end = h.now.utcMs + 120000;
+    await tester.tap(find.text('+15 s'));
+    await tester.pump();
+    expect(alert.scheduled, isEmpty);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, [end + 15000]);
+  });
+
+  h.appTest('a rest that runs out while the quiet check is out schedules '
+      'nothing', (tester) async {
+    final alert = HeldCheckAlert();
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await advance(tester, 121);
+    expect(find.text('Rest done'), findsOneWidget);
+    alert.answer.complete(true);
+    await settle(tester);
+    expect(alert.scheduled, isEmpty);
+  });
+
+  h.appTest('an adjust on a rest the phone does not allow schedules nothing', (
+    tester,
+  ) async {
+    final alert = FakeRestAlert(allowed: false);
+    final all = await openPushOn(tester, alert);
+    await log(tester, all.first);
+    await tester.tap(find.text('+15 s'));
+    await tester.pump();
+    await tester.tap(find.text('-15 s'));
+    await tester.pump();
+    expect(alert.scheduled, isEmpty);
+    expect(alertRow, findsOneWidget);
+  });
+
+  h.appTest('the alert row arriving late does not push the next set under '
+      'the bar', (tester) async {
+    final alert = HeldEachCheckAlert();
+    final all = await openPushOn(tester, alert, size: const Size(400, 600));
+    for (final s in all.take(3)) {
+      await log(tester, s);
+    }
+    final next = all[3];
+    // The bar is up without the row and the quiet check is still out. Put the
+    // next set just above the bottom of the list, in view.
+    final list = find.byType(SingleChildScrollView).first;
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    final gap =
+        tester.getRect(list).bottom - 4 - tester.getRect(check(next)).bottom;
+    position.jumpTo(position.pixels - gap);
+    await tester.pump();
+    expect(
+      tester.getRect(check(next)).bottom,
+      closeTo(tester.getRect(list).bottom - 4, 0.5),
+      reason: 'in view, at the bottom, before the row comes',
+    );
+    // The phone says no: the row arrives and the bar grows.
+    alert.answers.last.complete(false);
+    await settle(tester);
+    await settle(tester);
+    expect(alertRow, findsOneWidget);
+    final inList = tester.getRect(list);
+    expect(tester.getRect(check(next)).top, greaterThanOrEqualTo(inList.top));
+    expect(
+      tester.getRect(check(next)).bottom,
+      lessThanOrEqualTo(inList.bottom),
+    );
+  });
+
+  h.appTest('a quiet check still out when the timer is disposed schedules '
+      'nothing and raises nothing', (tester) async {
+    await h.real(tester, () => h.db.setRestAlert(true));
+    final alert = HeldCheckAlert();
+    final timer = RestTimer(() => h.now, alert: alert, db: h.db);
+    await h.real(
+      tester,
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    expect(timer.alertOn, isTrue);
+    timer.start(1, 90);
+    expect(alert.checks, 1);
+    timer.dispose();
+    alert.answer.complete(true);
+    await h.real(
+      tester,
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    expect(alert.scheduled, isEmpty);
+  });
+
   h.appTest('with the real wrapper over a mocked channel, the log path calls '
       'nothing, and tapping the row is the first call: it sets the plugin up '
       'and asks', (tester) async {
@@ -866,6 +992,13 @@ void main() {
       isEmpty,
       reason: 'the quiet check, setting up and scheduling must not ask',
     );
+    // The quiet check did go to the phone. The mock answers null, which is
+    // not allowed, so the row shows.
+    expect(
+      h.permissionCalls.where((c) => c.endsWith('areNotificationsEnabled')),
+      isNotEmpty,
+    );
+    expect(alertRow, findsOneWidget);
   });
 
   h.appTest('the rest bar and the last Add set sit above the system '

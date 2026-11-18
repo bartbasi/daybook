@@ -93,11 +93,12 @@ class RestTimer extends ChangeNotifier {
     }
   }
 
-  /// The row in the bar, shown while the setting is off. Asks the phone for
-  /// permission (this is the only place it is asked). If granted, keeps the
-  /// setting on for good and schedules the alert for this rest; the row is
-  /// then gone. If refused, the row stays and can be tapped again. Turning it
-  /// off again is done in the phone's notification settings.
+  /// The row in the bar, shown whenever the alert is not working on this
+  /// phone: the setting is off, or it is on but the phone does not allow
+  /// notifications. Asks the phone for permission (this is the only place it
+  /// is asked). If granted, keeps the setting on and schedules the alert for
+  /// this rest; the row is then gone. If refused, the row stays and can be
+  /// tapped again.
   Future<void> enableAlert() async {
     if (_asking || !showAlertRow) return;
     _asking = true;
@@ -246,6 +247,8 @@ class RestTimer extends ChangeNotifier {
 
   @override
   void dispose() {
+    // A quiet check still out must not schedule or notify when it answers.
+    _serial++;
     _ticker?.cancel();
     _ticker = null;
     super.dispose();

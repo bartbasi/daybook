@@ -50,10 +50,7 @@ void main() {
     expect(await const LocalRestAlert().requestPermission(), isTrue);
     // The plugin is set up once per run, so only the first test sees it.
     expect(names().last, 'requestNotificationsPermission');
-    expect(
-      names().where((n) => n == 'requestNotificationsPermission'),
-      hasLength(1),
-    );
+    expect(names().where((n) => n == 'requestNotificationsPermission'), hasLength(1));
     expect(
       names().where((n) => n != 'initialize' && !n.startsWith('request')),
       isEmpty,
@@ -99,11 +96,7 @@ void main() {
     expect(a['title'], 'Rest done');
     expect(a['body'], isNull);
     expect(a['payload'], '');
-    expect(
-      a['timeZoneName'],
-      'Etc/UTC',
-      reason: 'the UTC of the timezone package',
-    );
+    expect(a['timeZoneName'], 'Etc/UTC', reason: 'the UTC of the timezone package');
     expect(
       DateTime.parse(a['scheduledDateTimeISO8601'] as String)
           .millisecondsSinceEpoch,
@@ -138,11 +131,11 @@ void main() {
     Future<int> scheduledFor(int ms) async {
       calls.clear();
       await const LocalRestAlert().schedule(ms);
-      final a =
-          calls.singleWhere((c) => c.method == 'zonedSchedule').arguments
-              as Map;
-      return DateTime.parse(a['scheduledDateTimeISO8601'] as String)
-          .millisecondsSinceEpoch;
+      final a = calls.singleWhere((c) => c.method == 'zonedSchedule').arguments
+          as Map;
+      return DateTime.parse(
+        a['scheduledDateTimeISO8601'] as String,
+      ).millisecondsSinceEpoch;
     }
 
     expect(await scheduledFor(whole), whole, reason: 'a whole second stays');
@@ -153,9 +146,7 @@ void main() {
   test('a time that has passed schedules nothing, and cancel names the same '
       'id', () async {
     await const LocalRestAlert().schedule(
-      DateTime.now()
-          .subtract(const Duration(seconds: 5))
-          .millisecondsSinceEpoch,
+      DateTime.now().subtract(const Duration(seconds: 5)).millisecondsSinceEpoch,
     );
     expect(names().where((n) => n == 'zonedSchedule'), isEmpty);
 
@@ -169,8 +160,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           channel,
-          (call) async =>
-              throw PlatformException(code: 'x', message: 'user 175'),
+          (call) async => throw PlatformException(code: 'x', message: 'user 175'),
         );
     final end = DateTime.now().add(const Duration(minutes: 2));
     await const LocalRestAlert().schedule(end.millisecondsSinceEpoch);
@@ -179,8 +169,9 @@ void main() {
   });
 
   group('the Android files', () {
-    final manifest = File('android/app/src/main/AndroidManifest.xml')
-        .readAsStringSync();
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
 
     test('no exact alarm permission, no boot receiver and no vibrate '
         'permission is declared', () {
@@ -207,21 +198,17 @@ void main() {
         'and POST_NOTIFICATIONS is the one permission added', () {
       expect(
         manifest,
-        contains(
-          'com.dexterous.flutterlocalnotifications.'
-          'ScheduledNotificationReceiver',
-        ),
+        contains('com.dexterous.flutterlocalnotifications.'
+            'ScheduledNotificationReceiver'),
       );
       expect(manifest, contains('android.permission.POST_NOTIFICATIONS'));
     });
 
-    test(
-      'the build turns on core library desugaring, which the plugin needs',
-      () {
-        final gradle = File('android/app/build.gradle.kts').readAsStringSync();
-        expect(gradle, contains('isCoreLibraryDesugaringEnabled = true'));
-        expect(gradle, contains('coreLibraryDesugaring('));
-      },
-    );
+    test('the build turns on core library desugaring, which the plugin needs',
+        () {
+      final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+      expect(gradle, contains('isCoreLibraryDesugaringEnabled = true'));
+      expect(gradle, contains('coreLibraryDesugaring('));
+    });
   });
 }

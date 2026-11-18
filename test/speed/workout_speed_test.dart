@@ -8,12 +8,20 @@
 // flow from a new routine runs on a real build in integration_test/
 // flows_test.dart. The last group is crash safety: a workout survives the app
 // and the database being closed and opened again on a file.
+//
+// The prefill rule, as the tests below check it (plan row 4.2, speed-targets.md
+// section 4, and what startAgain does): "Start again" takes its exercises and
+// each exercise's number of sets from that past workout, and each set's weight
+// and reps from the last time that exercise was done, which may be a later
+// workout than the one copied. Only sets that were logged are copied.
 
 import 'dart:io';
 
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/workout_data.dart';
+import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/util/units.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +61,34 @@ void main() {
     }
   }
 
+  /// After a Start: the workout screen is open (no "Return" tap is hidden in
+  /// the flow) and shows a prefilled weight.
+  void expectWorkoutOpen(String weightText) {
+    expect(find.byType(WorkoutScreen), findsOneWidget);
+    expect(find.text(weightText), findsWidgets);
+  }
+
+  /// Last Thursday's workout is not its routine, and a later session of its
+  /// exercises has other numbers, so the readings of "prefilled" differ. The
+  /// Thursday session at 19:00 (the entry for that day) has 4 bench sets, 2
+  /// press sets and a row of 2, where Push A has 3 and 3. Bench and press were
+  /// done again on Mon, Nov 9 with other numbers. The row was last done in
+  /// the copied workout itself.
+  Future<void> seedDiffering(WidgetTester tester) async {
+    await h.seedSample(tester);
+    await h.real(tester, () async {
+      await h.doWorkout('2026-11-05', [
+        (bench, 'Bench press', [(175, 8), (175, 8), (175, 7), (170, 6)]),
+        (press, 'Overhead press', [(95, 8), (95, 8)]),
+        (row, 'Barbell row', [(130, 10), (130, 8)]),
+      ], hour: 19);
+      await h.doWorkout('2026-11-09', [
+        (bench, 'Bench press', [(180, 5)]),
+        (press, 'Overhead press', [(100, 6), (100, 5)]),
+      ]);
+    });
+  }
+
   /// The button must be in view without scrolling, on a phone 800 dp high.
   void expectInView(WidgetTester tester, Finder f) {
     final r = tester.getRect(f);
@@ -86,15 +122,18 @@ void main() {
       await taps.tap(startButtons().at(0));
       await settle(tester);
       taps.expectCount(1, flow: 'Start yesterday\'s workout');
+      expectWorkoutOpen('225 lb');
 
       final (w, sets) = await runningWorkout(tester);
       expect(w.localDate, '2026-11-12');
       expectPlanned(sets, [(squat, 225, 5), (squat, 225, 5), (squat, 225, 5)]);
     });
 
-    h.appTest('1 counted tap starts last week\'s workout, every set '
-        'prefilled in the database', (tester) async {
-      await h.seedSample(tester);
+    h.appTest('1 counted tap starts last week\'s workout: its exercises and '
+        'set counts, and the numbers from the last time of each', (
+      tester,
+    ) async {
+      await seedDiffering(tester);
       await h.openApp(tester);
       await h.openWorkoutsTab(tester);
       expect(find.text('Last Thursday, Nov 5'), findsOneWidget);
@@ -103,16 +142,23 @@ void main() {
       await taps.tap(startButtons().at(1));
       await settle(tester);
       taps.expectCount(1, flow: 'Start last week\'s workout');
+      expectWorkoutOpen('180 lb');
 
       final (w, sets) = await runningWorkout(tester);
       expect(w.localDate, '2026-11-12');
       expectPlanned(sets, [
-        (bench, 175, 8),
-        (bench, 175, 8),
-        (bench, 175, 7),
-        (press, 95, 8),
-        (press, 95, 8),
-        (press, 95, 8),
+        // 4 bench sets, as in that workout (the routine has 3), with the
+        // numbers of the Nov 9 session, whose one set is copied to all four.
+        (bench, 180, 5),
+        (bench, 180, 5),
+        (bench, 180, 5),
+        (bench, 180, 5),
+        // 2 press sets, with the Nov 9 numbers set by set.
+        (press, 100, 6),
+        (press, 100, 5),
+        // The row is not in the routine. Its last time is that workout.
+        (row, 130, 10),
+        (row, 130, 8),
       ]);
     });
 
@@ -139,6 +185,7 @@ void main() {
       await taps.tap(start);
       await settle(tester);
       taps.expectCount(1, flow: 'Start a routine');
+      expectWorkoutOpen('175 lb');
 
       final (w, sets) = await runningWorkout(tester);
       expect(w.routineId, ids.pushId);
@@ -164,6 +211,7 @@ void main() {
       await taps.tap(startButtons().at(0));
       await settle(tester);
       taps.expectCount(2, flow: 'Home, Workouts, Start');
+      expectWorkoutOpen('225 lb');
 
       final (_, sets) = await runningWorkout(tester);
       expectPlanned(sets, [(squat, 225, 5), (squat, 225, 5), (squat, 225, 5)]);
@@ -267,12 +315,36 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, 'Return'));
       await settle(tester);
       final before = await h.allSets(tester, workoutId);
+      // A second connection to the file sees only what is committed, so it
+      // shows each set was stored when its tap finished, not at close.
+      final reader = AppDatabase(NativeDatabase(file));
+      Future<List<WorkoutSet>> committed(WidgetTester tester) => h.real(
+        tester,
+        () =>
+            (reader.select(reader.workoutSets)
+                  ..where((s) => s.workoutId.equals(workoutId))
+                  ..orderBy([(s) => OrderingTerm.asc(s.position)]))
+                .get(),
+      );
+      expect(
+        (await committed(tester)).where((s) => s.completedAtMs != null),
+        isEmpty,
+      );
+      var done = 0;
       for (final s in before.take(2)) {
         await tester.tap(check(s));
         await settle(tester);
+        done++;
+        expect(
+          (await committed(tester)).where((s) => s.completedAtMs != null),
+          hasLength(done),
+          reason: 'set $done is committed when its tap is over',
+        );
       }
       final logged = await h.allSets(tester, workoutId);
       expect(logged.where((s) => s.completedAtMs != null), hasLength(2));
+      expect(await committed(tester), logged);
+      await tester.runAsync(reader.close);
 
       // The "restart": the app is taken off the screen, the database is
       // closed, and a new database object opens the same file with a new app
@@ -289,7 +361,6 @@ void main() {
       expect(after, logged);
       expect(after.where((s) => s.completedAtMs != null), hasLength(2));
       expect(after.where((s) => s.completedAtMs == null), hasLength(4));
-      expect(find.textContaining('Rest '), findsNothing);
 
       // Home offers Return.
       expect(find.widgetWithText(TextButton, 'Return'), findsOneWidget);
@@ -301,6 +372,8 @@ void main() {
       // It opens with both sets done and the rest still planned, and goes on.
       await tester.tap(find.text('Return to workout'));
       await settle(tester);
+      // The rest timer lived in the old app, so no rest shows.
+      expect(find.textContaining('Rest '), findsNothing);
       expect(find.text('Done'), findsNWidgets(2));
       for (final s in after.skip(2)) {
         expect(check(s), findsOneWidget);
@@ -318,5 +391,6 @@ void main() {
       'fixed clock and an in-memory database', (tester) async {
     await h.openApp(tester);
     await runWorkoutFlow(tester);
+    expect(h.permissionCalls, isEmpty);
   });
 }

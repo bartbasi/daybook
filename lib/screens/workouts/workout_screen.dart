@@ -75,6 +75,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   int? _scrollAfter;
   var _firstView = true;
 
+  // The rest bar below the list, and what changes its height. When that
+  // changes (the alert row arrives late, or the refusal sentence), the next
+  // set may be under the bar, so it is scrolled to again.
+  RestTimer? _timer;
+  (bool, bool, bool, bool)? _barShape;
+
   var _busy = false;
   var _picking = false;
   var _finishing = false;
@@ -102,6 +108,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     super.didChangeDependencies();
     if (_viewSub != null) return;
     final db = AppScope.of(context).db;
+    _timer = AppScope.of(context).restTimer;
+    _timer?.addListener(_onTimer);
     _viewSub = db
         .watchWorkout(widget.workoutId)
         .listen(
@@ -122,6 +130,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     _minuteTimer?.cancel();
     _viewSub?.cancel();
     _unitsSub?.cancel();
+    _timer?.removeListener(_onTimer);
     _scroll.dispose();
     super.dispose();
   }
@@ -169,6 +178,17 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         if (mounted) _scrollToNext(jump: jump);
       });
     }
+  }
+
+  void _onTimer() {
+    final t = _timer;
+    if (t == null) return;
+    final shape = (t.isActive, t.isOver, t.showAlertRow, t.alertRefused);
+    if (shape == _barShape) return;
+    _barShape = shape;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToNext();
+    });
   }
 
   GlobalKey _keyFor(int setId) => _keys.putIfAbsent(setId, GlobalKey.new);
