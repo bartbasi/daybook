@@ -5,7 +5,6 @@ import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
-import 'package:daybook/screens/workouts/seams.dart';
 import 'package:daybook/screens/workouts/workouts_tab.dart';
 import 'package:daybook/util/units.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -22,22 +21,8 @@ import 'workouts_harness.dart';
 void main() {
   final h = WorkoutHarness()..register();
 
-  tearDown(() {
-    WorkoutSeams.exercisePicker = null;
-    WorkoutSeams.exerciseDetail = null;
-    WorkoutSeams.routineEditor = null;
-    WorkoutSeams.exercises = null;
-    WorkoutSeams.weeklyVolume = null;
-  });
-
   Finder startButton(int index) =>
       find.widgetWithText(FilledButton, 'Start').at(index);
-
-  Future<void> waitFor(WidgetTester tester, Finder finder) async {
-    for (var i = 0; i < 40 && finder.evaluate().isEmpty; i++) {
-      await settle(tester);
-    }
-  }
 
   Future<void> openTab(
     WidgetTester tester, {
@@ -78,8 +63,7 @@ void main() {
 
     expect(find.text('Routines'), findsOneWidget);
     expect(find.text('Bench press, Overhead press'), findsOneWidget);
-    // An empty workout needs the picker to add exercises, so no button yet.
-    expect(find.text('Empty workout'), findsNothing);
+    expect(find.text('Empty workout'), findsOneWidget);
     // Four Start buttons: two to start again, two routines.
     expect(find.widgetWithText(FilledButton, 'Start'), findsNWidgets(4));
   });
@@ -144,23 +128,8 @@ void main() {
     expect(find.text('225 lb'), findsNWidgets(3));
   });
 
-  Future<void> noPicker(
-    BuildContext context, {
-    required PickExercise onPick,
-    required Set<String> alreadyIn,
-    bool single = false,
-  }) async {}
-
-  h.appTest('Empty workout is not offered until the picker exists, so there '
-      'is never an empty workout nothing can be added to', (tester) async {
-    await openTab(tester);
-    expect(find.text('No routines yet.'), findsOneWidget);
-    expect(find.text('Empty workout'), findsNothing);
-  });
-
   h.appTest('an empty workout starts with no exercises and an Add exercise '
-      'button once the picker exists', (tester) async {
-    WorkoutSeams.exercisePicker = noPicker;
+      'button', (tester) async {
     await openTab(tester);
     expect(find.text('No routines yet.'), findsOneWidget);
     await tester.tap(find.text('Empty workout'));
@@ -171,37 +140,6 @@ void main() {
     final rows = await h.workoutRows(tester);
     expect(rows.single.routineId, isNull);
     expect(rows.single.endedAtMs, isNull);
-  });
-
-  h.appTest('the seams to task 4.4 show nothing until they are filled in', (
-    tester,
-  ) async {
-    await h.seedSample(tester);
-    await openTab(tester);
-    expect(find.text('+ New routine'), findsNothing);
-    expect(find.text('Exercises'), findsNothing);
-    expect(find.text('Edit'), findsNothing);
-  });
-
-  h.appTest('a filled seam shows its control and calls through', (
-    tester,
-  ) async {
-    await h.seedSample(tester);
-    final calls = <String>[];
-    WorkoutSeams.routineEditor = (context, {routineId}) async {
-      calls.add('editor $routineId');
-      return null;
-    };
-    WorkoutSeams.exercises = (context) => calls.add('exercises');
-    await openTab(tester);
-    await tester.tap(find.text('+ New routine'));
-    await tester.tap(find.text('Exercises'));
-    await tester.tap(find.text('Edit').first);
-    expect(calls, hasLength(3));
-    expect(calls[0], 'editor null');
-    expect(calls[1], 'exercises');
-    expect(calls[2], startsWith('editor '));
-    expect(calls[2], isNot('editor null'));
   });
 
   h.appTest('this week, sets by muscle: every group, most sets first, with '
@@ -236,27 +174,34 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNWidgets(10));
   });
 
-  h.appTest('the weekly card opens the weekly volume screen only when '
-      'task 4.4 has put it there', (tester) async {
-    await openTab(tester);
-    await waitFor(tester, find.text('This week, sets by muscle'));
-    expect(find.text('Chest'), findsOneWidget);
-    expect(
-      find.ancestor(of: find.text('Chest'), matching: find.byType(InkWell)),
-      findsNothing,
-    );
-  });
-
-  h.appTest('a filled weekly volume seam makes the card open that screen', (
-    tester,
-  ) async {
-    var opened = 0;
-    WorkoutSeams.weeklyVolume = (context) => opened++;
+  h.appTest('the weekly card opens the weekly volume screen, once for a '
+      'double tap', (tester) async {
     await openTab(tester);
     await waitFor(tester, find.text('Chest'));
-    await tester.tap(find.text('Chest'));
-    await tester.pump();
-    expect(opened, 1);
+    // Two taps before the next frame.
+    final card = tester.widget<InkWell>(
+      find.ancestor(of: find.text('Chest'), matching: find.byType(InkWell)),
+    );
+    card.onTap!();
+    card.onTap!();
+    await waitFor(tester, find.text('Sets by muscle'));
+    expect(find.text('Sets by muscle'), findsOneWidget);
+    await h.back(tester);
+    expect(find.text('Sets by muscle'), findsNothing);
+  });
+
+  h.appTest('the Exercises button opens the exercise list, once for a double '
+      'tap', (tester) async {
+    await openTab(tester);
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Exercises'),
+    );
+    button.onPressed!();
+    button.onPressed!();
+    await waitFor(tester, find.text('Search exercises'));
+    expect(find.text('Search exercises'), findsOneWidget);
+    await h.back(tester);
+    expect(find.text('Search exercises'), findsNothing);
   });
 
   h.appTest('a workout running from today replaces every Start with one '
@@ -423,7 +368,6 @@ void main() {
     for (final scale in [1.0, 2.0]) {
       h.appTest('layout at ${size.width.round()} dp and text scale $scale: '
           'nothing overflows and every target is 48 dp', (tester) async {
-        WorkoutSeams.exercisePicker = noPicker;
         await h.seedSample(tester);
         await h.real(
           tester,

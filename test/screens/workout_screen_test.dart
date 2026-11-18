@@ -5,7 +5,6 @@ import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
-import 'package:daybook/screens/workouts/seams.dart';
 import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/util/units.dart';
 import 'package:flutter/material.dart';
@@ -21,11 +20,6 @@ import 'workouts_harness.dart';
 
 void main() {
   final h = WorkoutHarness()..register();
-
-  tearDown(() {
-    WorkoutSeams.exercisePicker = null;
-    WorkoutSeams.exerciseDetail = null;
-  });
 
   late int pushId;
 
@@ -325,65 +319,33 @@ void main() {
     expect(all.every((s) => s.exerciseRef == press), isTrue);
   });
 
-  h.appTest('replace and details are not in the menu until task 4.4 fills '
-      'in their seams', (tester) async {
-    await startPush(tester);
-    await openRunning(tester);
-    await tester.tap(find.byTooltip('Menu for Bench press'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('Move up'), findsOneWidget);
-    expect(find.text('Remove exercise'), findsOneWidget);
-    expect(find.text('Replace exercise'), findsNothing);
-    expect(find.text('Exercise details'), findsNothing);
-    expect(find.text('+ Add exercise'), findsNothing);
-  });
-
-  h.appTest('with the seams filled: Add exercise and Replace go through the '
-      'picker, and Replace says why it is off once a set is logged', (
-    tester,
-  ) async {
+  h.appTest('Add exercise and Replace go through the real picker, and '
+      'Replace says why it is off once a set is logged', (tester) async {
     final id = await startPush(tester);
-    final details = <String>[];
-    final picks = <String>[];
-    WorkoutSeams.exerciseDetail = (context, ref) => details.add(ref);
-    WorkoutSeams.exercisePicker =
-        (
-          context, {
-          required onPick,
-          required alreadyIn,
-          bool single = false,
-        }) async {
-          picks.add('${single ? 'one' : 'many'} ${alreadyIn.length}');
-          final said = await onPick('wger:1', single ? 'Dips' : 'Chin-up');
-          picks.add(said ?? 'ok');
-          // The same exercise again is refused in plain words.
-          picks.add(await onPick('wger:1', 'Chin-up') ?? 'ok');
-        };
     await openRunning(tester);
 
     await tester.tap(find.text('+ Add exercise'));
     await settle(tester);
-    expect(picks, [
-      'many 2',
-      'ok',
-      'That exercise is already in this workout.',
-    ]);
-    expect(find.text('Chin-up'), findsOneWidget);
+    await pickInPicker(tester, 'bench press', 'wger:73');
+    await h.back(tester);
+    expect(find.text('Bench Press'), findsOneWidget);
     expect(
-      (await sets(tester, id)).where((s) => s.exerciseRef == 'wger:1'),
+      (await sets(tester, id)).where((s) => s.exerciseRef == 'wger:73'),
       hasLength(3),
     );
 
-    // Replace overhead press (nothing logged): allowed.
-    picks.clear();
+    // Replace overhead press (nothing logged): allowed, and the picker shows
+    // what the workout already holds as Added.
     await tester.ensureVisible(find.byTooltip('Menu for Overhead press'));
     await tester.tap(find.byTooltip('Menu for Overhead press'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     await tester.tap(find.text('Replace exercise'));
     await settle(tester);
-    expect(picks.first, 'one 3');
+    await pickInPicker(tester, 'seated bench', 'wger:1094');
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Seated Bench Press'), findsOneWidget);
+    expect(find.text('Overhead press'), findsNothing);
 
     // Log a bench set: Replace for bench is off, with the reason.
     final all = await sets(tester, id);
@@ -402,9 +364,43 @@ void main() {
       findsOneWidget,
     );
     expect(menuItem(tester, 'Replace exercise').enabled, isFalse);
+  });
+
+  h.appTest('Exercise details opens the detail with the stored name, also '
+      'for an exercise the list no longer has', (tester) async {
+    await startPush(tester);
+    await openRunning(tester);
+    await tester.tap(find.byTooltip('Menu for Bench press'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.tap(find.text('Exercise details'));
     await settle(tester);
-    expect(details, [bench]);
+    expect(find.widgetWithText(AppBar, 'Bench press'), findsOneWidget);
+    await waitFor(tester, find.text('This exercise is no longer in the list.'));
+    expect(
+      find.text('This exercise is no longer in the list.'),
+      findsOneWidget,
+    );
+  });
+
+  h.appTest('a double tap on + Add exercise opens one picker', (tester) async {
+    await startPush(tester);
+    await openRunning(tester);
+    await tester.ensureVisible(find.text('+ Add exercise'));
+    // Two presses before the next frame, as two quick taps would be.
+    final add = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '+ Add exercise'),
+    );
+    add.onPressed!();
+    add.onPressed!();
+    await settle(tester);
+    expect(find.widgetWithText(TextField, 'Search exercises'), findsOneWidget);
+    // The slide in has to finish before Back is tapped.
+    await tester.pump(const Duration(milliseconds: 500));
+    await h.back(tester);
+    // One Back left the picker, so no second picker is under it.
+    expect(find.widgetWithText(TextField, 'Search exercises'), findsNothing);
+    expect(find.byType(WorkoutScreen), findsOneWidget);
   });
 
   h.appTest('the screen closes itself when the workout is deleted '
@@ -572,22 +568,30 @@ void main() {
 
   h.appTest('Undo after the exercise was added again is refused in plain '
       'words and doubles nothing', (tester) async {
-    final id = await startPush(tester);
-    WorkoutSeams.exercisePicker =
-        (
-          context, {
-          required onPick,
-          required alreadyIn,
-          bool single = false,
-        }) async {
-          await onPick(bench, 'Bench press');
-        };
+    // An exercise the list has, so the picker can add it again.
+    final id = await h.real(tester, () async {
+      final r = await h.db.createRoutine('Chest', [
+        const RoutineExerciseInput(
+          exerciseRef: 'wger:73',
+          exerciseName: 'Bench Press',
+          targetSets: 3,
+        ),
+        const RoutineExerciseInput(
+          exerciseRef: press,
+          exerciseName: 'Overhead press',
+          targetSets: 3,
+        ),
+      ], h.now);
+      return (await h.db.startRoutine(r.routine.id, h.now)).workout!.id;
+    });
     await openRunning(tester);
     final before = await sets(tester, id);
-    await removeExerciseFromMenu(tester, 'Bench press');
+    await removeExerciseFromMenu(tester, 'Bench Press');
     await tester.ensureVisible(find.text('+ Add exercise'));
     await tester.tap(find.text('+ Add exercise'));
     await settle(tester);
+    await pickInPicker(tester, 'bench press', 'wger:73');
+    await h.back(tester);
     final added = await sets(tester, id);
 
     await tester.tap(find.text('Undo'));

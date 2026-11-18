@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../app_scope.dart';
+import '../../data/database.dart';
 import '../../data/settings_data.dart';
 import '../../data/workout_data.dart';
 import '../../math/training.dart';
@@ -17,7 +18,8 @@ import '../food/confirm_bar.dart';
 import '../my_foods/food_editor.dart' show popRouteOf;
 import 'finish_screen.dart';
 import 'rest_timer_bar.dart';
-import 'seams.dart';
+import 'exercise_detail.dart';
+import 'exercise_picker.dart';
 import 'set_sheet.dart';
 import 'workout_widgets.dart';
 
@@ -74,6 +76,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   var _firstView = true;
 
   var _busy = false;
+  var _picking = false;
   var _finishing = false;
   var _closing = false;
   String? _message;
@@ -324,49 +327,45 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
   }
 
-  Future<void> _addExercise() async {
-    final picker = WorkoutSeams.exercisePicker;
+  /// Opens the picker over the workout. One at a time: a double tap on
+  /// "+ Add exercise" opens one picker.
+  Future<void> _pick({
+    required Future<void> Function(AppDatabase db, String ref, String name)
+    write,
+    bool single = false,
+  }) async {
     final view = _view;
-    if (picker == null || view == null) return;
+    if (view == null || _picking) return;
+    _picking = true;
     final scope = AppScope.of(context);
-    await picker(
-      context,
-      alreadyIn: {for (final e in view.exercises) e.exerciseRef},
-      onPick: (ref, name) async {
-        try {
-          await scope.db.addExercise(widget.workoutId, ref, name);
-          return null;
-        } catch (e) {
-          return _problem(e);
-        }
-      },
-    );
+    try {
+      await openExercisePicker(
+        context,
+        single: single,
+        alreadyIn: {for (final e in view.exercises) e.exerciseRef},
+        onPick: (ref, name) async {
+          try {
+            await write(scope.db, ref, name);
+            return null;
+          } catch (e) {
+            return _problem(e);
+          }
+        },
+      );
+    } finally {
+      _picking = false;
+    }
   }
 
-  Future<void> _replace(ExerciseBlock block) async {
-    final picker = WorkoutSeams.exercisePicker;
-    final view = _view;
-    if (picker == null || view == null) return;
-    final scope = AppScope.of(context);
-    await picker(
-      context,
-      single: true,
-      alreadyIn: {for (final e in view.exercises) e.exerciseRef},
-      onPick: (ref, name) async {
-        try {
-          await scope.db.replaceExercise(
-            widget.workoutId,
-            block.exerciseRef,
-            ref,
-            name,
-          );
-          return null;
-        } catch (e) {
-          return _problem(e);
-        }
-      },
-    );
-  }
+  Future<void> _addExercise() => _pick(
+    write: (db, ref, name) => db.addExercise(widget.workoutId, ref, name),
+  );
+
+  Future<void> _replace(ExerciseBlock block) => _pick(
+    single: true,
+    write: (db, ref, name) =>
+        db.replaceExercise(widget.workoutId, block.exerciseRef, ref, name),
+  );
 
   Future<void> _menu(_Menu action, ExerciseBlock block) {
     final db = AppScope.of(context).db;
@@ -392,8 +391,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       case _Menu.replace:
         return _replace(block);
       case _Menu.details:
-        WorkoutSeams.exerciseDetail?.call(context, block.exerciseRef);
-        return Future.value();
+        return Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => ExerciseDetailScreen(
+              exerciseRef: block.exerciseRef,
+              name: block.exerciseName,
+            ),
+          ),
+        );
     }
   }
 
@@ -534,20 +539,19 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               ),
               onMenu: (a) => _menu(a, view.exercises[i]),
             ),
-          if (WorkoutSeams.exercisePicker != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                  ),
-                  onPressed: _addExercise,
-                  child: const Text(S.addExercise),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(48, 48),
                 ),
+                onPressed: _addExercise,
+                child: const Text(S.addExercise),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -628,31 +632,29 @@ class _ExerciseCard extends StatelessWidget {
                       enabled: !isLast,
                       child: const Text(S.moveDown),
                     ),
-                    if (WorkoutSeams.exercisePicker != null)
-                      PopupMenuItem(
-                        value: _Menu.replace,
-                        enabled: !anyLogged,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(S.replaceExercise),
-                            if (anyLogged)
-                              Text(
-                                S.replaceNotAfterLogged,
-                                style: theme.textTheme.bodySmall,
-                              ),
-                          ],
-                        ),
+                    PopupMenuItem(
+                      value: _Menu.replace,
+                      enabled: !anyLogged,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(S.replaceExercise),
+                          if (anyLogged)
+                            Text(
+                              S.replaceNotAfterLogged,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                        ],
                       ),
+                    ),
                     const PopupMenuItem(
                       value: _Menu.remove,
                       child: Text(S.removeExercise),
                     ),
-                    if (WorkoutSeams.exerciseDetail != null)
-                      const PopupMenuItem(
-                        value: _Menu.details,
-                        child: Text(S.exerciseDetails),
-                      ),
+                    const PopupMenuItem(
+                      value: _Menu.details,
+                      child: Text(S.exerciseDetails),
+                    ),
                   ],
                 ),
               ],

@@ -11,8 +11,24 @@ import '../food/confirm_bar.dart';
 import '../my_foods/food_editor.dart' show popRouteOf;
 import 'exercise_picker.dart';
 import 'rest_timer_bar.dart' show defaultRestSeconds;
-import 'seams.dart';
 import 'workout_widgets.dart' show workoutProblemText;
+
+/// What the routine editor tells the Workouts tab when it closes with a change,
+/// so the tab can say so (with Undo for a delete).
+sealed class RoutineEdit {
+  const RoutineEdit();
+}
+
+class RoutineSaved extends RoutineEdit {
+  const RoutineSaved(this.name);
+  final String name;
+}
+
+class RoutineRemoved extends RoutineEdit {
+  const RoutineRemoved(this.id, this.name);
+  final int id;
+  final String name;
+}
 
 /// Opens the routine editor (routine-editor.html frame 1) for a new routine,
 /// or for [routineId]. Completes with what changed, or null.
@@ -65,7 +81,9 @@ class _RoutineEditorState extends State<RoutineEditor> {
   String? _nameError;
   String? _message;
   var _busy = false;
-  var _warned = false;
+  // What the editor held when the Back warning was shown. Only a Back with
+  // nothing changed since then leaves.
+  String? _warnedFor;
 
   bool get _isNew => widget.routineId == null;
 
@@ -205,7 +223,7 @@ class _RoutineEditorState extends State<RoutineEditor> {
           step: 1,
           min: 1,
           max: 30,
-          format: (v) => v == 1 ? '1 set' : '$v sets',
+          format: S.routineSets,
           lessSpoken: S.setsFewer,
           moreSpoken: S.setsMore,
           apply: (v) => e.sets = v,
@@ -314,11 +332,11 @@ class _RoutineEditorState extends State<RoutineEditor> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_dirty || _warned,
+      canPop: !_dirty || _warnedFor == _snapshot,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _dirty) {
           setState(() {
-            _warned = true;
+            _warnedFor = _snapshot;
             _message = S.routineLeaveWarn;
           });
         }
@@ -467,7 +485,7 @@ class _RoutineEditorState extends State<RoutineEditor> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  S.routineFacts(e.setsShown, S.restClock(e.restShown)),
+                  S.routineFacts(e.setsShown, e.restShown),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),

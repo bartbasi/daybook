@@ -1,8 +1,13 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:drift/native.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
+import 'package:daybook/screens/workouts/routine_editor.dart';
+import 'package:daybook/data/exercise_library.dart';
+import 'package:daybook/data/database.dart';
+import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/workout_data.dart';
-import 'package:daybook/screens/workouts/install_seams.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,11 +17,23 @@ import 'workouts_harness.dart';
 // in order, drag or menu to reorder, sets and rest per exercise, Save, Back
 // with unsaved changes, delete with Undo.
 
+/// A database that refuses every update while [fail] is true.
+class _FailUpdates extends QueryInterceptor {
+  var fail = false;
+
+  @override
+  Future<int> runUpdate(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) {
+    if (fail) throw StateError('disk full');
+    return super.runUpdate(executor, statement, args);
+  }
+}
+
 void main() {
   final h = WorkoutHarness()..register();
-
-  setUp(installWorkoutSeams);
-  tearDown(clearWorkoutSeams);
 
   Finder nameField() => find.widgetWithText(TextField, 'Name');
 
@@ -29,22 +46,30 @@ void main() {
     await h.openWorkoutsTab(tester);
   }
 
+  /// The editor of the first routine, or of [routineId].
   Future<void> openEditorOfPush(
     WidgetTester tester, {
     Size size = const Size(400, 800),
     double scale = 1,
+    int? routineId,
   }) async {
     await openTab(tester, size: size, scale: scale);
-    for (var i = 0; i < 20 && find.text('Edit').evaluate().isEmpty; i++) {
+    final edit = routineId == null
+        ? find.text('Edit').first
+        : find.descendant(
+            of: find.byKey(ValueKey('routine-$routineId')),
+            matching: find.text('Edit'),
+          );
+    for (var i = 0; i < 20 && edit.evaluate().isEmpty; i++) {
       await tester.drag(find.byType(ListView).last, const Offset(0, -200));
       await tester.pump();
     }
-    await tester.ensureVisible(find.text('Edit').first);
+    await tester.ensureVisible(edit);
     await tester.pump();
-    await tester.tap(find.text('Edit').first);
-    await settle(tester);
+    await tester.tap(edit);
+    await waitFor(tester, nameField());
+    // The slide in has to finish before anything is tapped.
     await tester.pump(const Duration(milliseconds: 500));
-    await settle(tester);
   }
 
   Future<void> menu(WidgetTester tester, String name, String item) async {
@@ -290,35 +315,266 @@ void main() {
     expect(find.text('Routine "Push C" saved.'), findsNothing);
   });
 
+  h.appTest('the real app, start to finish: Workouts > + New routine > '
+      '+ Add exercise > Add > Save > Start', (tester) async {
+    await openTab(tester);
+    await tester.tap(find.text('+ New routine'));
+    await settle(tester);
+    await tester.enterText(nameField(), 'Chest day');
+    await tester.tap(find.text('+ Add exercise'));
+    await settle(tester);
+    await pickInPicker(tester, 'bench press', 'wger:73');
+    await h.back(tester);
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('Routine "Chest day" saved.'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+    await settle(tester);
+    expect(find.text('Chest day'), findsWidgets);
+    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Finish'), findsOneWidget);
+    final running = (await h.workoutRows(tester)).single;
+    expect(running.endedAtMs, isNull);
+    expect((await h.allSets(tester, running.id)).map((s) => s.exerciseRef), [
+      'wger:73',
+      'wger:73',
+      'wger:73',
+    ]);
+  });
+
+  h.appTest('a routine with no exercises can be saved (the data layer '
+      'allows it), and the tab says it has none', (tester) async {
+    await openTab(tester);
+    await tester.tap(find.text('+ New routine'));
+    await settle(tester);
+    await tester.enterText(nameField(), 'Blank');
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('Routine "Blank" saved.'));
+    final saved = (await h.real(tester, () => h.db.listRoutines())).single;
+    expect(saved.exercises, isEmpty);
+    expect(find.text('No exercises yet.'), findsOneWidget);
+  });
+
+  h.appTest('Back, then more changes, then Back warns again: only a Back '
+      'with nothing changed since the warning leaves', (tester) async {
+    final ids = await h.seedSample(tester);
+    await openEditorOfPush(tester);
+    const warning =
+        'Your changes are not saved. Tap Save, or go back again to leave '
+        'without them.';
+    await tester.enterText(nameField(), 'Push Z');
+    await tester.pump();
+    await tester.pageBack();
+    await settle(tester);
+    expect(find.text(warning), findsOneWidget);
+
+    // Changed again after the warning: Back stays and warns again.
+    await tester.enterText(nameField(), 'Push ZZ');
+    await tester.pump();
+    await tester.pageBack();
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Save'), findsOneWidget);
+    expect(find.text(warning), findsOneWidget);
+
+    // Nothing changed since that warning: the next Back leaves.
+    await h.back(tester);
+    expect(find.text('Save'), findsNothing);
+    expect((await routine(tester, ids.pushId)).routine.name, 'Push A');
+  });
+
+  h.appTest('the facts line says "no rest" for a rest of 0, and the steppers '
+      'stop at 1 and 30 sets and at no rest and 10:00', (tester) async {
+    final made = await h.real(
+      tester,
+      () => h.db.createRoutine('Edges', [
+        const RoutineExerciseInput(
+          exerciseRef: 'wger:73',
+          exerciseName: 'Bench Press',
+          targetSets: 1,
+          restSeconds: 0,
+        ),
+      ], h.now),
+    );
+    await openEditorOfPush(tester, routineId: made.routine.id);
+    expect(find.text('1 set, no rest'), findsOneWidget);
+
+    IconButton button(String tip) => tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip(tip),
+        matching: find.byWidgetPredicate((w) => w is IconButton),
+      ),
+    );
+
+    await menu(tester, 'Bench Press', 'Number of sets');
+    expect(find.text('1 set'), findsWidgets);
+    expect(button('One fewer set').onPressed, isNull);
+    for (var i = 0; i < 29; i++) {
+      await tester.tap(find.byTooltip('One more set'));
+      await tester.pump();
+    }
+    expect(find.text('30 sets'), findsWidgets);
+    expect(button('One more set').onPressed, isNull);
+    expect(button('One fewer set').onPressed, isNotNull);
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('30 sets, no rest'), findsOneWidget);
+
+    await menu(tester, 'Bench Press', 'Rest time');
+    expect(find.text('No rest'), findsOneWidget);
+    expect(button('Take 15 seconds off the rest').onPressed, isNull);
+    for (var i = 0; i < 40; i++) {
+      await tester.tap(find.byTooltip('Add 15 seconds to the rest'));
+      await tester.pump();
+    }
+    expect(find.text('10:00'), findsWidgets);
+    expect(button('Add 15 seconds to the rest').onPressed, isNull);
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('30 sets, rest 10:00'), findsOneWidget);
+  });
+
+  h.appTest("creating an exercise from the routine editor's picker adds it "
+      'to the routine', (tester) async {
+    await openTab(tester);
+    await tester.tap(find.text('+ New routine'));
+    await settle(tester);
+    await tester.enterText(nameField(), 'Mine');
+    await tester.tap(find.text('+ Add exercise'));
+    await settle(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search exercises'),
+      'Zq press',
+    );
+    await settle(tester);
+    await tester.tap(find.text('+ Create "Zq press" as your own exercise'));
+    await settle(tester);
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.widgetWithText(OutlinedButton, 'Add'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add'));
+    await settle(tester);
+    await h.back(tester);
+    expect(find.text('Zq press'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('Routine "Mine" saved.'));
+    final saved = (await h.real(tester, () => h.db.listRoutines())).single;
+    expect(saved.exercises.single.exerciseName, 'Zq press');
+    expect(saved.exercises.single.exerciseRef, startsWith('local:'));
+  });
+
+  h.appTest('a Save the database refuses says so and keeps the editor and '
+      'its changes', (tester) async {
+    final fail = _FailUpdates();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(fail));
+    final ids = await h.seedSample(tester);
+    await openEditorOfPush(tester);
+    await tester.enterText(nameField(), 'Push Z');
+    fail.fail = true;
+    await tester.tap(find.text('Save'));
+    await waitFor(
+      tester,
+      find.text('Could not save the routine. Nothing was changed.'),
+    );
+    expect(
+      find.text('Could not save the routine. Nothing was changed.'),
+      findsOneWidget,
+    );
+    expect(tester.widget<TextField>(nameField()).controller!.text, 'Push Z');
+    fail.fail = false;
+    expect((await routine(tester, ids.pushId)).routine.name, 'Push A');
+    // Nothing is stuck: Save works once the database does.
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('Routine "Push Z" saved.'));
+    expect((await routine(tester, ids.pushId)).routine.name, 'Push Z');
+  });
+
+  h.appTest('Undo that the database refuses says so in plain words', (
+    tester,
+  ) async {
+    final fail = _FailUpdates();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(fail));
+    final ids = await h.seedSample(tester);
+    await openEditorOfPush(tester);
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('Delete routine'));
+    await waitFor(tester, find.text('Routine "Push A" deleted.'));
+    fail.fail = true;
+    await tester.tap(find.text('Undo'));
+    await waitFor(tester, find.text('Could not bring the routine back.'));
+    expect(find.text('Could not bring the routine back.'), findsOneWidget);
+    expect(find.text('Undo'), findsNothing);
+    fail.fail = false;
+    expect((await routine(tester, ids.pushId)).routine.archived, isTrue);
+  });
+
+  h.appTest('a routine that is not there says so, and Save is off', (
+    tester,
+  ) async {
+    await tester.runAsync(() => ExerciseLibrary.load());
+    await tester.pumpWidget(
+      AppScope(
+        db: h.db,
+        clock: () => h.now,
+        foodsPath: Future.value(''),
+        child: const MaterialApp(home: RoutineEditor(routineId: 999)),
+      ),
+    );
+    await waitFor(
+      tester,
+      find.text('Could not read this routine. Go back and try again.'),
+    );
+    expect(
+      find.text('Could not read this routine. Go back and try again.'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+          .onPressed,
+      isNull,
+    );
+  });
+
   for (final size in [const Size(344, 800), const Size(673, 800)]) {
     for (final scale in [1.0, 2.0]) {
       h.appTest('layout at ${size.width.round()} dp, text scale $scale: '
           'nothing overflows and every target is 48 dp', (tester) async {
         await h.seedSample(tester);
-        await h.real(
+        const long = 'A very long exercise name that goes on and on and on';
+        final long1 = await h.real(
           tester,
           () => h.db.createRoutine('Long', [
             const RoutineExerciseInput(
               exerciseRef: 'wger:73',
-              exerciseName:
-                  'A very long exercise name that goes on and on and on',
+              exerciseName: long,
             ),
           ], h.now),
         );
-        await openEditorOfPush(tester, size: size, scale: scale);
+        await openEditorOfPush(
+          tester,
+          size: size,
+          scale: scale,
+          routineId: long1.routine.id,
+        );
+        expect(find.text(long), findsOneWidget);
         for (final f in [
           find.widgetWithText(FilledButton, 'Save'),
           find.widgetWithText(OutlinedButton, '+ Add exercise'),
           find.byIcon(Icons.drag_handle),
-          find.byType(PopupMenuButton<dynamic>),
+          find.byWidgetPredicate((w) => w is PopupMenuButton),
         ]) {
+          expect(f, findsWidgets);
           for (var i = 0; i < f.evaluate().length; i++) {
             final s = tester.getSize(f.at(i));
             expect(s.height, greaterThanOrEqualTo(48));
             expect(s.width, greaterThanOrEqualTo(48));
           }
         }
-        await menu(tester, 'Bench press', 'Number of sets');
+        await menu(tester, long, 'Number of sets');
         for (final t in ['One fewer set', 'One more set']) {
           final s = tester.getSize(find.byTooltip(t));
           expect(s.height, greaterThanOrEqualTo(48));

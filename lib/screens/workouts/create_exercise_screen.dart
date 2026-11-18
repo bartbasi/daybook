@@ -87,7 +87,9 @@ class _CreateExerciseScreenState extends State<CreateExerciseScreen> {
     }
   }
 
-  Widget _muscles(String title, Set<String> chosen) {
+  /// A muscle is primary or secondary, never both: choosing it here clears it
+  /// from [other].
+  Widget _muscles(String title, Set<String> chosen, Set<String> other) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -103,10 +105,16 @@ class _CreateExerciseScreenState extends State<CreateExerciseScreen> {
           children: [
             for (final m in exerciseMuscleNames)
               FilterChip(
-                label: Text(m),
+                // Wraps rather than fades, for a long name on a narrow screen.
+                label: Text(m, softWrap: true, maxLines: 3),
                 selected: chosen.contains(m),
                 onSelected: (on) => setState(() {
-                  on ? chosen.add(m) : chosen.remove(m);
+                  if (on) {
+                    chosen.add(m);
+                    other.remove(m);
+                  } else {
+                    chosen.remove(m);
+                  }
                 }),
               ),
           ],
@@ -142,8 +150,8 @@ class _CreateExerciseScreenState extends State<CreateExerciseScreen> {
                         border: const OutlineInputBorder(),
                       ),
                     ),
-                    _muscles(S.createExercisePrimary, _primary),
-                    _muscles(S.createExerciseSecondary, _secondary),
+                    _muscles(S.createExercisePrimary, _primary, _secondary),
+                    _muscles(S.createExerciseSecondary, _secondary, _primary),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _equipment,

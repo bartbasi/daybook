@@ -13,7 +13,10 @@ import '../food/confirm_bar.dart';
 import '../my_foods/food_editor.dart' show popRouteOf;
 import 'create_exercise_screen.dart';
 import 'exercise_detail.dart';
-import 'seams.dart';
+
+/// What the picker calls for each exercise the user adds or picks. It returns
+/// null when it worked, or a plain sentence to show when it did not.
+typedef PickExercise = Future<String?> Function(String ref, String name);
 
 /// The exercise library with the user's own exercises merged in. The bundled
 /// list is read once and shared; this only adds the user's rows.
@@ -39,11 +42,9 @@ Future<void> openExercisePicker(
 );
 
 /// The exercise list: the picker in browse mode, where a tap opens the detail.
-void openExerciseList(BuildContext context) {
-  Navigator.of(
-    context,
-  ).push<void>(MaterialPageRoute(builder: (_) => const ExercisePickerScreen()));
-}
+Future<void> openExerciseList(BuildContext context) => Navigator.of(
+  context,
+).push<void>(MaterialPageRoute(builder: (_) => const ExercisePickerScreen()));
 
 enum _Kind { heading, exercise, note, create }
 
@@ -187,7 +188,13 @@ class _ExercisePickerScreenState extends State<ExercisePickerScreen> {
     }
     if (made == null || !mounted) return;
     // The new exercise is the one result, ready to Add.
-    final fresh = lib.withUser(await _db.userExercises());
+    final ExerciseLibrary fresh;
+    try {
+      fresh = lib.withUser(await _db.userExercises());
+    } catch (_) {
+      if (mounted) setState(() => _message = S.pickerLoadFailed);
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _library = fresh;

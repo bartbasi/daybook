@@ -1333,8 +1333,12 @@ class S {
   static const routineSave = 'Save';
   static const routineMenu = 'More options';
   static const routineDelete = 'Delete routine';
-  static String routineFacts(int sets, String rest) =>
-      '${sets == 1 ? '1 set' : '$sets sets'}, rest $rest';
+  static String routineSets(int n) => n == 1 ? '1 set' : '$n sets';
+
+  /// '3 sets, rest 1:30', or '3 sets, no rest' when the rest is 0.
+  static String routineFacts(int sets, int restSeconds) =>
+      '${routineSets(sets)}, '
+      '${restSeconds == 0 ? 'no rest' : 'rest ${restClock(restSeconds)}'}';
   static const routineMenuSets = 'Number of sets';
   static const routineMenuRest = 'Rest time';
   static String routineDragSpoken(String name) => 'Drag to move $name';
@@ -1362,7 +1366,7 @@ class S {
   static const detailRecords = 'Records';
   static const detailHeaviest = 'Heaviest';
   static const detailEstimate = 'Est. 1-rep max';
-  static String detailSetOn(String set, String date) => '$set, $date';
+  static String detailHeaviestSmall(int reps, String date) => 'x $reps, $date';
   static String detailFrom(String set, String date) => 'from $set, $date';
   static const detailBySession = 'Est. 1-rep max by session';
   static String detailBest(String set) => 'best $set';
@@ -1372,6 +1376,8 @@ class S {
   static const detailNoRecords = 'No records yet.';
   static const detailLoadFailed = 'Could not read this exercise.';
   static const detailNotListed = 'This exercise is no longer in the list.';
+  static String detailLicenseUrl(String url) => 'License: $url';
+  static String detailSourceUrl(String url) => 'Source: $url';
   static String detailCredit(String authors, String? license) =>
       license == null ? 'Text by $authors.' : 'Text by $authors, $license.';
 

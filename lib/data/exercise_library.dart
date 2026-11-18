@@ -391,11 +391,12 @@ List<String> get exerciseMuscleNames => volumeGroupOfMuscle.keys.toList();
 
 extension ExerciseCreate on AppDatabase {
   /// Saves one of the user's own exercises and returns it as read back. The
-  /// name is trimmed and may not be blank, nor the same as a listed exercise
-  /// ([library] plus the user's own rows) once accents and case are ignored,
-  /// since two rows with one name cannot be told apart in a list. [primary] and
-  /// [secondary] must be names from [exerciseMuscleNames] (an [ArgumentError]
-  /// otherwise); a muscle in both stays primary only. [equipment] is optional.
+  /// name is trimmed, runs of spaces become one, and it may not be blank, nor
+  /// the same as a listed exercise ([library] plus the user's own rows) once
+  /// accents and case are ignored, since two rows with one name cannot be told
+  /// apart in a list. [primary] and [secondary] must be names from
+  /// [exerciseMuscleNames] (an [ArgumentError] otherwise); a muscle in both
+  /// stays primary only. [equipment] is optional.
   Future<LibraryExercise> createExercise(
     ExerciseLibrary library,
     String name, {
@@ -403,7 +404,7 @@ extension ExerciseCreate on AppDatabase {
     List<String> secondary = const [],
     String? equipment,
   }) async {
-    final trimmed = name.trim();
+    final trimmed = name.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (trimmed.isEmpty) {
       throw const ExerciseRefused(ExerciseProblem.blankName);
     }

@@ -1,11 +1,18 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:flutter/rendering.dart';
+import 'package:drift/native.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
+import 'package:daybook/data/database.dart';
+
+import 'dart:async';
+import 'dart:ui' show Tristate;
+
+import 'package:daybook/app_scope.dart';
 import 'package:daybook/data/exercise_library.dart';
 import 'package:daybook/data/workout_data.dart';
-import 'package:daybook/screens/workouts/install_seams.dart';
 import 'package:daybook/screens/workouts/exercise_picker.dart';
-import 'package:daybook/screens/workouts/seams.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -18,9 +25,6 @@ const chips = ['Chest', 'Shoulders', 'Back', 'Legs', 'Arms'];
 
 void main() {
   final h = WorkoutHarness()..register();
-
-  setUp(installWorkoutSeams);
-  tearDown(clearWorkoutSeams);
 
   Finder rowOf(String ref) => find.byKey(ValueKey('row-$ref'));
   Finder addIn(String ref) =>
@@ -53,6 +57,31 @@ void main() {
     await settle(tester);
   }
 
+  /// The real picker screen on its own, calling [onPick] for each Add.
+  Future<void> pumpPicker(
+    WidgetTester tester, {
+    required PickExercise onPick,
+    bool single = false,
+    Set<String> alreadyIn = const {},
+  }) async {
+    await tester.runAsync(() => ExerciseLibrary.load());
+    await tester.pumpWidget(
+      AppScope(
+        db: h.db,
+        clock: () => h.now,
+        foodsPath: Future.value(''),
+        child: MaterialApp(
+          home: ExercisePickerScreen(
+            onPick: onPick,
+            single: single,
+            alreadyIn: alreadyIn,
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+  }
+
   /// An empty workout running, its picker open through "+ Add exercise".
   Future<int> openPick(
     WidgetTester tester, {
@@ -75,8 +104,7 @@ void main() {
     expect(find.text('Add'), findsNothing);
     await type(tester, 'bench press');
     await tester.tap(find.text('Bench Press').first);
-    await settle(tester);
-    await settle(tester);
+    await waitFor(tester, find.textContaining('(primary)'));
     expect(find.widgetWithText(AppBar, 'Bench Press'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Text by sistab2, CC BY-SA 3.0.'),
@@ -260,32 +288,19 @@ void main() {
     expect(find.text('Seated Bench Press'), findsOneWidget);
   });
 
-  h.appTest(
-    'a refused pick says so in plain words, the row is not marked Added '
-    'and the picker stays open',
-    (tester) async {
-      WorkoutSeams.exercisePicker =
-          (
-            context, {
-            required onPick,
-            required alreadyIn,
-            bool single = false,
-          }) => openExercisePicker(
-            context,
-            alreadyIn: alreadyIn,
-            single: single,
-            onPick: (ref, name) async => 'That did not work, in plain words.',
-          );
-      final id = await openPick(tester);
-      await type(tester, 'bench press');
-      await tester.tap(addIn('wger:73'));
-      await settle(tester);
-      expect(find.text('That did not work, in plain words.'), findsOneWidget);
-      expect(addIn('wger:73'), findsOneWidget);
-      expect(searchBox(), findsOneWidget);
-      expect(await h.allSets(tester, id), isEmpty);
-    },
-  );
+  h.appTest('a refused pick says so in plain words, the row is not marked '
+      'Added and the picker stays open', (tester) async {
+    await pumpPicker(
+      tester,
+      onPick: (ref, name) async => 'That did not work, in plain words.',
+    );
+    await type(tester, 'bench press');
+    await tester.tap(addIn('wger:73'));
+    await settle(tester);
+    expect(find.text('That did not work, in plain words.'), findsOneWidget);
+    expect(addIn('wger:73'), findsOneWidget);
+    expect(searchBox(), findsOneWidget);
+  });
 
   h.appTest('Create: a blank name and a name already listed are refused '
       'beside the field, and a good one is saved and shown ready to Add', (
@@ -382,6 +397,319 @@ void main() {
     expect(find.text('Chest'), findsOneWidget);
     // Chest is first now: its row says 1 set, the others 0 sets.
     expect(find.text('1 set'), findsOneWidget);
+  });
+
+  /// openPick, with the exercises table read through [reads].
+  Future<int> openPickWith(WidgetTester tester, ExerciseReads reads) {
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(reads));
+    return openPick(tester);
+  }
+
+  h.appTest('the picker says the list is loading while it is read, then '
+      'shows it', (tester) async {
+    final reads = ExerciseReads()..hold = Completer<void>();
+    await openPickWith(tester, reads);
+    expect(find.text('Loading the exercise list.'), findsOneWidget);
+    expect(find.text('Add'), findsNothing);
+    reads.hold!.complete();
+    await waitFor(tester, find.text('Add'));
+    expect(find.text('Loading the exercise list.'), findsNothing);
+  });
+
+  h.appTest('the picker says so when the list cannot be read, and offers no '
+      'Add', (tester) async {
+    final reads = ExerciseReads()..fail = true;
+    await openPickWith(tester, reads);
+    await waitFor(tester, find.text('The exercise list could not be read.'));
+    expect(find.text('The exercise list could not be read.'), findsOneWidget);
+    expect(find.text('Add'), findsNothing);
+    // A search shows the same sentence, and no way to create.
+    await type(tester, 'bench');
+    expect(find.text('The exercise list could not be read.'), findsOneWidget);
+    expect(find.textContaining('Create'), findsNothing);
+  });
+
+  h.appTest('recent exercises show before the library has loaded', (
+    tester,
+  ) async {
+    final reads = ExerciseReads()..hold = Completer<void>();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(reads));
+    await h.real(
+      tester,
+      () => h.doWorkout('2026-11-05', [
+        ('wger:73', 'Bench Press', [(100, 5)]),
+      ]),
+    );
+    await openPick(tester);
+    expect(find.text('Loading the exercise list.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('recent-wger:73')), findsOneWidget);
+    expect(find.text('Recent'), findsOneWidget);
+    reads.hold!.complete();
+    await waitFor(tester, find.byKey(const ValueKey('row-wger:73')));
+    expect(find.byKey(const ValueKey('recent-wger:73')), findsOneWidget);
+  });
+
+  h.appTest('there is no Create button until something is typed', (
+    tester,
+  ) async {
+    await openPick(tester);
+    expect(find.textContaining('Create'), findsNothing);
+    await type(tester, '   ');
+    expect(find.textContaining('Create'), findsNothing);
+    await type(tester, 'Zq');
+    expect(find.text('+ Create "Zq" as your own exercise'), findsOneWidget);
+  });
+
+  h.appTest('a double press on Add picks once', (tester) async {
+    final gate = Completer<String?>();
+    final picked = <String>[];
+    await pumpPicker(
+      tester,
+      onPick: (ref, name) {
+        picked.add(ref);
+        return gate.future;
+      },
+    );
+    await type(tester, 'bench press');
+    final add = tester.widget<OutlinedButton>(
+      find.ancestor(
+        of: addIn('wger:73'),
+        matching: find.byType(OutlinedButton),
+      ),
+    );
+    add.onPressed!();
+    add.onPressed!();
+    await settle(tester);
+    gate.complete(null);
+    await settle(tester);
+    expect(picked, ['wger:73']);
+    expect(addIn('wger:73'), findsNothing); // shown as Added
+  });
+
+  h.appTest('a refused pick in single mode (Replace) keeps the picker open', (
+    tester,
+  ) async {
+    await pumpPicker(
+      tester,
+      single: true,
+      onPick: (ref, name) async => 'Not that one.',
+    );
+    await type(tester, 'bench press');
+    await tester.tap(addIn('wger:73'));
+    await settle(tester);
+    expect(find.text('Not that one.'), findsOneWidget);
+    expect(searchBox(), findsOneWidget);
+    expect(addIn('wger:73'), findsOneWidget);
+  });
+
+  h.appTest('if the user exercises cannot be read after a create, the picker '
+      'says the list could not be read and nothing is thrown', (tester) async {
+    final reads = ExerciseReads();
+    await openPickWith(tester, reads);
+    await type(tester, 'Zq press');
+    await tester.tap(find.text('+ Create "Zq press" as your own exercise'));
+    await settle(tester);
+    // Saving reads the table twice (the name check and the row read back);
+    // the third read, the picker's own refresh, fails.
+    reads.failFromRead = reads.reads + 3;
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('The exercise list could not be read.'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('The exercise list could not be read.'), findsOneWidget);
+    expect(searchBox(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    // The exercise itself was saved.
+    reads.failFromRead = null;
+    expect(await h.real(tester, () => h.db.userExercises()), hasLength(1));
+  });
+
+  /// The form behind "+ Create ...", opened from the picker.
+  Future<void> openCreate(
+    WidgetTester tester, {
+    Size size = const Size(400, 800),
+    double scale = 1,
+  }) async {
+    await openPick(tester, size: size, scale: scale);
+    await type(tester, 'Zq press');
+    await tester.tap(find.text('+ Create "Zq press" as your own exercise'));
+    await waitFor(tester, find.text('Primary muscles'));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+
+  /// The chip of [muscle] in the primary or the secondary list, scrolled into
+  /// view (the lists are built as they come into view).
+  Future<Finder> chipIn(
+    WidgetTester tester,
+    String muscle, {
+    required bool primary,
+  }) async {
+    final form = find
+        .descendant(
+          of: find.byType(ListView).last,
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    if (primary) {
+      await tester.drag(form, const Offset(0, 5000));
+      await tester.pump();
+    } else {
+      await tester.scrollUntilVisible(
+        find.text('Secondary muscles'),
+        200,
+        scrollable: form,
+      );
+    }
+    final all = find.widgetWithText(FilterChip, muscle);
+    final c = primary ? all.first : all.last;
+    await tester.ensureVisible(c);
+    await tester.pump();
+    return c;
+  }
+
+  Future<bool> chosen(
+    WidgetTester tester,
+    String muscle, {
+    required bool primary,
+  }) async => tester
+      .widget<FilterChip>(await chipIn(tester, muscle, primary: primary))
+      .selected;
+
+  h.appTest('a muscle is primary or secondary, never both: choosing it in '
+      'one list clears it from the other', (tester) async {
+    await openCreate(tester);
+    await tester.tap(await chipIn(tester, 'Chest', primary: true));
+    await tester.pump();
+    expect(await chosen(tester, 'Chest', primary: true), isTrue);
+    expect(await chosen(tester, 'Chest', primary: false), isFalse);
+
+    await tester.tap(await chipIn(tester, 'Chest', primary: false));
+    await tester.pump();
+    expect(await chosen(tester, 'Chest', primary: true), isFalse);
+    expect(await chosen(tester, 'Chest', primary: false), isTrue);
+
+    await tester.tap(await chipIn(tester, 'Chest', primary: true));
+    await tester.pump();
+    expect(await chosen(tester, 'Chest', primary: true), isTrue);
+    expect(await chosen(tester, 'Chest', primary: false), isFalse);
+
+    // Save keeps what the form shows.
+    await tester.tap(await chipIn(tester, 'Triceps', primary: false));
+    await tester.pump();
+    await tester.tap(find.text('Save'));
+    await waitFor(tester, find.text('Chest. Triceps'));
+    final own = (await h.real(tester, () => h.db.userExercises())).single;
+    expect(own.primaryMuscles, ['Chest']);
+    expect(own.secondaryMuscles, ['Triceps']);
+  });
+
+  for (final size in [const Size(344, 800), const Size(673, 800)]) {
+    for (final scale in [1.0, 2.0]) {
+      h.appTest('create exercise at ${size.width.round()} dp, text scale '
+          '$scale: nothing overflows, every target is 48 dp and a long muscle '
+          'name wraps', (tester) async {
+        await openCreate(tester, size: size, scale: scale);
+        final form = find
+            .descendant(
+              of: find.byType(ListView).last,
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        for (final f in [
+          find.widgetWithText(FilledButton, 'Save'),
+          find.byType(TextField),
+        ]) {
+          for (var i = 0; i < f.evaluate().length; i++) {
+            final s = tester.getSize(f.at(i));
+            expect(s.height, greaterThanOrEqualTo(48));
+            expect(s.width, greaterThanOrEqualTo(48));
+          }
+        }
+        // Every chip of both lists, scrolled to. The lists are built as they
+        // come into view, so each is looked at from its own heading.
+        for (final list in [
+          ('Primary muscles', 'first'),
+          ('Secondary muscles', 'last'),
+        ]) {
+          await tester.scrollUntilVisible(
+            find.text(list.$1),
+            -200,
+            scrollable: form,
+          );
+          await tester.scrollUntilVisible(
+            find.text(list.$1),
+            200,
+            scrollable: form,
+          );
+          for (final muscle in exerciseMuscleNames) {
+            final all = find.widgetWithText(FilterChip, muscle);
+            final c = list.$2 == 'first' ? all.first : all.last;
+            await tester.scrollUntilVisible(c, 200, scrollable: form);
+            expect(tester.getSize(c).height, greaterThanOrEqualTo(48));
+            // The label is whole: wrapped onto lines when it does not fit on
+            // one, never cut off or faded.
+            final label = tester.renderObject<RenderParagraph>(
+              find.descendant(of: c, matching: find.text(muscle)).first,
+            );
+            final natural = label.getMaxIntrinsicWidth(double.infinity);
+            if (natural > label.size.width + 0.5) {
+              expect(
+                label.size.height,
+                greaterThanOrEqualTo(label.preferredLineHeight * 1.9),
+                reason: '$muscle at ${size.width} dp, scale $scale',
+              );
+            }
+            expect(
+              tester.getRect(c).right,
+              lessThanOrEqualTo(size.width),
+              reason: muscle,
+            );
+          }
+        }
+        await tester.scrollUntilVisible(
+          find.widgetWithText(TextField, 'Equipment (optional)'),
+          200,
+          scrollable: form,
+        );
+        expect(
+          find.widgetWithText(TextField, 'Equipment (optional)'),
+          findsOneWidget,
+        );
+      });
+    }
+  }
+
+  h.appTest('create exercise, spoken: the headings, a muscle chip and its '
+      'chosen state, and Save', (tester) async {
+    await openCreate(tester);
+    final handle = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(find.text('Primary muscles'))
+          .flagsCollection
+          .isHeader,
+      isTrue,
+    );
+    expect(
+      tester
+          .getSemantics(find.text('Secondary muscles'))
+          .flagsCollection
+          .isHeader,
+      isTrue,
+    );
+    final chest = find.widgetWithText(FilterChip, 'Chest').first;
+    expect(tester.getSemantics(chest).label, 'Chest');
+    expect(
+      tester.getSemantics(chest).flagsCollection.isSelected,
+      Tristate.isFalse,
+    );
+    await tester.tap(chest);
+    await tester.pump();
+    expect(
+      tester.getSemantics(chest).flagsCollection.isSelected,
+      Tristate.isTrue,
+    );
+    expect(find.bySemanticsLabel('Save'), findsOneWidget);
+    handle.dispose();
   });
 
   for (final size in [const Size(344, 800), const Size(673, 800)]) {

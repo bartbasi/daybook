@@ -15,7 +15,9 @@ import '../../data/workout_data.dart';
 import '../../strings.dart';
 import '../../util/units.dart';
 import '../food/confirm_bar.dart';
-import 'seams.dart';
+import 'exercise_picker.dart' show openExerciseList;
+import 'routine_editor.dart';
+import 'weekly_volume_screen.dart';
 import 'workout_screen.dart';
 import 'workout_widgets.dart';
 
@@ -186,12 +188,36 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     }
   }
 
+  // One screen at a time: the same guard as a start, so a double tap on
+  // Exercises or on the weekly card opens one screen.
+  Future<void> _openList() async {
+    if (_starting) return;
+    _starting = true;
+    try {
+      await openExerciseList(context);
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _openWeekly() async {
+    if (_starting) return;
+    _starting = true;
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => const WeeklyVolumeScreen()),
+      );
+    } finally {
+      _starting = false;
+    }
+  }
+
   Future<void> _openEditor(int? routineId) async {
     if (_starting) return;
     _starting = true;
     final RoutineEdit? edit;
     try {
-      edit = await WorkoutSeams.routineEditor!(context, routineId: routineId);
+      edit = await openRoutineEditor(context, routineId: routineId);
     } finally {
       _starting = false;
     }
@@ -310,14 +336,13 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                   ),
                 ),
               ),
-              if (WorkoutSeams.exercises != null)
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                  ),
-                  onPressed: () => WorkoutSeams.exercises!(context),
-                  child: const Text(S.exercisesButton),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(48, 48),
                 ),
+                onPressed: _openList,
+                child: const Text(S.exercisesButton),
+              ),
             ],
           ),
         ),
@@ -364,9 +389,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                     ], 3),
               onStart: () =>
                   _start((db, now) => db.startRoutine(r.routine.id, now)),
-              onEdit: WorkoutSeams.routineEditor == null
-                  ? null
-                  : () => _openEditor(r.routine.id),
+              onEdit: () => _openEditor(r.routine.id),
             ),
           Padding(
             padding: const EdgeInsets.only(top: 12),
@@ -374,35 +397,26 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
               spacing: 12,
               runSpacing: 8,
               children: [
-                if (WorkoutSeams.routineEditor != null)
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                    ),
-                    onPressed: () => _openEditor(null),
-                    child: const Text(S.newRoutine),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(48, 48),
                   ),
-                // An empty workout is only useful with the picker to fill it.
-                if (WorkoutSeams.exercisePicker != null)
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                    ),
-                    onPressed: () =>
-                        _start((db, now) => db.startEmptyWorkout(now)),
-                    child: const Text(S.emptyWorkout),
+                  onPressed: () => _openEditor(null),
+                  child: const Text(S.newRoutine),
+                ),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(48, 48),
                   ),
+                  onPressed: () =>
+                      _start((db, now) => db.startEmptyWorkout(now)),
+                  child: const Text(S.emptyWorkout),
+                ),
               ],
             ),
           ),
         ],
-        _Weekly(
-          volume: volume,
-          failed: _libraryFailed,
-          onOpen: WorkoutSeams.weeklyVolume == null
-              ? null
-              : () => WorkoutSeams.weeklyVolume!(context),
-        ),
+        _Weekly(volume: volume, failed: _libraryFailed, onOpen: _openWeekly),
         const SizedBox(height: 16),
       ],
     );
@@ -576,7 +590,7 @@ class _Weekly extends StatelessWidget {
 
   final Map<String, int>? volume;
   final bool failed;
-  final VoidCallback? onOpen;
+  final VoidCallback onOpen;
 
   /// A bar is full at this many sets, as in the wireframe (6 sets is 60%).
   static const _full = 10;
@@ -645,6 +659,6 @@ class _Weekly extends StatelessWidget {
       children: [head, rows],
     );
     // The title and the bars both open the weekly screen.
-    return onOpen == null ? all : InkWell(onTap: onOpen, child: all);
+    return InkWell(onTap: onOpen, child: all);
   }
 }

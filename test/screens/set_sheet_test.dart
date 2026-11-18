@@ -4,7 +4,6 @@
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/workout_data.dart';
-import 'package:daybook/screens/workouts/seams.dart';
 import 'package:daybook/screens/workouts/workout_screen.dart';
 import 'package:daybook/util/units.dart';
 import 'package:flutter/material.dart';
@@ -262,19 +261,25 @@ void main() {
 
   h.appTest('Remove set in the sheet clears an old error, so its Undo is '
       'seen', (tester) async {
-    WorkoutSeams.exercisePicker =
-        (
-          context, {
-          required onPick,
-          required alreadyIn,
-          bool single = false,
-        }) async {
-          await onPick(bench, 'Bench press');
-        };
-    addTearDown(() => WorkoutSeams.exercisePicker = null);
-    await openPush(tester);
+    // An exercise the list has, so the picker can add it again.
+    await h.real(tester, () async {
+      await h.doWorkout('2026-11-05', [
+        ('wger:73', 'Bench Press', [(175, 8), (175, 8), (175, 7)]),
+      ]);
+      final r = await h.db.createRoutine('Chest', [
+        const RoutineExerciseInput(
+          exerciseRef: 'wger:73',
+          exerciseName: 'Bench Press',
+          targetSets: 3,
+        ),
+      ], h.now);
+      workoutId = (await h.db.startRoutine(r.routine.id, h.now)).workout!.id;
+    });
+    await h.openApp(tester);
+    await tester.tap(find.widgetWithText(TextButton, 'Return'));
+    await settle(tester);
     // Remove bench, add it again, then Undo: an error is on the bar.
-    await tester.tap(find.byTooltip('Menu for Bench press'));
+    await tester.tap(find.byTooltip('Menu for Bench Press'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     await tester.tap(find.text('Remove exercise'));
@@ -282,6 +287,8 @@ void main() {
     await tester.ensureVisible(find.text('+ Add exercise'));
     await tester.tap(find.text('+ Add exercise'));
     await settle(tester);
+    await pickInPicker(tester, 'bench press', 'wger:73');
+    await h.back(tester);
     await tester.tap(find.text('Undo'));
     await settle(tester);
     expect(

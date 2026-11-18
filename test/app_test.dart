@@ -177,7 +177,7 @@ void main() {
     await tester.tap(find.widgetWithText(NavigationDestination, 'Workouts'));
     await settle(tester);
     expect(find.byType(WorkoutsTab), findsOneWidget);
-    expect(find.text('Empty workout'), findsNothing);
+    expect(find.text('Empty workout'), findsOneWidget);
     expect(find.text('Start again'), findsNothing);
     await tester.tap(find.widgetWithText(NavigationDestination, 'Today'));
     await settle(tester);

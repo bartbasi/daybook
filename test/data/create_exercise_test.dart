@@ -81,6 +81,26 @@ void main() {
     expect(await db.userExercises(), hasLength(1));
   });
 
+  test('an accented spelling and extra inner spaces are the same name as a '
+      'library exercise', () async {
+    expect(lib.lookup('wger:73').exercise!.name, 'Bench Press');
+    for (final name in ['Bénch press', 'Bench  press', ' bench \t PRESS ']) {
+      final e = await refused(db.createExercise(lib, name));
+      expect(e.problem, ExerciseProblem.sameName, reason: name);
+    }
+    expect(await db.userExercises(), isEmpty);
+  });
+
+  test(
+    'inner spaces are collapsed in the name that is saved and compared',
+    () async {
+      final made = await db.createExercise(lib, '  Zq   sled \n haul ');
+      expect(made.name, 'Zq sled haul');
+      final e = await refused(db.createExercise(lib, 'zq sled  haul'));
+      expect(e.problem, ExerciseProblem.sameName);
+    },
+  );
+
   test('a muscle that is not in the library is a programming error', () {
     expect(
       () => db.createExercise(lib, 'X', primary: ['Wings']),

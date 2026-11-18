@@ -36,6 +36,7 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
   Stream<List<ExerciseSession>>? _history;
   LibraryExercise? _exercise;
   var _libraryDone = false;
+  var _libraryFailed = false;
 
   @override
   void didChangeDependencies() {
@@ -54,7 +55,12 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
         });
       },
       onError: (Object _) {
-        if (mounted) setState(() => _libraryDone = true);
+        if (mounted) {
+          setState(() {
+            _libraryDone = true;
+            _libraryFailed = true;
+          });
+        }
       },
     );
   }
@@ -151,7 +157,10 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        if (_libraryDone && ex == null) const Text(S.detailNotListed),
+        if (_libraryFailed)
+          const Text(S.pickerLoadFailed)
+        else if (_libraryDone && ex == null)
+          const Text(S.detailNotListed),
         if (ex != null)
           Text(
             S.detailMuscles(
@@ -171,7 +180,10 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
                 card(
                   S.detailHeaviest,
                   weight(heaviest),
-                  'x ${heaviest.reps}, ${S.monthDay(heaviest.localDate, today)}',
+                  S.detailHeaviestSmall(
+                    heaviest.reps!,
+                    S.monthDay(heaviest.localDate, today),
+                  ),
                 ),
                 if (best != null && bestEst != null) ...[
                   const SizedBox(width: 12),
@@ -217,9 +229,26 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
         if (credit != null)
           Padding(
             padding: const EdgeInsets.only(top: 16),
-            child: Text(
-              S.detailCredit(credit, ex!.licenseLabel),
-              style: theme.textTheme.bodySmall,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  S.detailCredit(credit, ex!.licenseLabel),
+                  style: theme.textTheme.bodySmall,
+                ),
+                // Plain text to copy for now. Task 8.3 makes both tappable
+                // when url_launcher arrives.
+                if (ex.licenseUrl != null)
+                  SelectableText(
+                    S.detailLicenseUrl(ex.licenseUrl!),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                if (ex.url != null)
+                  SelectableText(
+                    S.detailSourceUrl(ex.url!),
+                    style: theme.textTheme.bodySmall,
+                  ),
+              ],
             ),
           ),
       ],

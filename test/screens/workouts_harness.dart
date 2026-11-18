@@ -1,6 +1,8 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'dart:async';
+
 import 'package:daybook/app.dart';
 import 'package:daybook/clock.dart';
 import 'package:daybook/data/database.dart';
@@ -32,6 +34,59 @@ Future<void> settle(WidgetTester tester) async {
   );
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
+}
+
+/// Waits (a little at a time, outside the fake clock) until [finder] finds
+/// something, for at most 40 rounds.
+Future<void> waitFor(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 40 && finder.evaluate().isEmpty; i++) {
+    await settle(tester);
+  }
+}
+
+/// In the open exercise picker: search for [query] and tap Add on the row of
+/// [ref].
+Future<void> pickInPicker(WidgetTester tester, String query, String ref) async {
+  await tester.enterText(
+    find.widgetWithText(TextField, 'Search exercises'),
+    query,
+  );
+  final add = find.descendant(
+    of: find.byKey(ValueKey('row-$ref')),
+    matching: find.text('Add'),
+  );
+  await waitFor(tester, add);
+  await tester.tap(add);
+  await settle(tester);
+}
+
+/// A database that can hold or refuse reads of the exercises table (the user's
+/// own exercises), which the exercise library load needs, and nothing else. With [hold] set, the library stays loading until it completes; with
+/// [fail] set, the load fails once it is let through.
+class ExerciseReads extends QueryInterceptor {
+  Completer<void>? hold;
+  var fail = false;
+
+  /// How many reads of the table there have been, and the number of the first
+  /// one that fails (null for none), for a failure partway through a flow.
+  var reads = 0;
+  int? failFromRead;
+
+  @override
+  Future<List<Map<String, Object?>>> runSelect(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    if (statement.contains('FROM "exercises"')) {
+      reads++;
+      await hold?.future;
+      if (fail || (failFromRead != null && reads >= failFromRead!)) {
+        throw StateError('unreadable');
+      }
+    }
+    return super.runSelect(executor, statement, args);
+  }
 }
 
 /// One exercise of a sample workout: ref, name, sets as (lb, reps).
