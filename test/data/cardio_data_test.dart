@@ -263,6 +263,12 @@ void main() {
       expect(b.activityCode, '02054');
     });
 
+    test('last entry for an Other row, or an unknown code, is null', () async {
+      await save(run(code: '02054', miles: null));
+      expect(await db.lastEntryFor(table, '02054'), isNull);
+      expect(await db.lastEntryFor(table, '99999'), isNull);
+    });
+
     test('a chosen entry (Change) wins, with or without a distance', () async {
       expect(
         (await save(run(entry: '12090', miles: null))).activityCode,
@@ -572,7 +578,214 @@ void main() {
       await db.deleteCardio(a.id, noon);
       await pumpEventQueue();
       expect(seen.last, [b]);
+      final edited = await db.editCardio(b.id, table, run(override: 77));
+      await pumpEventQueue();
+      expect(seen.last, [edited]);
+      expect(seen.last.single.kcalOverride, 77);
       await sub.cancel();
+    });
+  });
+
+  group('the entry must belong to the activity', () {
+    setUp(() => weigh(181.8, '2026-11-09'));
+
+    Matcher noActivity() => throwsA(
+      isA<CardioRefused>().having(
+        (e) => e.problem,
+        'problem',
+        CardioProblem.noActivity,
+      ),
+    );
+
+    test('a code of another group, or another Other row, is refused', () async {
+      await expectLater(save(run(entry: '17190')), noActivity()); // Running
+      await expectLater(save(run(code: walking, entry: '12050')), noActivity());
+      await expectLater(save(run(code: cycling, entry: '12050')), noActivity());
+      await expectLater(save(run(code: '02054', entry: '02050')), noActivity());
+      await expectLater(save(run(code: '02054', entry: '12050')), noActivity());
+      expect(await db.select(db.cardioSessions).get(), isEmpty);
+      // Edit refuses the same, and writes nothing.
+      final s = await save(run());
+      await expectLater(
+        db.editCardio(s.id, table, run(entry: '17190', override: 99)),
+        noActivity(),
+      );
+      expect(await db.cardioSession(s.id), s);
+    });
+
+    test(
+      'an entry of the same group, or the Other row itself, is fine',
+      () async {
+        expect((await save(run(entry: '12090'))).activityCode, '12090');
+        expect((await save(run(entry: '12145'))).activityCode, '12145');
+        expect(
+          (await save(run(code: '02054', entry: '02054'))).activityCode,
+          '02054',
+        );
+      },
+    );
+  });
+
+  group('the preview says how the entry was found', () {
+    setUp(() => weigh(181.8, '2026-11-09'));
+
+    Future<CardioPreview> pv({String? entry, double? miles}) =>
+        db.cardioPreview(
+          table,
+          activityCode: running,
+          entryCode: entry,
+          durationSeconds: 3600,
+          distanceMeters: miles == null ? null : milesToMeters(miles),
+          localDate: '2026-11-12',
+        );
+
+    test('6.2 mph is in its band', () async {
+      final p = await pv(miles: 6.2);
+      expect(p.entry.code, '12050');
+      expect(p.fromPace, isTrue);
+      expect(p.inBand, isTrue);
+    });
+
+    test('6.5 mph is in a gap: nearest band, not in band', () async {
+      final p = await pv(miles: 6.5);
+      expect(p.entry.code, '12050');
+      expect(p.fromPace, isTrue);
+      expect(p.inBand, isFalse);
+      expect((await pv(miles: 30)).inBand, isFalse); // beyond the fastest
+    });
+
+    test('no distance, or a chosen entry: neither', () async {
+      final a = await pv();
+      expect([a.fromPace, a.inBand], [false, false]);
+      final b = await pv(entry: '12090', miles: 6.2);
+      expect([b.fromPace, b.inBand], [false, false]);
+    });
+  });
+
+  group('heart rate', () {
+    setUp(() => weigh(181.8, '2026-11-09'));
+
+    test('when given it must be above 0', () async {
+      for (final bad in [0, -1, -150]) {
+        await expectLater(
+          save(run(hr: bad)),
+          throwsA(
+            isA<CardioRefused>().having(
+              (e) => e.problem,
+              'problem',
+              CardioProblem.badNumber,
+            ),
+          ),
+        );
+      }
+      expect(await db.select(db.cardioSessions).get(), isEmpty);
+      final s = await save(run(hr: 1));
+      expect(s.avgHeartRate, 1);
+      await expectLater(
+        db.editCardio(s.id, table, run(hr: 0)),
+        throwsA(isA<CardioRefused>()),
+      );
+      expect((await db.cardioSession(s.id))!.avgHeartRate, 1);
+    });
+  });
+
+  group('what an edit stores, and the preview of it', () {
+    setUp(() => weigh(181.8, '2026-11-09'));
+
+    Future<void> goals() => db
+        .saveGoals(
+          const GoalInput(
+            activity: ActivityLevel.sedentary,
+            rate: WeeklyRate(Target.stay, 0, imp),
+            ownCalories: 2138,
+          ),
+          localAt('2026-11-08', 8, 0),
+        )
+        .then((_) {});
+
+    test('an edit that changes no estimate input keeps the stored estimate, '
+        'and the preview says so', () async {
+      final s = await save(run()); // 383 at 181.8 lb
+      await weigh(150, '2026-11-12'); // the session's own day, later
+      final after = localAt('2026-11-12', 15, 30);
+      final edits = <String, (CardioInput, Now?)>{
+        'override only': (run(override: 360), null),
+        'use estimate': (run(), null),
+        'heart rate only': (run(hr: 140), null),
+        'time of day only': (run(), after),
+      };
+      for (final e in edits.entries) {
+        final p = await db.editPreview(table, s.id, e.value.$1, at: e.value.$2);
+        expect(p.kcal, s.kcalEstimated, reason: e.key);
+        expect(p.keptStored, isTrue, reason: e.key);
+        final row = await db.editCardio(
+          s.id,
+          table,
+          e.value.$1,
+          at: e.value.$2,
+        );
+        expect(row.kcalEstimated, s.kcalEstimated, reason: e.key);
+        expect(roundForDisplay(row.kcalEstimated!), 383, reason: e.key);
+      }
+      expect((await db.cardioSession(s.id))!.startedAtMs, after.utcMs);
+    });
+
+    test('a changed duration, distance or entry works it out again, and the '
+        'preview is what is stored', () async {
+      final s = await save(run());
+      await weigh(150, '2026-11-12');
+      final inputs = [
+        run(minutes: 40, miles: 4.1),
+        run(miles: 3.2), // the distance, same band
+        run(entry: '12090'), // the entry
+      ];
+      for (final input in inputs) {
+        final p = await db.editPreview(table, s.id, input);
+        expect(p.keptStored, isFalse);
+        expect(p.weightKg, closeTo(lbToKg(150), 1e-9));
+        final row = await db.editCardio(s.id, table, input);
+        expect(row.kcalEstimated, p.kcal);
+        expect(row.met, p.entry.met);
+        expect(row.kcalEstimated, isNot(s.kcalEstimated));
+      }
+      final d = await db.editCardio(s.id, table, run(minutes: 40, miles: 4.1));
+      expect(d.kcalEstimated, closeTo(9.3 * lbToKg(150) * (40 / 60), 1e-6));
+    });
+
+    test('a move to another day uses that day\'s weigh-in and moves the '
+        'calories between budgets', () async {
+      await goals();
+      final s = await save(run());
+      await weigh(150, '2026-11-14');
+      final to = localAt('2026-11-14', 12, 0);
+      final p = await db.editPreview(table, s.id, run(), at: to);
+      expect(p.keptStored, isFalse);
+      expect(p.kcal, closeTo(9.3 * lbToKg(150) * 0.5, 1e-6));
+      final row = await db.editCardio(s.id, table, run(), at: to);
+      expect(row.localDate, '2026-11-14');
+      expect(row.kcalEstimated, p.kcal);
+      expect((await db.budgetForDay('2026-11-12'))!.exerciseKcal, 0);
+      expect((await db.budgetForDay('2026-11-14'))!.exerciseKcal, p.kcal);
+    });
+
+    test('a missing estimate is filled on any edit once there is a weigh-in, '
+        'and the preview says it is new', () async {
+      await db.delete(db.weightEntries).go();
+      final s = await save(run());
+      expect(s.kcalEstimated, isNull);
+      final none = await db.editPreview(table, s.id, run(hr: 130));
+      expect(none.kcal, isNull);
+      expect(none.keptStored, isFalse);
+      await weigh(181.8, '2026-11-10');
+      final p = await db.editPreview(table, s.id, run(hr: 130));
+      expect(p.keptStored, isFalse);
+      expect(roundForDisplay(p.kcal!), 383);
+      final row = await db.editCardio(s.id, table, run(hr: 130));
+      expect(row.kcalEstimated, p.kcal);
+    });
+
+    test('the preview of a missing session is an error', () async {
+      await expectLater(db.editPreview(table, 999, run()), throwsStateError);
     });
   });
 
@@ -779,6 +992,18 @@ void main() {
       await db.deleteCardio(id, noon);
       expect(await db.cardioForDay('2026-11-12'), isEmpty);
       expect(await db.select(db.cardioSessions).get(), hasLength(1));
+      final back = await db.undoDeleteCardio(id);
+      expect(back.deletedAtMs, isNull);
+      expect((await db.cardioForDay('2026-11-12')).map((e) => e.id), [id]);
+      await db.saveGoals(
+        const GoalInput(
+          activity: ActivityLevel.sedentary,
+          rate: WeeklyRate(Target.stay, 0, imp),
+          ownCalories: 2000,
+        ),
+        localAt('2026-11-08', 8, 0),
+      );
+      expect((await db.budgetForDay('2026-11-12'))!.exerciseKcal, 250);
     });
   });
 

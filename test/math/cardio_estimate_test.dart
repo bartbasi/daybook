@@ -1,6 +1,7 @@
 // Daybook. Copyright 2026 Play, Inc.
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
+import 'package:daybook/data/met_table.dart';
 import 'package:daybook/math/calorie_budget.dart';
 import 'package:daybook/math/cardio_estimate.dart';
 import 'package:daybook/util/units.dart';
@@ -44,6 +45,8 @@ const walkingCodes = [
 ];
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   String pick(List<MphRange> bands, List<String> codes, double mph) =>
       codes[pickBand(bands, mph)];
 
@@ -108,6 +111,18 @@ void main() {
       );
     });
 
+    test('paces that are float-noisy as a division come out exactly', () {
+      // 3.3 / (33 / 60) and 4.2 / (42 / 60) are not 6.0 in floating point.
+      expect(
+        paceMph(distanceMeters: milesToMeters(3.3), durationSeconds: 33 * 60),
+        6.0,
+      );
+      expect(
+        paceMph(distanceMeters: milesToMeters(4.2), durationSeconds: 42 * 60),
+        6.0,
+      );
+    });
+
     test('no distance, a distance of 0, or no duration is no pace', () {
       expect(paceMph(distanceMeters: null, durationSeconds: 1800), isNull);
       expect(paceMph(distanceMeters: 0, durationSeconds: 1800), isNull);
@@ -161,13 +176,49 @@ void main() {
       expect(pick(walking, walkingCodes, 0.4), '17151');
     });
 
-    test('"greater than" does not hold its own number, but is nearest', () {
-      // 20.0 is not inside ">20", and not inside 16-19 either: it is in the
-      // gap, 0 from the edge of ">20" and 1 from 16-19.
+    test('"greater than" does not hold its own number', () {
+      // Two open bands that meet at 12.5. "<12.5" and ">12.5" both leave 12.5
+      // out, so it is in a gap with 0 to each edge and the slower wins. With
+      // "p >= lo" the faster band would hold it and win.
+      final meet = [r(null, 12.5), r(12.5, null)];
+      expect(pickBand(meet, 12.5), 0);
+      expect(pickBand(meet, 12.4), 0);
+      expect(pickBand(meet, 12.6), 1);
+      // "10 to 12" then ">12.5": 12.5 is in the open band's edge, 12.25 is
+      // halfway between the two edges and goes to the slower.
+      final gap = [r(10, 12), r(12.5, null)];
+      expect(pickBand(gap, 12.25), 0);
+      expect(pickBand(gap, 12.5), 1);
+      expect(pickBand(gap, 12.6), 1);
+      expect(pickBand(gap, 12.2), 0);
+    });
+
+    test('cycling above 20 mph', () {
       expect(pick(cycling, cyclingCodes, 20.0), '01060');
       expect(pick(cycling, cyclingCodes, 20.1), '01060');
       expect(pick(cycling, cyclingCodes, 25), '01060');
       expect(pick(cycling, cyclingCodes, 19.4), '01050');
+    });
+
+    test('a tie that only holds after the rounding: the slower band', () {
+      // 4.9 is 0.1 from 4.8 and 0.1 from 5.0, but 5.0 - 4.9 is a hair under.
+      expect(pick(running, runningCodes, 4.9), '12029');
+      expect(pick(walking, walkingCodes, 3.45), '17190');
+      // The same walking pace typed as 0.23 mi in 4 min.
+      final mph = paceMph(
+        distanceMeters: milesToMeters(0.23),
+        durationSeconds: 240,
+      )!;
+      expect(pick(walking, walkingCodes, mph), '17190');
+    });
+
+    test('kilometers on an edge: 16.09344 km in 1 h is 10 mph, 01020', () {
+      final mph = paceMph(
+        distanceMeters: kmToMeters(16.09344),
+        durationSeconds: 3600,
+      )!;
+      expect(mph, 10.0);
+      expect(pick(cycling, cyclingCodes, mph), '01020');
     });
 
     test('walking paces', () {
@@ -186,17 +237,26 @@ void main() {
       expect(pick(running, runningCodes, 30), '12135');
     });
 
-    test('values are never blended: the answer is always one whole band', () {
-      for (var mph = 0.0; mph < 30; mph += 0.05) {
-        final i = pickBand(running, mph);
-        expect(i, inInclusiveRange(0, running.length - 1));
-      }
-      // Over the whole sweep the choice only ever steps up with the pace.
-      var last = 0;
-      for (var mph = 0.0; mph < 30; mph += 0.05) {
-        final i = pickBand(running, mph);
-        expect(i, greaterThanOrEqualTo(last));
-        last = i;
+    test('on the real table the pick never goes down as the pace rises, '
+        'and every band is picked somewhere', () async {
+      final table = await MetTable.load();
+      for (final g in table.groups) {
+        final bands = [for (final b in g.bands) (min: b.minMph, max: b.maxMph)];
+        final picked = <int>{};
+        var last = 0;
+        for (var i = 1; i <= 8000; i++) {
+          final k = pickBand(bands, i * 0.005); // 0.005 to 40 mph
+          expect(
+            k,
+            greaterThanOrEqualTo(last),
+            reason: '${g.name} at ${i * 0.005}',
+          );
+          last = k;
+          picked.add(k);
+        }
+        expect(picked, {
+          for (var k = 0; k < bands.length; k++) k,
+        }, reason: g.name);
       }
     });
 

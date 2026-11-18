@@ -68,6 +68,9 @@ int pickBand(List<MphRange> bands, double mph) {
   return best;
 }
 
+/// True when the band holds [mph] (see [MphRange]).
+bool bandHolds(MphRange band, double mph) => _holds(band, _clean(mph));
+
 bool _holds(MphRange b, double p) {
   final lo = b.min, hi = b.max;
   if (lo != null && hi != null) return p >= lo && p <= hi;

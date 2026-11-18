@@ -37,7 +37,8 @@ enum CardioProblem {
   /// distance and is fine.)
   badDistance,
 
-  /// An override that is negative or not a number. (0 is allowed.)
+  /// An override that is negative or not a number (0 is allowed), or a heart
+  /// rate that is 0 or less.
   badNumber,
 }
 
@@ -89,8 +90,10 @@ class CardioPreview {
     required this.group,
     required this.mph,
     required this.fromPace,
+    required this.inBand,
     required this.weightKg,
     required this.kcal,
+    this.keptStored = false,
   });
 
   /// The Compendium row used.
@@ -102,14 +105,27 @@ class CardioPreview {
   /// The pace in mph, or null when there is no distance (or no duration).
   final double? mph;
 
-  /// True when [entry] is the band that holds [mph].
+  /// True whenever [entry] was picked by the pace (a group, a distance and no
+  /// entry chosen by the user).
   final bool fromPace;
 
-  /// The weigh-in used, or null when there is none.
+  /// True only when [entry]'s band holds [mph]. False for a pace in a gap
+  /// between bands or beyond the ends (the nearest band was used), and
+  /// whenever [fromPace] is false.
+  final bool inBand;
+
+  /// The weigh-in the estimate was worked out from, or null when there is
+  /// none, or when [keptStored] (the stored estimate's weight is not kept).
   final double? weightKg;
 
   /// The estimate, unrounded. Null without a duration or without a weigh-in.
+  /// For [CardioData.editPreview] it is exactly what the edit stores.
   final double? kcal;
+
+  /// Only from [CardioData.editPreview]: true when [kcal] is the estimate
+  /// already stored on the session, kept because no input of the estimate
+  /// changed; false when it was worked out now.
+  final bool keptStored;
 }
 
 /// One of the activities the screen offers again.
@@ -128,6 +144,26 @@ class RecentActivity {
 
   /// The entry used last time. Its code goes in [CardioInput.activityCode].
   final MetActivity entry;
+}
+
+class _EditPlan {
+  const _EditPlan({
+    required this.day,
+    required this.code,
+    required this.name,
+    required this.met,
+    required this.estimate,
+    required this.kept,
+    this.preview,
+  });
+
+  final String day;
+  final String? code;
+  final String name;
+  final double? met;
+  final double? estimate;
+  final bool kept;
+  final CardioPreview? preview;
 }
 
 extension CardioSessionKcal on CardioSession {
@@ -155,7 +191,7 @@ extension CardioData on AppDatabase {
   /// pace (a duration and a distance above 0), the band that holds the pace
   /// ([pickBand]); for a group with no distance, [currentEntryCode] if it is
   /// in the same group (an edit keeps its entry), else the entry of the last
-  /// session of the group (not deleted, not [exceptId], with a code), else the
+  /// session of the group (not deleted, with a code), else the
   /// group's general entry. An Other row is always its own row.
   ///
   /// [localDate] picks the weigh-in: the latest on or before that day.
@@ -167,7 +203,6 @@ extension CardioData on AppDatabase {
     double? distanceMeters,
     required String localDate,
     String? currentEntryCode,
-    int? exceptId,
   }) async {
     final activity = table.byCode(activityCode);
     if (activity == null) throw const CardioRefused(CardioProblem.noActivity);
@@ -185,19 +220,30 @@ extension CardioData on AppDatabase {
 
     MetActivity entry = activity;
     var fromPace = false;
+    var inBand = false;
     final chosen = entryCode == null ? null : table.byCode(entryCode);
     if (entryCode != null && chosen == null) {
+      throw const CardioRefused(CardioProblem.noActivity);
+    }
+    // The entry has to belong to the activity: a code of the same group, or
+    // the Other row itself.
+    if (chosen != null &&
+        (group != null
+            ? !group.contains(chosen.code)
+            : chosen.code != activityCode)) {
       throw const CardioRefused(CardioProblem.noActivity);
     }
     if (chosen != null) {
       entry = chosen;
     } else if (group != null) {
       if (mph != null) {
-        entry =
-            group.bands[pickBand([
-              for (final b in group.bands) (min: b.minMph, max: b.maxMph),
-            ], mph)];
+        final ranges = [
+          for (final b in group.bands) (min: b.minMph, max: b.maxMph),
+        ];
+        final i = pickBand(ranges, mph);
+        entry = group.bands[i];
         fromPace = true;
+        inBand = bandHolds(ranges[i], mph);
       } else {
         final current = currentEntryCode == null
             ? null
@@ -206,7 +252,7 @@ extension CardioData on AppDatabase {
             (current != null && group.contains(current.code)
                 ? current
                 : null) ??
-            await _lastEntry(table, group, exceptId) ??
+            await _lastEntry(table, group) ??
             group.general;
       }
     }
@@ -217,6 +263,7 @@ extension CardioData on AppDatabase {
       group: group,
       mph: mph,
       fromPace: fromPace,
+      inBand: inBand,
       weightKg: weight?.weightKg,
       kcal: secs == null || weight == null
           ? null
@@ -231,21 +278,12 @@ extension CardioData on AppDatabase {
   /// The entry of the most recent session of [group] that has a code in the
   /// group. Deleted sessions and sessions with no code are skipped; the source
   /// does not matter.
-  Future<MetActivity?> _lastEntry(
-    MetTable table,
-    MetGroup group,
-    int? exceptId,
-  ) async {
+  Future<MetActivity?> _lastEntry(MetTable table, MetGroup group) async {
     final codes = [group.general.code, for (final b in group.bands) b.code];
     final row =
         await (select(cardioSessions)
               ..where(
-                (c) =>
-                    c.activityCode.isIn(codes) &
-                    c.deletedAtMs.isNull() &
-                    (exceptId == null
-                        ? const Constant(true)
-                        : c.id.equals(exceptId).not()),
+                (c) => c.activityCode.isIn(codes) & c.deletedAtMs.isNull(),
               )
               ..orderBy([
                 (c) => OrderingTerm.desc(c.startedAtMs),
@@ -262,7 +300,7 @@ extension CardioData on AppDatabase {
   /// it when there is no distance.
   Future<MetActivity?> lastEntryFor(MetTable table, String activityCode) async {
     final group = table.groupOf(activityCode);
-    return group == null ? null : _lastEntry(table, group, null);
+    return group == null ? null : _lastEntry(table, group);
   }
 
   // Saving
@@ -271,6 +309,7 @@ extension CardioData on AppDatabase {
     required int durationSeconds,
     double? distanceMeters,
     double? kcalOverride,
+    int? avgHeartRate,
   }) {
     if (durationSeconds <= 0) {
       throw const CardioRefused(CardioProblem.badDuration);
@@ -281,6 +320,10 @@ extension CardioData on AppDatabase {
     }
     final k = kcalOverride;
     if (k != null && !(k.isFinite && k >= 0)) {
+      throw const CardioRefused(CardioProblem.badNumber);
+    }
+    final hr = avgHeartRate;
+    if (hr != null && hr <= 0) {
       throw const CardioRefused(CardioProblem.badNumber);
     }
   }
@@ -302,6 +345,7 @@ extension CardioData on AppDatabase {
       durationSeconds: input.durationSeconds,
       distanceMeters: input.distanceMeters,
       kcalOverride: input.kcalOverride,
+      avgHeartRate: input.avgHeartRate,
     );
     return transaction(() async {
       final p = await cardioPreview(
@@ -335,13 +379,15 @@ extension CardioData on AppDatabase {
   /// given, moves the start (otherwise the day and time stay as stored,
   /// whatever the phone's zone is now). The source and source id stay.
   ///
-  /// The estimate is worked out again from the new values (entry, duration,
-  /// distance, the day's weigh-in) when any of them changed, and when there is
-  /// none yet. When only the override, the heart rate or the time of day
-  /// changed, the stored estimate stays as it was. With no [CardioInput
-  /// .activityCode] the stored activity and MET stay, and without a MET the
-  /// stored estimate stays. Throws [StateError] for a missing or deleted
-  /// session, and [CardioRefused] as [saveCardio] does.
+  /// What is stored is exactly what [editPreview] returns. The estimate is
+  /// worked out again (entry, duration, distance, the weigh-in on or before
+  /// the session's day as it is now) only when the duration, the distance, the
+  /// entry or the local day changed, or when there is no estimate yet. When
+  /// only the override, the heart rate or the time of day changed, the stored
+  /// estimate stays as it was. With no [CardioInput.activityCode] the stored
+  /// activity and MET stay, and without a MET the stored estimate stays.
+  /// Throws [StateError] for a missing or deleted session, and
+  /// [CardioRefused] as [saveCardio] does.
   Future<CardioSession> editCardio(
     int id,
     MetTable table,
@@ -352,71 +398,123 @@ extension CardioData on AppDatabase {
       durationSeconds: input.durationSeconds,
       distanceMeters: input.distanceMeters,
       kcalOverride: input.kcalOverride,
+      avgHeartRate: input.avgHeartRate,
     );
     return transaction(() async {
-      final old =
-          await (select(cardioSessions)
-                ..where((c) => c.id.equals(id) & c.deletedAtMs.isNull()))
-              .getSingleOrNull();
-      if (old == null) throw StateError('No such cardio session');
-      final day = at?.localDate ?? old.localDate;
-      final distance = _distanceOf(input);
-
-      String? code = old.activityCode;
-      String name = old.activityName;
-      double? met = old.met;
-      double? estimate = old.kcalEstimated;
-      final inputCode = input.activityCode;
-      var changed =
-          input.durationSeconds != old.durationSeconds ||
-          distance != old.distanceMeters ||
-          day != old.localDate;
-      if (inputCode != null) {
-        final p = await cardioPreview(
-          table,
-          activityCode: inputCode,
-          entryCode: input.entryCode,
-          durationSeconds: input.durationSeconds,
-          distanceMeters: input.distanceMeters,
-          localDate: day,
-          currentEntryCode: old.activityCode,
-          exceptId: id,
-        );
-        changed = changed || p.entry.code != old.activityCode;
-        code = p.entry.code;
-        name = _nameOf(p);
-        met = p.entry.met;
-        if (changed || estimate == null) estimate = p.kcal;
-      } else if (met != null && (changed || estimate == null)) {
-        final w = await weightOnOrBefore(day);
-        estimate = w == null
-            ? null
-            : cardioKcal(
-                met: met,
-                bodyWeightKg: w.weightKg,
-                durationSeconds: input.durationSeconds,
-              );
-      }
-
+      final plan = await _editPlan(id, table, input, at);
       await (update(cardioSessions)..where((c) => c.id.equals(id))).write(
         CardioSessionsCompanion(
-          localDate: Value(day),
+          localDate: Value(plan.day),
           startedAtMs: at == null ? const Value.absent() : Value(at.utcMs),
           tzOffsetMinutes: at == null
               ? const Value.absent()
               : Value(at.offsetMinutes),
-          activityCode: Value(code),
-          activityName: Value(name),
-          met: Value(met),
+          activityCode: Value(plan.code),
+          activityName: Value(plan.name),
+          met: Value(plan.met),
           durationSeconds: Value(input.durationSeconds),
-          distanceMeters: Value(distance),
+          distanceMeters: Value(_distanceOf(input)),
           avgHeartRate: Value(input.avgHeartRate),
-          kcalEstimated: Value(estimate),
+          kcalEstimated: Value(plan.estimate),
           kcalOverride: Value(input.kcalOverride),
         ),
       );
       return _row(id);
     });
+  }
+
+  /// What [editCardio] with the same arguments would store, for the screen's
+  /// live estimate: the entry, and [CardioPreview.kcal] (the stored estimate
+  /// when [CardioPreview.keptStored], else worked out now). It needs
+  /// [CardioInput.activityCode] (the screen passes the session's own code when
+  /// the user did not change the activity); without it, [CardioRefused] with
+  /// [CardioProblem.noActivity]. Throws [StateError] for a missing or deleted
+  /// session.
+  Future<CardioPreview> editPreview(
+    MetTable table,
+    int id,
+    CardioInput input, {
+    Now? at,
+  }) async {
+    final plan = await _editPlan(id, table, input, at);
+    final p = plan.preview;
+    if (p == null) throw const CardioRefused(CardioProblem.noActivity);
+    return CardioPreview(
+      entry: p.entry,
+      group: p.group,
+      mph: p.mph,
+      fromPace: p.fromPace,
+      inBand: p.inBand,
+      weightKg: plan.kept ? null : p.weightKg,
+      kcal: plan.estimate,
+      keptStored: plan.kept,
+    );
+  }
+
+  // The one place that decides what an edit stores, for editCardio and
+  // editPreview. [preview] is null when [input] names no activity.
+  Future<_EditPlan> _editPlan(
+    int id,
+    MetTable table,
+    CardioInput input,
+    Now? at,
+  ) async {
+    final old =
+        await (select(cardioSessions)
+              ..where((c) => c.id.equals(id) & c.deletedAtMs.isNull()))
+            .getSingleOrNull();
+    if (old == null) throw StateError('No such cardio session');
+    final day = at?.localDate ?? old.localDate;
+    final changed =
+        input.durationSeconds != old.durationSeconds ||
+        _distanceOf(input) != old.distanceMeters ||
+        day != old.localDate;
+    final inputCode = input.activityCode;
+    if (inputCode != null) {
+      final p = await cardioPreview(
+        table,
+        activityCode: inputCode,
+        entryCode: input.entryCode,
+        durationSeconds: input.durationSeconds,
+        distanceMeters: input.distanceMeters,
+        localDate: day,
+        currentEntryCode: old.activityCode,
+      );
+      final recompute =
+          changed ||
+          p.entry.code != old.activityCode ||
+          old.kcalEstimated == null;
+      return _EditPlan(
+        day: day,
+        code: p.entry.code,
+        name: _nameOf(p),
+        met: p.entry.met,
+        estimate: recompute ? p.kcal : old.kcalEstimated,
+        kept: !recompute,
+        preview: p,
+      );
+    }
+    final met = old.met;
+    final recompute = met != null && (changed || old.kcalEstimated == null);
+    double? estimate = old.kcalEstimated;
+    if (recompute) {
+      final w = await weightOnOrBefore(day);
+      estimate = w == null
+          ? null
+          : cardioKcal(
+              met: met,
+              bodyWeightKg: w.weightKg,
+              durationSeconds: input.durationSeconds,
+            );
+    }
+    return _EditPlan(
+      day: day,
+      code: old.activityCode,
+      name: old.activityName,
+      met: met,
+      estimate: estimate,
+      kept: !recompute,
+    );
   }
 
   String _nameOf(CardioPreview p) => p.group?.name ?? p.entry.description;

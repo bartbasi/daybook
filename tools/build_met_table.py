@@ -42,8 +42,8 @@ URL = ("https://pacompendium.com/wp-content/uploads/2025/02/"
 PDF_SIZE = 563091
 PDF_SHA256 = "ac30234b8f8f813837e282773cfcb3e0fe062334777c2f7b3213429c4fbc251c"
 PDF_NAME = "compendium_2024.pdf"
-SITE_ROWS = 1114  # the number the Compendium website gives
-PDF_ROWS = 1111  # the rows the pinned PDF actually holds (checked 2026-11-17)
+PDF_ROWS = 1111  # the PDF and the website's heading pages list the same 1,111
+# codes (1,114 is the journal article's figure; see assets/met/README.txt)
 # SHA-256 of assets/met/compendium_2024.csv as committed (LF line endings, as
 # write_csv writes them). The PDF is pinned, so the file built from it is
 # fixed. A different build (say a stray page number joined to a description by
@@ -241,18 +241,28 @@ def csv_bytes(rows):
     return out.getvalue().encode("utf-8")
 
 
-def write_csv(rows, path, sha256=None):
-    """Writes the CSV. With [sha256], raises BuildError (and writes nothing)
-    when the built file does not have that hash."""
+def write_csv(rows, path, sha256=None, scratch_dir=None):
+    """Writes the CSV. With [sha256], raises BuildError (and leaves [path]
+    alone) when the built file does not have that hash. With [scratch_dir] the
+    differing build is saved there, so it can be compared with the committed
+    file (git diff --no-index)."""
     data = csv_bytes(rows)
     if sha256 is not None:
         digest = hashlib.sha256(data).hexdigest()
         if digest != sha256:
-            raise BuildError(
-                "the CSV built now has SHA-256 %s, but the committed file is "
-                "%s. The PDF text read differently (a stray line?). Nothing "
-                "written; compare with git diff after building elsewhere."
-                % (digest, sha256))
+            msg = ("the CSV built now has SHA-256 %s, but the committed file "
+                   "is %s. The PDF text read differently (a stray line?). The "
+                   "committed file was not touched." % (digest, sha256))
+            if scratch_dir is not None:
+                os.makedirs(scratch_dir, exist_ok=True)
+                built = os.path.join(scratch_dir, "compendium_2024.built.csv")
+                with open(built, "wb") as f:
+                    f.write(data)
+                msg += (" This build is in %s: compare it with git diff "
+                        "--no-index. If the change is intended, update "
+                        "CSV_SHA256 in this script after checking the "
+                        "difference." % built)
+            raise BuildError(msg)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
@@ -279,9 +289,8 @@ def main(argv=None):
         for p in problems:
             print("  " + p, file=sys.stderr)
         return 1
-    print("rows: %d (the Compendium website says %d, so %d are not in this PDF; "
-          "the PDF does not say which)" % (len(rows), SITE_ROWS,
-                                           SITE_ROWS - len(rows)))
+    print("rows: %d (the PDF and the website's heading pages list the same "
+          "%d codes)" % (len(rows), PDF_ROWS))
     if len(rows) != PDF_ROWS:
         print("error: this PDF held %d rows when it was checked, now %d. "
               "Nothing written." % (PDF_ROWS, len(rows)), file=sys.stderr)
@@ -295,7 +304,7 @@ def main(argv=None):
         print("pace or km/h but no mph, no speed recorded: " + ", ".join(only))
     try:
         write_csv(rows, os.path.join(args.out_dir, "compendium_2024.csv"),
-                  CSV_SHA256)
+                  CSV_SHA256, scratch_dir=args.cache)
     except BuildError as e:
         print("error: %s" % e, file=sys.stderr)
         return 1

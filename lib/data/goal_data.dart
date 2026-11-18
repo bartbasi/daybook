@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../clock.dart';
 import '../math/calorie_budget.dart';
+import 'cardio_data.dart' show CardioSessionKcal;
 import 'database.dart';
 import 'food_data.dart';
 import 'nutrients.dart';
@@ -403,7 +404,7 @@ extension GoalData on AppDatabase {
             .get();
     var total = 0.0;
     for (final c in cardio) {
-      total += c.kcalOverride ?? c.kcalEstimated ?? 0;
+      total += c.effectiveKcal ?? 0;
     }
     for (final w in lifting) {
       total += w.kcalOverride ?? w.kcalEstimated ?? 0;

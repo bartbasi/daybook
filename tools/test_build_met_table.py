@@ -364,6 +364,20 @@ class CsvPinTests(unittest.TestCase):
         with open(path, "rb") as f:
             self.assertEqual(f.read(), b"old")
 
+    def test_a_mismatch_writes_the_build_to_the_scratch_folder(self):
+        rows, _ = parse_text(SAMPLE)
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "x.csv")
+        scratch = os.path.join(d, "cache")
+        with self.assertRaises(BuildError) as cm:
+            write_csv(rows, path, "0" * 64, scratch_dir=scratch)
+        built = os.path.join(scratch, "compendium_2024.built.csv")
+        self.assertIn(built, str(cm.exception))
+        self.assertIn("update CSV_SHA256", str(cm.exception))
+        self.assertFalse(os.path.exists(path))
+        with open(built, "rb") as f:
+            self.assertEqual(f.read(), csv_bytes(rows))
+
 
 if __name__ == "__main__":
     unittest.main()
