@@ -37,7 +37,17 @@ class CardioDeleted extends CardioResult {
   const CardioDeleted(super.row);
 }
 
-bool _screenOpen = false;
+/// Set from the request until the screen closes, so a second tap opens
+/// nothing. Each request owns its own token and only the owner clears it, so
+/// an old screen cannot clear the flag of a newer one. The screen also
+/// releases it when it leaves the tree: when the whole tree is unmounted (a
+/// test, an app restart) the push never completes, and without that the
+/// screen could never open again in the process.
+Object? _openToken;
+
+void _release(Object? token) {
+  if (token != null && identical(_openToken, token)) _openToken = null;
+}
 
 /// Opens the cardio screen over the tab bar: a new session, or [editing] a
 /// logged one. Completes when it closes, with what it wrote or null. A second
@@ -47,16 +57,19 @@ Future<CardioResult?> openCardioScreen(
   CardioSession? editing,
   OffsetAt offsetAt = systemOffsetAt,
 }) async {
-  if (_screenOpen) return null;
-  _screenOpen = true;
+  if (_openToken != null) return null;
+  final token = _openToken = Object();
   try {
     return await Navigator.of(context, rootNavigator: true).push<CardioResult>(
       MaterialPageRoute(
-        builder: (_) => CardioScreen(editing: editing, offsetAt: offsetAt),
+        // Closes with an X, as the frames show.
+        fullscreenDialog: true,
+        builder: (_) =>
+            CardioScreen(editing: editing, offsetAt: offsetAt, token: token),
       ),
     );
   } finally {
-    _screenOpen = false;
+    _release(token);
   }
 }
 
@@ -76,6 +89,16 @@ String _plain(double v) {
     s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
   }
   return s;
+}
+
+/// The stored duration as the Duration field shows it: whole minutes, and for
+/// a session of under half a minute (an import can have one) a decimal, never
+/// "0".
+String _minutesText(int seconds) {
+  final whole = (seconds / 60).round();
+  if (whole > 0) return '$whole';
+  final tenths = (seconds / 6).round() / 10;
+  return (tenths < 0.1 ? 0.1 : tenths).toStringAsFixed(1);
 }
 
 /// What the preview of the entry and the estimate came to, for either a new
@@ -105,10 +128,19 @@ class _Shown {
 /// The cardio screen (cardio.html frames 1 to 4): one screen to log a session,
 /// or to edit one. Nothing is pushed on the way to Save.
 class CardioScreen extends StatefulWidget {
-  const CardioScreen({super.key, this.editing, this.offsetAt = systemOffsetAt});
+  const CardioScreen({
+    super.key,
+    this.editing,
+    this.offsetAt = systemOffsetAt,
+    this.token,
+  });
 
   final CardioSession? editing;
   final OffsetAt offsetAt;
+
+  /// The request that opened this screen, released when the screen is
+  /// disposed.
+  final Object? token;
 
   @override
   State<CardioScreen> createState() => _CardioScreenState();
@@ -128,8 +160,17 @@ class _CardioScreenState extends State<CardioScreen>
   /// The activity picked: its code goes in [CardioInput.activityCode].
   MetActivity? _activity;
 
-  /// Editing: true once the user picked another activity than the stored one.
-  var _activityChanged = false;
+  /// Editing: true while the activity picked is another than the stored one.
+  /// Worked out each time, so picking Walking and then Running again is no
+  /// change.
+  bool get _activityChanged {
+    final row = _row;
+    final table = _table;
+    final picked = _activity;
+    if (row == null || table == null || picked == null) return false;
+    final code = row.activityCode;
+    return !_same(code == null ? null : table.byCode(code), picked);
+  }
 
   /// The entry the user chose with Change, or null.
   MetActivity? _entryPick;
@@ -183,6 +224,7 @@ class _CardioScreenState extends State<CardioScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _release(widget.token);
     _duration.dispose();
     _distance.dispose();
     _heart.dispose();
@@ -226,7 +268,7 @@ class _CardioScreenState extends State<CardioScreen>
       } else {
         final code = row.activityCode;
         _activity = code == null ? null : table.byCode(code);
-        _initDuration = '${(row.durationSeconds / 60).round()}';
+        _initDuration = _minutesText(row.durationSeconds);
         _duration.text = _initDuration;
         final d = row.distanceMeters;
         if (d != null) {
@@ -280,6 +322,11 @@ class _CardioScreenState extends State<CardioScreen>
   String? get _durationProblem {
     final t = _duration.text.trim();
     if (t.isEmpty) return null;
+    // Left as it was opened, the stored duration is fine, however short.
+    final row = _row;
+    if (row != null && t == _initDuration && row.durationSeconds > 0) {
+      return null;
+    }
     final m = int.tryParse(t);
     return m == null || m <= 0 ? S.cardioDurationBad : null;
   }
@@ -399,11 +446,13 @@ class _CardioScreenState extends State<CardioScreen>
           kept: p.keptStored,
         );
       }
-    } on StateError {
-      if (mounted && seq == _seq) setState(() => _gone = true);
-      return;
-    } catch (_) {
-      // No preview: the estimate line says what is missing.
+    } catch (e) {
+      // A session that is gone can only be an edit's.
+      if (e is StateError && row != null) {
+        if (mounted && seq == _seq) setState(() => _gone = true);
+        return;
+      }
+      // No preview: the bar says nothing new.
     }
     if (!mounted || seq != _seq) return;
     setState(() => _shown = shown);
@@ -430,12 +479,21 @@ class _CardioScreenState extends State<CardioScreen>
     return ka == kb;
   }
 
-  void _pick(MetActivity a) {
-    if (_same(_activity, a)) return;
+  /// Picks the activity [a] belongs to. With [asEntry] (a Running, Walking or
+  /// Cycling row found with Other...) that row is also the entry in use, as if
+  /// it had been chosen with Change. A new activity clears the preview, so the
+  /// matched line, the Change list and the number never belong to the one
+  /// before.
+  void _pick(MetActivity a, {bool asEntry = false}) {
+    final other = !_same(_activity, a);
+    if (!other && !asEntry) return;
     setState(() {
-      _activity = a;
-      _activityChanged = true;
-      _entryPick = null;
+      if (other) {
+        _activity = a;
+        _entryPick = null;
+        _shown = null;
+      }
+      if (asEntry) _entryPick = a;
     });
     _changed();
   }
@@ -446,7 +504,9 @@ class _CardioScreenState extends State<CardioScreen>
     _asking = true;
     try {
       final a = await showActivitySearch(context, table);
-      if (a != null && mounted) _pick(a);
+      if (a != null && mounted) {
+        _pick(a, asEntry: table.groupOf(a.code) != null);
+      }
     } finally {
       _asking = false;
     }
@@ -456,7 +516,11 @@ class _CardioScreenState extends State<CardioScreen>
     if (_asking) return;
     _asking = true;
     try {
-      final entries = [group.general, ...group.bands];
+      // The general entry is one of Walking's bands: list it once.
+      final entries = [
+        if (!group.bands.any((b) => b.code == group.general.code)) group.general,
+        ...group.bands,
+      ];
       final a = await showModalBottomSheet<MetActivity>(
         context: context,
         isScrollControlled: true,
@@ -498,13 +562,16 @@ class _CardioScreenState extends State<CardioScreen>
       final cur = _current;
       final day = parseDate(cur.localDate);
       final today = parseDate(_opened.localDate);
+      final first = DateTime(2000);
       var initial = DateTime(day.year, day.month, day.day);
       final last = DateTime(today.year, today.month, today.day);
+      if (initial.isBefore(first)) initial = first;
+      // A row can be dated after today (after travelling west).
       if (initial.isAfter(last)) initial = last;
       final date = await showDatePicker(
         context: context,
         initialDate: initial,
-        firstDate: DateTime(2000),
+        firstDate: first,
         lastDate: last,
       );
       if (date == null || !mounted) return;
@@ -576,18 +643,18 @@ class _CardioScreenState extends State<CardioScreen>
         _saving = false;
         _problem = _problemText(e.problem);
       });
-    } on StateError {
+    } catch (e) {
+      // A full disk, a closed database: stay open, keep what was typed. Only
+      // an edit can find its session gone.
       if (!mounted) return;
+      final row = _row;
       setState(() {
         _saving = false;
-        _gone = true;
-      });
-    } catch (_) {
-      // A full disk, a closed database: stay open, keep what was typed.
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _failed = true;
+        if (e is StateError && row != null) {
+          _gone = true;
+        } else {
+          _failed = true;
+        }
       });
     }
   }
@@ -705,8 +772,12 @@ class _CardioScreenState extends State<CardioScreen>
       }
     } else if (shown != null && shown.entry == null && row?.met == null) {
       headline = S.cardioNoEstimate;
-    } else {
+    } else if (shown != null && shown.weightKg == null && !shown.kept) {
+      // Said only when the preview really found no weigh-in.
       headline = S.cardioNeedsWeighIn;
+    } else {
+      // The preview is on its way: nothing new is said.
+      headline = '';
     }
     final chips = <Widget>[];
     if (table != null) {
@@ -725,6 +796,7 @@ class _CardioScreenState extends State<CardioScreen>
             selected: on,
             label: S.cardioChipSpoken(name, on),
             excludeSemantics: true,
+            onTap: _saving ? null : () => _pick(a),
             child: ChoiceChip(
               label: Text(name),
               selected: on,
@@ -739,6 +811,7 @@ class _CardioScreenState extends State<CardioScreen>
           button: true,
           label: S.cardioOtherSpoken,
           excludeSemantics: true,
+          onTap: _saving ? null : _other,
           child: ActionChip(
             label: const Text(S.cardioOther),
             onPressed: _saving ? null : _other,
@@ -747,16 +820,18 @@ class _CardioScreenState extends State<CardioScreen>
       );
     }
 
+    final VoidCallback? changeEntry = table == null || shown?.group == null || _saving
+        ? null
+        : () => _changeEntry(shown!.group!, shown.entry);
     final change = table == null || shown?.group == null
         ? null
         : TextButton(
             style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: _saving
-                ? null
-                : () => _changeEntry(shown!.group!, shown.entry),
+            onPressed: changeEntry,
             child: Semantics(
               label: S.cardioChangeEntrySpoken,
               excludeSemantics: true,
+              onTap: changeEntry,
               child: const Text(S.change),
             ),
           );
@@ -772,9 +847,7 @@ class _CardioScreenState extends State<CardioScreen>
       bool last = false,
       bool focus = false,
     }) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: TextField(
+      final input = TextField(
           controller: c,
           autofocus: focus,
           enabled: !_saving,
@@ -788,7 +861,6 @@ class _CardioScreenState extends State<CardioScreen>
           ],
           decoration: InputDecoration(
             labelText: label,
-            suffixText: unit,
             hintText: hint,
             errorText: error,
             errorMaxLines: 3,
@@ -796,6 +868,20 @@ class _CardioScreenState extends State<CardioScreen>
           ),
           onChanged: (_) => _changed(),
           onSubmitted: last ? (_) => _save() : null,
+        );
+      // The unit is a Text beside the field, as in the weight sheet, so it
+      // shows on an empty field too (a suffix hides until the field has focus).
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: input),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(unit, style: theme.textTheme.titleMedium),
+            ),
+          ],
         ),
       );
     }
@@ -821,6 +907,7 @@ class _CardioScreenState extends State<CardioScreen>
               child: Semantics(
                 label: S.cardioChangeTimeSpoken,
                 excludeSemantics: true,
+                onTap: _saving ? null : _changeTime,
                 child: const Text(S.change),
               ),
             ),
@@ -840,18 +927,12 @@ class _CardioScreenState extends State<CardioScreen>
             _activityName(),
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(matched.join(' ')),
-                ),
-              ),
-              ?change,
-            ],
+          // Change goes under the text, so a long line is never squeezed.
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(matched.join(' ')),
           ),
+          if (change != null) Align(alignment: Alignment.centerLeft, child: change),
         ],
         field(
           _duration,
@@ -1041,6 +1122,7 @@ class _EntryList extends StatelessWidget {
                       '${S.cardioEntryRow(e.description, e.metText)}'
                       '${e.code == inUse ? ', ${S.cardioInUse}' : ''}',
                   excludeSemantics: true,
+                  onTap: () => Navigator.of(context).pop(e),
                   child: InkWell(
                     key: ValueKey('entry-${e.code}'),
                     onTap: () => Navigator.of(context).pop(e),

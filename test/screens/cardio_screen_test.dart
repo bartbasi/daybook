@@ -2,6 +2,7 @@
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
 import 'dart:async';
+import 'dart:ui' show SemanticsAction;
 
 import 'package:daybook/app_scope.dart';
 import 'package:daybook/clock.dart';
@@ -10,6 +11,7 @@ import 'package:daybook/data/database.dart';
 import 'package:daybook/data/met_table.dart';
 import 'package:daybook/data/settings_data.dart';
 import 'package:daybook/data/weight_data.dart';
+import 'package:daybook/data/workout_data.dart';
 import 'package:daybook/math/calorie_budget.dart';
 import 'package:daybook/screens/cardio/cardio_screen.dart';
 import 'package:daybook/strings.dart';
@@ -30,10 +32,24 @@ const running = '12145';
 const walking = '17190';
 const cycling = '01014';
 
-/// A database that can hold or refuse the insert of a session.
+/// A database that can hold or refuse the insert of a session, and refuse an
+/// update of one (a delete, an Undo, an edit).
 class _Gate extends QueryInterceptor {
   Completer<void>? hold;
   var failInserts = false;
+  var failUpdates = false;
+
+  @override
+  Future<int> runUpdate(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    if (failUpdates && statement.contains('cardio_sessions')) {
+      throw Exception('disk full');
+    }
+    return super.runUpdate(executor, statement, args);
+  }
 
   @override
   Future<int> runInsert(
@@ -46,6 +62,25 @@ class _Gate extends QueryInterceptor {
       throw StateError('disk full');
     }
     return super.runInsert(executor, statement, args);
+  }
+}
+
+/// Holds reads of the weigh-ins, so a test can look at the screen while a
+/// preview is on its way. Each read takes the next gate in [queue], if there
+/// is one, and waits for it; with none queued a read goes straight through.
+class _HoldWeights extends QueryInterceptor {
+  final queue = <Completer<void>>[];
+
+  @override
+  Future<List<Map<String, Object?>>> runSelect(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    if (statement.contains('weight_entries') && queue.isNotEmpty) {
+      await queue.removeAt(0).future;
+    }
+    return super.runSelect(executor, statement, args);
   }
 }
 
@@ -110,10 +145,31 @@ void main() {
     await settle(tester);
   }
 
+  /// Types into a field, scrolling to it first when it is not in view, as a
+  /// person would (the list builds only the rows in view).
   Future<void> type(WidgetTester tester, String label, String text) async {
-    await tester.enterText(field(label), text);
+    final f = field(label);
+    if (f.hitTestable().evaluate().isEmpty) {
+      if (f.evaluate().isEmpty) {
+        await tester.scrollUntilVisible(
+          f,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+      } else {
+        await tester.ensureVisible(f);
+      }
+      await tester.pump();
+    }
+    await tester.enterText(f, text);
     await settle(tester);
   }
+
+  // The two Change buttons: the day and time, then (when there is a matched
+  // line) the entry.
+  Finder changeTime() => find.widgetWithText(TextButton, 'Change').first;
+  Finder changeEntry() => find.widgetWithText(TextButton, 'Change').last;
+  Finder logCardio() => find.widgetWithText(OutlinedButton, S.logCardio);
 
   Future<void> save(WidgetTester tester) async {
     await tester.tap(saveButton());
@@ -316,29 +372,47 @@ void main() {
     await type(tester, 'Duration', '30');
     await type(tester, 'Distance (optional)', '3.1');
 
-    await tester.tap(find.bySemanticsLabel('Change the entry'));
+    await tester.tap(changeEntry());
     await settle(tester);
     final group = table.groups.first;
     expect(find.text('Other entries for Running'), findsOneWidget);
-    expect(find.text('MET ${group.general.metText}'), findsWidgets);
+    // The list builds only the rows in view: scroll to each one, top to
+    // bottom, as a person would.
+    final scroll = find.descendant(
+      of: find.byType(BottomSheet),
+      matching: find.byType(Scrollable),
+    );
+    Finder entry(String code) => find.byKey(ValueKey('entry-$code'));
+    // The entry the pace chose is marked, once, and it is near the top.
+    expect(
+      find.descendant(of: entry('12050'), matching: find.text('In use')),
+      findsOneWidget,
+    );
+    expect(find.text('In use'), findsOneWidget);
     for (final e in [group.general, ...group.bands]) {
+      await tester.scrollUntilVisible(entry(e.code), 200, scrollable: scroll);
+      expect(entry(e.code), findsOneWidget, reason: e.code);
       expect(
-        find.byKey(ValueKey('entry-${e.code}')),
+        find.descendant(of: entry(e.code), matching: find.text('MET ${e.metText}')),
         findsOneWidget,
         reason: e.code,
       );
     }
-    expect(find.text('In use'), findsOneWidget);
+    // Back to the top, where 12060 (MET 10.5) is in view.
+    await tester.drag(scroll, const Offset(0, 5000));
+    await settle(tester);
 
-    await tester.tap(find.byKey(const ValueKey('entry-12060')));
+    await tester.tap(entry('12060'));
     await settle(tester);
     expect(find.textContaining('code 12060'), findsOneWidget);
     expect(find.textContaining('You chose this entry.'), findsOneWidget);
     expect(find.text('383 kcal estimate'), findsNothing);
+    // MET 10.5 x 82.46309 kg x 0.5 h = 432.9
+    expect(find.text('433 kcal estimate'), findsOneWidget);
     await save(tester);
     final row = (await sessions(tester)).last;
     expect(row.activityCode, '12060');
-    expect(row.met, 9.8);
+    expect(row.met, 10.5);
   });
 
   h.appTest('Other... searches the Compendium names; the pick shows its '
@@ -440,6 +514,9 @@ void main() {
 
     expect(find.byType(CardioScreen), findsOneWidget);
     expect(find.text(S.cardioFailed), findsOneWidget);
+    // A new session is never "gone", and Save stays usable for another try.
+    expect(find.text(S.cardioGone), findsNothing);
+    expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
     expect(tester.widget<TextField>(field('Duration')).controller!.text, '30');
     expect(await sessions(tester), hasLength(1));
     gate.failInserts = false;
@@ -479,7 +556,10 @@ void main() {
     await tester.tap(bar('Cardio'), warnIfMissed: false);
     await settle(tester);
     expect(find.byType(CardioScreen), findsOneWidget);
-    await h.back(tester);
+    // It closes with an X, not a back arrow.
+    await tester.tap(find.byType(CloseButton));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.byType(CardioScreen), findsNothing);
   });
 
@@ -502,7 +582,7 @@ void main() {
     await type(tester, 'Distance (optional)', '3.1');
     expect(find.text('Today, 5:29 pm'), findsOneWidget);
 
-    await tester.tap(find.bySemanticsLabel('Change the date and time'));
+    await tester.tap(changeTime());
     await settle(tester);
     await tester.tap(find.text('5'));
     await tester.pump();
@@ -510,6 +590,15 @@ void main() {
     await settle(tester);
     await tester.tap(find.byIcon(Icons.keyboard_outlined));
     await settle(tester);
+    // The clock reads 5:29 pm, so the picker opens on PM: choose AM. (The
+    // weight sheet's test needs no tap, its clock reads 7:02 am.)
+    await tester.tap(
+      find.descendant(
+        of: find.byType(TimePickerDialog),
+        matching: find.text('AM'),
+      ),
+    );
+    await tester.pump();
     final boxes = find.descendant(
       of: find.byType(TimePickerDialog),
       matching: find.byType(TextField),
@@ -914,6 +1003,653 @@ void main() {
       });
     }
   }
+
+  // Review fixes for task 5.3. Each test names the fix it covers.
+
+  // A1: the "a screen is open" flag is cleared when the screen leaves the
+  // tree. This test ends with the screen open and the tree unmounted, as
+  // every harness does, and the next one must still be able to open it.
+  h.appTest('a test can end with the cardio screen open (first of two)', (
+    tester,
+  ) async {
+    await weigh(tester);
+    await openApp(tester);
+    await openCardio(tester);
+    expect(find.byType(CardioScreen), findsOneWidget);
+  });
+
+  h.appTest('the screen still opens in the next test (second of two)', (
+    tester,
+  ) async {
+    await weigh(tester);
+    await openApp(tester);
+    await openCardio(tester);
+    expect(find.byType(CardioScreen), findsOneWidget);
+    expect(find.widgetWithText(ActionChip, 'Other...'), findsOneWidget);
+  });
+
+  // A2
+  h.appTest('Change for Walking lists each entry once, though the general '
+      'entry is also one of its bands', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(code: walking, miles: null));
+    await openApp(tester);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    await tester.tap(changeEntry());
+    await settle(tester);
+
+    final group = table.groups[1];
+    expect(group.name, 'Walking');
+    final listed = find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('entry-'),
+    );
+    expect(listed, findsNWidgets(group.bands.length));
+    expect(find.byKey(const ValueKey('entry-17190')), findsOneWidget);
+    expect(find.text('In use'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  // A3
+  h.appTest('a screen reader can pick a chip, open Other... and Change: each '
+      'has a tap action', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(code: walking, miles: null), at('2026-11-11', 8, 0));
+    await seed(tester, input());
+    await openApp(tester);
+    final handle = tester.ensureSemantics();
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+
+    for (final label in [
+      'Walking',
+      S.cardioOtherSpoken,
+      S.cardioChangeEntrySpoken,
+      S.cardioChangeTimeSpoken,
+    ]) {
+      final node = find.semantics.byLabel(label);
+      expect(node, findsOneWidget, reason: label);
+      expect(
+        node.evaluate().single.getSemanticsData().hasAction(
+          SemanticsAction.tap,
+        ),
+        isTrue,
+        reason: label,
+      );
+    }
+    // Performing the action picks the activity.
+    tester.semantics.tap(find.semantics.byLabel('Walking'));
+    await settle(tester);
+    expect(find.semantics.byLabel('Walking, picked'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Walking'))
+          .selected,
+      isTrue,
+    );
+    // And Other... opens its search.
+    tester.semantics.tap(find.semantics.byLabel(S.cardioOtherSpoken));
+    await settle(tester);
+    expect(find.text(S.cardioSearchTitle), findsOneWidget);
+    handle.dispose();
+  });
+
+  // A5: a Running, Walking or Cycling row found with Other... is the entry
+  // in use, as if chosen with Change.
+  h.appTest('Other... with Running already picked: a Running row found there '
+      'is the entry used, and is saved', (tester) async {
+    await weigh(tester);
+    await seed(tester, input()); // Running, last entry 12050
+    await openApp(tester);
+    await openCardio(tester);
+    await tester.tap(find.widgetWithText(ActionChip, 'Other...'));
+    await settle(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, S.cardioSearchHint),
+      'running 7 mph 8.5',
+    );
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('activity-12070')));
+    await settle(tester);
+
+    expect(find.textContaining('code 12070'), findsOneWidget);
+    expect(find.textContaining('You chose this entry.'), findsOneWidget);
+    await type(tester, 'Duration', '30');
+    await save(tester);
+    final row = (await sessions(tester)).last;
+    expect(row.activityCode, '12070');
+    expect(row.activityName, 'Running');
+    expect(row.met, 11);
+  });
+
+  h.appTest('Other... with another activity picked: a Running row found '
+      'there picks Running and is the entry used', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(code: walking, miles: null));
+    await openApp(tester);
+    await openCardio(tester);
+    await tester.tap(find.widgetWithText(ActionChip, 'Other...'));
+    await settle(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, S.cardioSearchHint),
+      'running 7 mph 8.5',
+    );
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('activity-12070')));
+    await settle(tester);
+
+    expect(find.textContaining('code 12070'), findsOneWidget);
+    expect(find.textContaining('You chose this entry.'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Running'))
+          .selected,
+      isTrue,
+    );
+    await type(tester, 'Duration', '30');
+    await save(tester);
+    final row = (await sessions(tester)).last;
+    expect(row.activityCode, '12070');
+    expect(row.activityName, 'Running');
+  });
+
+  // A6
+  h.appTest('with a weigh-in on record the bar never says one is needed while '
+      'a preview is on its way', (tester) async {
+    final hold = _HoldWeights();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(hold));
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    await openCardio(tester);
+    final c = Completer<void>();
+    hold.queue.add(c);
+    await type(tester, 'Duration', '3');
+    expect(find.text(S.cardioNeedsWeighIn), findsNothing);
+    c.complete();
+    await settle(tester);
+    expect(find.text(S.cardioNeedsWeighIn), findsNothing);
+    // 9.3 MET x 82.46309 kg x 3 min = 38.3
+    expect(find.text('38 kcal estimate'), findsOneWidget);
+  });
+
+  h.appTest('picking another activity clears the matched line, the Change '
+      'button and the number until its preview arrives', (tester) async {
+    final hold = _HoldWeights();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(hold));
+    await weigh(tester);
+    await seed(tester, input(code: walking, miles: null), at('2026-11-11', 8, 0));
+    await seed(tester, input());
+    await openApp(tester);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    expect(find.text('383 kcal estimate'), findsOneWidget);
+
+    final c = Completer<void>();
+    hold.queue.add(c);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Walking'));
+    await settle(tester);
+    expect(find.textContaining('Matched'), findsNothing);
+    expect(find.widgetWithText(TextButton, 'Change'), findsOneWidget); // time
+    expect(find.text('383 kcal estimate'), findsNothing);
+    expect(find.text(S.cardioNeedsWeighIn), findsNothing);
+
+    c.complete();
+    await settle(tester);
+    expect(find.textContaining('code 17190'), findsOneWidget);
+    // 3.8 MET x 82.46309 kg x 0.5 h = 156.7
+    expect(find.text('157 kcal estimate'), findsOneWidget);
+  });
+
+  // The preview of an older change must not overwrite a newer one.
+  h.appTest('an older preview that arrives late does not overwrite a newer '
+      'one', (tester) async {
+    final hold = _HoldWeights();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(hold));
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    await openCardio(tester);
+
+    final first = Completer<void>();
+    hold.queue.add(first); // the read for 30 minutes waits
+    await type(tester, 'Duration', '30');
+    await type(tester, 'Duration', '60'); // this read goes straight through
+    // 9.3 MET x 82.46309 kg x 1 h = 766.9
+    expect(find.text('767 kcal estimate'), findsOneWidget);
+    first.complete();
+    await settle(tester);
+    expect(find.text('767 kcal estimate'), findsOneWidget);
+    expect(find.text('383 kcal estimate'), findsNothing);
+  });
+
+  // A7
+  h.appTest('at a large text size the Change button is under the matched '
+      'line, not beside it', (tester) async {
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester, size: const Size(344, 800), scale: 2);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    final line = tester.getRect(find.textContaining('Matched Running'));
+    final change = tester.getRect(changeEntry());
+    expect(change.top, greaterThanOrEqualTo(line.bottom - 0.5));
+    expect(tester.takeException(), isNull);
+  });
+
+  // A8
+  h.appTest('on an edit, picking Walking and then Running again keeps the '
+      'entry that was chosen', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(code: walking, miles: null), at('2026-11-11', 8, 0));
+    final s = await seed(tester, input(entry: '12060')); // 3.1 mi, chose 10.5
+    expect(s.activityCode, '12060');
+    await openApp(tester);
+    await tester.tap(find.byKey(ValueKey('cardio-${s.id}')));
+    await settle(tester);
+    expect(find.textContaining('code 12060'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Walking'));
+    await settle(tester);
+    expect(find.textContaining('Matched Walking'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Running'));
+    await settle(tester);
+    // Not the entry the pace would pick (12050): the stored choice is back.
+    expect(find.textContaining('code 12060'), findsOneWidget);
+    await save(tester);
+    final row = (await sessions(tester)).firstWhere((r) => r.id == s.id);
+    expect(row.activityCode, '12060');
+    expect(row.met, 10.5);
+  });
+
+  // A9
+  h.appTest('a row under Exercise is one spoken line with a tap action', (
+    tester,
+  ) async {
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    final handle = tester.ensureSemantics();
+    final node = find.semantics.byLabel(
+      'Running, 383 kcal, 30 min, 3.1 mi, 12:00 pm',
+    );
+    expect(node, findsOneWidget);
+    expect(
+      node.evaluate().single.getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+    // Its pieces are not read one by one.
+    expect(find.semantics.byLabel('383 kcal'), findsNothing);
+    handle.dispose();
+  });
+
+  // A10
+  h.appTest('the units show beside the fields before anything is typed', (
+    tester,
+  ) async {
+    await weigh(tester);
+    await openApp(tester);
+    await openCardio(tester);
+    for (final (label, unit) in [
+      ('Duration', 'min'),
+      ('Distance (optional)', 'mi'),
+      ('Avg heart rate (optional)', 'bpm'),
+      ('Calories (own number)', 'kcal'),
+    ]) {
+      expect(find.text(unit), findsOneWidget, reason: unit);
+      expect(
+        tester.getRect(find.text(unit)).left,
+        greaterThanOrEqualTo(tester.getRect(field(label)).right - 0.5),
+        reason: '$unit is beside $label',
+      );
+    }
+  });
+
+  // A11
+  h.appTest('the screen closes with an X', (tester) async {
+    await weigh(tester);
+    await openApp(tester);
+    await openCardio(tester);
+    expect(find.byType(CloseButton), findsOneWidget);
+    expect(find.byType(BackButton), findsNothing);
+    await tester.tap(find.byType(CloseButton));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(CardioScreen), findsNothing);
+  });
+
+  // A12
+  h.appTest('a session of under half a minute shows a short duration, not '
+      '0, and can still be saved', (tester) async {
+    await weigh(tester);
+    final s = await seed(
+      tester,
+      const CardioInput(activityCode: running, durationSeconds: 25),
+    );
+    await openApp(tester);
+    await tester.tap(find.byKey(ValueKey('cardio-${s.id}')));
+    await settle(tester);
+    expect(tester.widget<TextField>(field('Duration')).controller!.text, '0.4');
+    expect(find.text(S.cardioDurationBad), findsNothing);
+    expect(tester.widget<FilledButton>(saveButton()).onPressed, isNotNull);
+    await type(tester, 'Avg heart rate (optional)', '120');
+    await save(tester);
+    final row = (await sessions(tester)).single;
+    expect(row.durationSeconds, 25); // the stored seconds, not "0.4" read back
+    expect(row.avgHeartRate, 120);
+  });
+
+  // A13
+  h.appTest('Change on a session dated before the earliest day opens the '
+      'date picker on that day', (tester) async {
+    await weigh(tester);
+    final id = await h.real(
+      tester,
+      () => h.db
+          .into(h.db.cardioSessions)
+          .insert(
+            CardioSessionsCompanion.insert(
+              localDate: '1999-12-31',
+              startedAtMs: at('1999-12-31', 8, 0).utcMs,
+              tzOffsetMinutes: -360,
+              activityName: 'Imported run',
+              durationSeconds: 1800,
+              source: const Value('health_connect'),
+              sourceId: const Value('hc-old'),
+            ),
+          ),
+    );
+    final row = (await h.real(tester, () => h.db.cardioSession(id)))!;
+    await openApp(tester);
+    final context = tester.element(find.byType(Scaffold).first);
+    unawaited(openCardioScreen(context, editing: row));
+    await settle(tester);
+    await tester.tap(changeTime());
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+  });
+
+  // The words and the layout.
+  h.appTest('with no distance the general entry says how to match a pace, '
+      'and a distance replaces that line', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(code: running, miles: null)); // the general entry
+    await openApp(tester);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    expect(
+      find.textContaining(
+        'Matched Running, self-selected pace, code 12145, MET 10.5. '
+        'General entry. Add a distance to match your pace.',
+      ),
+      findsOneWidget,
+    );
+    await type(tester, 'Distance (optional)', '3.1');
+    expect(find.textContaining('General entry.'), findsNothing);
+    expect(find.textContaining('is in this band.'), findsOneWidget);
+  });
+
+  for (final scale in [1.0, 2.0]) {
+    h.appTest('at 344 dp and text scale $scale every chip is fully in view, '
+        'with no swipe', (tester) async {
+      await weigh(tester);
+      table = (await tester.runAsync(MetTable.load))!;
+      final longest = table.all.reduce(
+        (a, b) => a.description.length >= b.description.length ? a : b,
+      );
+      await seed(
+        tester,
+        input(code: longest.code, miles: null),
+        at('2026-11-10', 8, 0),
+      );
+      await seed(tester, input(), at('2026-11-12', 12, 0));
+      await seed(
+        tester,
+        input(code: walking, miles: null),
+        at('2026-11-11', 8, 0),
+      );
+      await openApp(tester, size: const Size(344, 800), scale: scale);
+      await openCardio(tester);
+      for (final f in [find.byType(ChoiceChip), find.byType(ActionChip)]) {
+        expect(f, findsWidgets);
+        for (var i = 0; i < f.evaluate().length; i++) {
+          final r = tester.getRect(f.at(i));
+          expect(r.left, greaterThanOrEqualTo(0), reason: '$f $i');
+          expect(r.right, lessThanOrEqualTo(344), reason: '$f $i');
+        }
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  // Edit: Use estimate on a session that had its own number.
+  h.appTest('Use estimate on an edit clears the stored own number and keeps '
+      'the stored estimate', (tester) async {
+    await weigh(tester);
+    final s = await seed(tester, input(override: 360));
+    await openApp(tester);
+    await tester.tap(find.byKey(ValueKey('cardio-${s.id}')));
+    await settle(tester);
+    expect(find.text('360 kcal your number'), findsOneWidget);
+    expect(find.text('Estimate was 383.'), findsOneWidget);
+    await tester.tap(find.text('Use estimate'));
+    await settle(tester);
+    expect(find.text('383 kcal estimate'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(field('Calories (own number)')).controller!.text,
+      isEmpty,
+    );
+    await save(tester);
+    expect(find.text('Running changed, 383 kcal'), findsOneWidget);
+    final row = (await sessions(tester)).single;
+    expect(row.kcalOverride, isNull);
+    expect(row.kcalEstimated, s.kcalEstimated);
+  });
+
+  // Delete and Undo that fail.
+  h.appTest('a delete that fails keeps the screen and says so; trying again '
+      'works', (tester) async {
+    final gate = _Gate();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
+    await weigh(tester);
+    final s = await seed(tester, input());
+    await openApp(tester);
+    await tester.tap(find.byKey(ValueKey('cardio-${s.id}')));
+    await settle(tester);
+
+    gate.failUpdates = true;
+    await tester.tap(find.byTooltip(S.cardioMenu));
+    await settle(tester);
+    await tester.tap(find.text('Delete'));
+    await settle(tester);
+    expect(find.byType(CardioScreen), findsOneWidget);
+    expect(find.text(S.cardioDeleteFailed), findsOneWidget);
+    expect(find.text(S.cardioGone), findsNothing);
+    expect((await sessions(tester)).single.deletedAtMs, isNull);
+
+    gate.failUpdates = false;
+    await tester.tap(find.byTooltip(S.cardioMenu));
+    await settle(tester);
+    await tester.tap(find.text('Delete'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(CardioScreen), findsNothing);
+    expect(find.text('Running deleted, 383 kcal'), findsOneWidget);
+  });
+
+  h.appTest('an Undo of a save that fails says the session is still saved', (
+    tester,
+  ) async {
+    final gate = _Gate();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    await save(tester);
+    expect(find.text('Running saved, 383 kcal'), findsOneWidget);
+
+    gate.failUpdates = true;
+    await tester.tap(undo());
+    await settle(tester);
+    expect(find.text(S.cardioUndoFailed), findsOneWidget);
+    expect(find.text('Running saved, 383 kcal'), findsNothing);
+    final rows = await sessions(tester);
+    expect(rows, hasLength(2));
+    expect(rows.last.deletedAtMs, isNull);
+  });
+
+  h.appTest('an Undo of a delete that fails says the session is still '
+      'deleted', (tester) async {
+    final gate = _Gate();
+    h.db = AppDatabase(NativeDatabase.memory().interceptWith(gate));
+    await weigh(tester);
+    final s = await seed(tester, input());
+    await openApp(tester);
+    await tester.tap(find.byKey(ValueKey('cardio-${s.id}')));
+    await settle(tester);
+    await tester.tap(find.byTooltip(S.cardioMenu));
+    await settle(tester);
+    await tester.tap(find.text('Delete'));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Running deleted, 383 kcal'), findsOneWidget);
+
+    gate.failUpdates = true;
+    await tester.tap(undo());
+    await settle(tester);
+    expect(find.text(S.cardioUndoDeleteFailed), findsOneWidget);
+    expect((await sessions(tester)).single.deletedAtMs, isNotNull);
+  });
+
+  // Home: a session saved for another day, and the day Home shows.
+  h.appTest('Home says the day when a session is saved for another day, and '
+      'does not list it under today', (tester) async {
+    await h.real(
+      tester,
+      () => h.db.saveWeight(150, imp, at('2026-11-03', 7, 0)).then((_) {}),
+    );
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    await openCardio(tester);
+    await type(tester, 'Duration', '30');
+    await tester.tap(changeTime());
+    await settle(tester);
+    await tester.tap(find.text('5'));
+    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.keyboard_outlined));
+    await settle(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(TimePickerDialog),
+        matching: find.text('AM'),
+      ),
+    );
+    await tester.pump();
+    final boxes = find.descendant(
+      of: find.byType(TimePickerDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(boxes.at(0), '9');
+    await tester.enterText(boxes.at(1), '30');
+    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await settle(tester);
+    await save(tester);
+
+    // 150 lb, the weigh-in on or before Nov 5: 9.3 x 68.04 kg x 0.5 h = 316.
+    expect(find.text('Running saved for Thu, Nov 5, 316 kcal'), findsOneWidget);
+    final row = (await sessions(tester)).last;
+    expect(row.localDate, '2026-11-05');
+    expect(find.byKey(ValueKey('cardio-${row.id}')), findsNothing);
+  });
+
+  h.appTest('Home lists the sessions of the day it shows, and follows the day '
+      'when it changes', (tester) async {
+    await weigh(tester);
+    await seed(tester, input(), at('2026-11-12', 12, 0));
+    await seed(tester, input(minutes: 20, miles: null), at('2026-11-13', 9, 0));
+    await openApp(tester);
+    expect(find.text('30 min, 3.1 mi, 12:00 pm'), findsOneWidget);
+    expect(find.text('20 min, 9:00 am'), findsNothing);
+
+    h.now = at('2026-11-13', 0, 1);
+    await tester.pump(const Duration(hours: 7));
+    await settle(tester);
+    expect(find.text('20 min, 9:00 am'), findsOneWidget);
+    expect(find.text('30 min, 3.1 mi, 12:00 pm'), findsNothing);
+  });
+
+  // The Workouts tab: Log cardio (task 5.3).
+
+  h.appTest('Log cardio on the Workouts tab opens the screen', (tester) async {
+    await weigh(tester);
+    await openApp(tester);
+    await h.openWorkoutsTab(tester);
+    await tester.tap(logCardio());
+    await settle(tester);
+    expect(find.byType(CardioScreen), findsOneWidget);
+  });
+
+  h.appTest('after Save the Workouts tab says so, and Undo deletes the '
+      'session', (tester) async {
+    await weigh(tester);
+    await seed(tester, input());
+    await openApp(tester);
+    await h.openWorkoutsTab(tester);
+    await tester.tap(logCardio());
+    await settle(tester);
+    await type(tester, 'Duration', '30');
+    await save(tester);
+
+    expect(find.byType(CardioScreen), findsNothing);
+    expect(find.text('Running saved, 383 kcal'), findsOneWidget);
+    expect(await sessions(tester), hasLength(2));
+
+    await tester.tap(undo());
+    await tester.tap(undo(), warnIfMissed: false);
+    await settle(tester);
+    expect(find.text('Running saved, 383 kcal'), findsNothing);
+    expect(await h.real(tester, () => h.db.cardioForDay('2026-11-12')), hasLength(1));
+  });
+
+  h.appTest('Log cardio is there while a workout runs', (tester) async {
+    await weigh(tester);
+    await h.real(
+      tester,
+      () => h.db.startEmptyWorkout(at('2026-11-12', 17, 0)).then((_) {}),
+    );
+    await openApp(tester);
+    await h.openWorkoutsTab(tester);
+    // Only "Return to workout" starts anything now, and Log cardio stays.
+    expect(find.widgetWithText(OutlinedButton, 'Empty workout'), findsNothing);
+    expect(logCardio(), findsOneWidget);
+    await tester.tap(logCardio());
+    await settle(tester);
+    expect(find.byType(CardioScreen), findsOneWidget);
+  });
+
+  h.appTest('Log cardio does not push the Start again rows out of view at '
+      '320 x 568 (speed target 4)', (tester) async {
+    await h.seedSample(tester);
+    await h.openApp(tester, size: const Size(320, 568));
+    await h.openWorkoutsTab(tester);
+    expect(find.text('Start again'), findsOneWidget);
+    final box = tester.getRect(
+      find.widgetWithText(FilledButton, 'Start').first,
+    );
+    expect(box.top >= 0 && box.bottom <= 568, isTrue, reason: '$box');
+    // The button is on the tab, below the routines.
+    expect(logCardio(), findsOneWidget);
+    expect(tester.getRect(logCardio()).top, greaterThan(box.bottom));
+  });
 
   // The speed target: one screen, three counted taps, no second route.
 

@@ -950,30 +950,38 @@ class _ExerciseRow extends StatelessWidget {
     final muted = theme.textTheme.bodySmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
-    return InkWell(
+    // One spoken line for the row, and a button when it opens something.
+    return Semantics(
+      container: true,
+      button: onTap != null,
+      label: [title, if (kcal.isNotEmpty) kcal, detail, ?note].join(', '),
+      excludeSemantics: true,
       onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 56),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
-                  ),
-                  if (kcal.isNotEmpty) Text(kcal),
-                ],
-              ),
-              Text(detail, style: muted),
-              if (note != null) Text(note!, style: muted),
-            ],
+                    if (kcal.isNotEmpty) Text(kcal),
+                  ],
+                ),
+                Text(detail, style: muted),
+                if (note != null) Text(note!, style: muted),
+              ],
+            ),
           ),
         ),
       ),

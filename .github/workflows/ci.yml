@@ -147,6 +147,8 @@ jobs:
           api-level: 34
           target: default
           arch: x86_64
+          # The default device is 320 x 480 dp, smaller than any phone the app targets.
+          profile: pixel_6
           script: flutter test integration_test -d emulator-5554
 
   ios-integration:
