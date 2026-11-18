@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../app_scope.dart';
+import '../../data/cardio_data.dart';
 import '../../data/database.dart';
 import '../../data/food_data.dart';
 import '../../data/goal_data.dart';
@@ -19,6 +20,7 @@ import '../../math/weight_trend.dart';
 import '../../strings.dart';
 import '../../util/dates.dart';
 import '../../util/units.dart';
+import '../cardio/cardio_screen.dart';
 import '../food/confirm_bar.dart';
 import '../food/food_entry_screen.dart';
 import '../goals/goals_screen.dart';
@@ -55,6 +57,8 @@ class HomeScreenState extends State<HomeScreen> {
   Stream<DayLog>? _day;
   Stream<DayBudget?>? _budget;
   Stream<GoalsForDay?>? _goals;
+  Stream<List<CardioSession>>? _cardio;
+  Stream<List<WorkoutSummary>>? _finished;
   Stream<WorkoutSummary?>? _running;
   String? _dayFor;
 
@@ -91,6 +95,8 @@ class HomeScreenState extends State<HomeScreen> {
     _day = db.watchDay(widget.today);
     _budget = db.watchBudgetForDay(widget.today);
     _goals = db.watchGoalsForDay(widget.today);
+    _cardio = db.watchCardioForDay(widget.today);
+    _finished = db.watchFinishedWorkoutsForDay(widget.today);
   }
 
   @override
@@ -252,6 +258,48 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Opens the cardio screen: a new session, or a logged one to [editing].
+  /// Then shows what happened.
+  Future<void> openCardio({CardioSession? editing}) async {
+    final result = await openCardioScreen(context, editing: editing);
+    if (!mounted || result == null) return;
+    final scope = AppScope.of(context);
+    final db = scope.db;
+    final row = result.row;
+    final k = row.effectiveKcal;
+    final kcal = k == null ? null : roundForDisplay(k);
+    final name = S.cardioName(row.activityName);
+    final day = _dayNamed(row.localDate);
+    switch (result) {
+      case CardioSaved(:final edited):
+        // Built from the stored row that was read back. An edit has no Undo:
+        // the previous version is not kept.
+        _showNotice(
+          _Notice(
+            () => edited
+                ? S.cardioChanged(name, kcal, day)
+                : S.cardioSaved(name, kcal, day),
+            undo: edited
+                ? null
+                : () async {
+                    await db.deleteCardio(row.id, scope.clock());
+                  },
+            failed: S.cardioUndoFailed,
+          ),
+        );
+      case CardioDeleted():
+        _showNotice(
+          _Notice(
+            () => S.cardioDeleted(name, kcal, day),
+            undo: () async {
+              await db.undoDeleteCardio(row.id);
+            },
+            failed: S.cardioUndoDeleteFailed,
+          ),
+        );
+    }
+  }
+
   void _openGoals() {
     Navigator.of(
       context,
@@ -292,15 +340,23 @@ class HomeScreenState extends State<HomeScreen> {
                         _budget,
                         (budget) => _watch<GoalsForDay?>(
                           _goals,
-                          (goals) => _list(
-                            theme,
-                            units: units.data,
-                            weights: weights.data,
-                            trend: trend.data,
-                            slots: slots.data,
-                            day: day.data,
-                            budget: budget,
-                            goals: goals.data,
+                          (goals) => _watch<List<CardioSession>>(
+                            _cardio,
+                            (cardio) => _watch<List<WorkoutSummary>>(
+                              _finished,
+                              (finished) => _list(
+                                theme,
+                                units: units.data,
+                                weights: weights.data,
+                                trend: trend.data,
+                                slots: slots.data,
+                                day: day.data,
+                                budget: budget,
+                                goals: goals.data,
+                                cardio: cardio,
+                                finished: finished,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -346,11 +402,11 @@ class HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: FilledButton.tonal(
-                      onPressed: null,
                       style: _barButton,
-                      child: Text(S.addCardio),
+                      onPressed: openCardio,
+                      child: const Text(S.addCardio),
                     ),
                   ),
                 ],
@@ -371,6 +427,8 @@ class HomeScreenState extends State<HomeScreen> {
     required DayLog? day,
     required AsyncSnapshot<DayBudget?> budget,
     required GoalsForDay? goals,
+    required AsyncSnapshot<List<CardioSession>> cardio,
+    required AsyncSnapshot<List<WorkoutSummary>> finished,
   }) {
     final today = widget.today;
     return ListView(
@@ -398,6 +456,13 @@ class HomeScreenState extends State<HomeScreen> {
           onSetGoals: _openGoals,
         ),
         _Meals(slots: slots, day: day, onOpen: openFood),
+        const SizedBox(height: 12),
+        _Exercise(
+          units: units,
+          cardio: cardio.data,
+          finished: finished.data,
+          onOpenCardio: (row) => openCardio(editing: row),
+        ),
         const SizedBox(height: 12),
         _WeightRow(
           units: units,
@@ -765,6 +830,152 @@ class _Meter extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The day's cardio sessions and finished workouts, earliest first
+/// (home.html frame 2). A cardio row reopens the cardio screen to edit it; a
+/// workout row is only listed, so the budget's exercise number can be
+/// followed. Sessions from another source say so in words.
+class _Exercise extends StatelessWidget {
+  const _Exercise({
+    required this.units,
+    required this.cardio,
+    required this.finished,
+    required this.onOpenCardio,
+  });
+
+  final UnitSystem? units;
+  final List<CardioSession>? cardio;
+  final List<WorkoutSummary>? finished;
+  final void Function(CardioSession row) onOpenCardio;
+
+  static String _kcal(double? v) =>
+      v == null ? '' : '${S.count(roundForDisplay(v))} kcal';
+
+  static int _minutes(int seconds) {
+    final m = (seconds / 60).round();
+    return m < 1 ? 1 : m;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final u = units;
+    final cardio = this.cardio;
+    final finished = this.finished;
+    if (u == null || cardio == null || finished == null) {
+      return const SizedBox.shrink();
+    }
+    final rows = <({int at, Widget row})>[];
+    for (final c in cardio) {
+      final distance = c.distanceMeters;
+      rows.add((
+        at: c.startedAtMs,
+        row: _ExerciseRow(
+          key: ValueKey('cardio-${c.id}'),
+          title: S.cardioName(c.activityName),
+          kcal: _kcal(c.effectiveKcal),
+          detail: S.cardioDetail(
+            _minutes(c.durationSeconds),
+            distance == null ? null : S.cardioDistanceShown(distance, u),
+            S.timeOfDay(minuteOfDayOf(c.startedAtMs, c.tzOffsetMinutes)),
+          ),
+          note: S.cardioSourceMark(c.source),
+          onTap: () => onOpenCardio(c),
+        ),
+      ));
+    }
+    for (final w in finished) {
+      final ms = w.durationMs;
+      rows.add((
+        at: w.workout.startedAtMs,
+        row: _ExerciseRow(
+          key: ValueKey('workout-${w.workout.id}'),
+          title:
+              w.routineName ??
+              (w.exerciseNames.isEmpty
+                  ? S.workoutDefaultName
+                  : S.exercisesInBrief(w.exerciseNames, 2)),
+          kcal: _kcal(w.workout.kcalOverride ?? w.workout.kcalEstimated),
+          detail: S.workoutFacts(
+            w.exerciseCount,
+            w.setCount,
+            ms == null ? null : minutesIn(ms),
+          ),
+        ),
+      ));
+    }
+    rows.sort((a, b) => a.at.compareTo(b.at));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(S.homeExercise, style: theme.textTheme.titleMedium),
+        ),
+        if (rows.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text(S.exerciseEmpty),
+          )
+        else
+          for (final r in rows) r.row,
+      ],
+    );
+  }
+}
+
+class _ExerciseRow extends StatelessWidget {
+  const _ExerciseRow({
+    super.key,
+    required this.title,
+    required this.kcal,
+    required this.detail,
+    this.note,
+    this.onTap,
+  });
+
+  final String title;
+  final String kcal;
+  final String detail;
+  final String? note;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (kcal.isNotEmpty) Text(kcal),
+                ],
+              ),
+              Text(detail, style: muted),
+              if (note != null) Text(note!, style: muted),
+            ],
+          ),
+        ),
       ),
     );
   }

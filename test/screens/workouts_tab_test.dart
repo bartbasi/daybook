@@ -490,6 +490,20 @@ void main() {
     expectAtTop(tester);
   });
 
+  h.appTest('opened on a new day after being left scrolled down, the tab is '
+      'at the top', (tester) async {
+    await seedManyRoutines(tester);
+    await openTab(tester, size: const Size(320, 568));
+    await tester.drag(find.byType(ListView).first, const Offset(0, -2000));
+    await settle(tester);
+    expect(offset(tester), greaterThan(0));
+
+    h.now = at('2026-11-13', 0, 1);
+    await tester.pump(const Duration(hours: 7));
+    await settle(tester);
+    expectAtTop(tester);
+  });
+
   h.appTest('choosing the Workouts tab from another tab shows its list at the '
       'top', (tester) async {
     await seedManyRoutines(tester);

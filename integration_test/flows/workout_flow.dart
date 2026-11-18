@@ -231,8 +231,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
       (_benchRef, _benchName),
       (_secondRef, _secondName),
     ]) {
-      await _waitForHit(tester, search);
-      await taps.tap(search);
+      await _tap(tester, taps, search);
       await tester.pump();
       await taps.type(search, query);
       final add = find.descendant(
@@ -300,8 +299,7 @@ Future<void> runWorkoutFlow(WidgetTester tester, {double keyboard = 0}) async {
       await tester.pump();
       await taps.type(reps, '8');
       final weight = find.widgetWithText(TextField, S.setWeightLabel);
-      await _waitForHit(tester, weight);
-      await taps.tap(weight);
+      await _tap(tester, taps, weight);
       await tester.pump();
       await taps.type(weight, '135');
       await _tap(

@@ -745,7 +745,7 @@ void main() {
         expect(p.weightKg, closeTo(lbToKg(150), 1e-9));
         final row = await db.editCardio(s.id, table, input);
         expect(row.kcalEstimated, p.kcal);
-        expect(row.met, p.entry.met);
+        expect(row.met, p.entry!.met);
         expect(row.kcalEstimated, isNot(s.kcalEstimated));
       }
       final d = await db.editCardio(s.id, table, run(minutes: 40, miles: 4.1));
@@ -978,6 +978,73 @@ void main() {
       );
       expect(longer.kcalEstimated, 250);
       expect(longer.durationSeconds, 3600);
+    });
+
+    test('the preview of a row with no code is what the edit stores', () async {
+      await weigh(150, '2026-11-12');
+      final id = await imported(noon, met: 9.3, estimate: 383);
+      const longer = CardioInput(durationSeconds: 3600);
+      final p = await db.editPreview(table, id, longer);
+      expect(p.entry, isNull);
+      expect(p.keptStored, isFalse);
+      final row = await db.editCardio(id, table, longer);
+      expect(p.kcal, row.kcalEstimated);
+      expect(p.kcal, closeTo(9.3 * lbToKg(150), 1e-6));
+      expect(row.met, 9.3);
+      expect(row.activityName, 'Imported run');
+      // Nothing that feeds the estimate changed: the stored number is kept.
+      const same = CardioInput(durationSeconds: 1800, kcalOverride: 300);
+      final k = await db.editPreview(table, id, same);
+      expect(k.keptStored, isFalse); // the duration differs from 3600 now
+      final again = await db.editCardio(id, table, longer);
+      final kept = await db.editPreview(
+        table,
+        id,
+        const CardioInput(durationSeconds: 3600, kcalOverride: 100),
+      );
+      expect(kept.keptStored, isTrue);
+      expect(kept.kcal, again.kcalEstimated);
+    });
+
+    test('a stored code the table does not have can be edited', () async {
+      final id = await imported(noon, code: '77777', met: 5, estimate: 200);
+      CardioInput input({int secs = 1800, double? own}) => CardioInput(
+        activityCode: '77777',
+        durationSeconds: secs,
+        kcalOverride: own,
+      );
+      final o = await db.editPreview(table, id, input(own: 150));
+      expect(o.entry, isNull);
+      expect(o.keptStored, isTrue);
+      expect(o.kcal, 200);
+      final saved = await db.editCardio(id, table, input(own: 150));
+      expect(saved.kcalOverride, 150);
+      expect(saved.activityCode, '77777');
+      expect(saved.met, 5);
+      expect(saved.kcalEstimated, 200);
+      await weigh(150, '2026-11-12');
+      final p = await db.editPreview(table, id, input(secs: 3600));
+      expect(p.keptStored, isFalse);
+      final row = await db.editCardio(id, table, input(secs: 3600));
+      expect(row.kcalEstimated, p.kcal);
+      expect(p.kcal, closeTo(5 * lbToKg(150), 1e-6));
+      expect(row.activityCode, '77777');
+      expect(row.activityName, 'Imported run');
+      expect(row.met, 5);
+    });
+
+    test('a row with no MET and no code keeps no estimate and its own '
+        'number', () async {
+      final id = await imported(noon, override: 120);
+      const input = CardioInput(durationSeconds: 3600, kcalOverride: 120);
+      final p = await db.editPreview(table, id, input);
+      expect(p.entry, isNull);
+      expect(p.kcal, isNull);
+      expect(p.keptStored, isTrue);
+      final row = await db.editCardio(id, table, input);
+      expect(row.kcalEstimated, isNull);
+      expect(row.kcalOverride, 120);
+      expect(row.durationSeconds, 3600);
     });
 
     test('an imported session can be chosen as an activity by code', () async {

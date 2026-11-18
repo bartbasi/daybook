@@ -2367,4 +2367,40 @@ void main() {
       expect(await db.select(db.workoutSets).get(), isEmpty);
     });
   });
+
+  group('finished workouts of a day, for the Exercise rows on Home', () {
+    test('only the finished workouts of the day, earliest first, with their '
+        'numbers; a running one and another day are left out', () async {
+      final early = await doWorkout('2026-11-12', [
+        (squat, 'Squat', [(225, 5)]),
+      ], hour: 7);
+      final late = await doWorkout('2026-11-12', [
+        (bench, 'Bench press', [(175, 8), (175, 8)]),
+      ], hour: 18);
+      await doWorkout('2026-11-11', [
+        (row, 'Row', [(100, 8)]),
+      ]);
+      await db.startEmptyWorkout(at('2026-11-12', 20, 0)); // still running
+      final list = await db.finishedWorkoutsForDay('2026-11-12');
+      expect(list.map((w) => w.workout.id), [early, late]);
+      expect(list.last.setCount, 2);
+      expect(list.last.exerciseNames, ['Bench press']);
+    });
+
+    test('the stream follows a finish', () async {
+      final first = db.watchFinishedWorkoutsForDay('2026-11-12').first;
+      expect(await first, isEmpty);
+      final seen = <int>[];
+      final sub = db.watchFinishedWorkoutsForDay('2026-11-12').listen(
+        (l) => seen.add(l.length),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await doWorkout('2026-11-12', [
+        (squat, 'Squat', [(225, 5)]),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sub.cancel();
+      expect(seen.last, 1);
+    });
+  });
 }

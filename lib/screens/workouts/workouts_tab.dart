@@ -8,12 +8,15 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../app_scope.dart';
 import '../../clock.dart';
+import '../../data/cardio_data.dart';
 import '../../data/database.dart';
 import '../../data/exercise_library.dart';
 import '../../data/settings_data.dart';
 import '../../data/workout_data.dart';
 import '../../strings.dart';
 import '../../util/units.dart';
+import '../../math/calorie_budget.dart';
+import '../cardio/cardio_screen.dart';
 import '../food/confirm_bar.dart';
 import 'exercise_picker.dart' show openExerciseList;
 import 'routine_editor.dart';
@@ -43,13 +46,21 @@ class WorkoutsTab extends StatefulWidget {
 
 /// A message above the tab bar, with "Return to workout" when it offers it.
 class _Msg {
-  const _Msg(this.text, {this.returnId, this.undo});
+  const _Msg(
+    this.text, {
+    this.returnId,
+    this.undo,
+    this.undoFailed = S.routineUndoFailed,
+  });
 
   final String text;
   final int? returnId;
 
-  /// Brings back a deleted routine.
+  /// Brings back a deleted routine, or takes back a saved cardio session.
   final Future<void> Function()? undo;
+
+  /// What is said when [undo] did not work.
+  final String undoFailed;
 }
 
 class _WorkoutsTabState extends State<WorkoutsTab> {
@@ -81,6 +92,13 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
+  // From didUpdateWidget: after the frame, so a jump never happens in a build.
+  void _toTopAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _toTop();
+    });
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -100,11 +118,13 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   @override
   void didUpdateWidget(WorkoutsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.selected && !oldWidget.selected) _toTop();
+    if (widget.selected && !oldWidget.selected) _toTopAfterFrame();
     // A new day (the shell moved past midnight): "Start again" and the week
-    // are worked out for it, with new streams.
+    // are worked out for it, with new streams, and the list goes back to the
+    // top so "Start again" is in view.
     if (_dayFor != widget.today) {
       _dayFor = widget.today;
+      _toTopAfterFrame();
       _followDay(AppScope.of(context).db);
     }
   }
@@ -195,8 +215,9 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
         setState(() => _msg = null);
       }
       await openWorkoutScreen(context, result.workout!.id);
+      if (!mounted) return;
       _toTop();
-      if (mounted && earlier != null) _fadeMessage();
+      if (earlier != null) _fadeMessage();
     } catch (_) {
       if (mounted) _show(const _Msg(S.startFailed));
     } finally {
@@ -257,14 +278,50 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
   /// awaited.
   Future<void> _undoMsg() async {
     final undo = _msg?.undo;
+    final failed = _msg?.undoFailed ?? S.routineUndoFailed;
     if (undo == null) return;
     _msgTimer?.cancel();
     setState(() => _msg = null);
     try {
       await undo();
     } catch (_) {
-      if (mounted) _show(const _Msg(S.routineUndoFailed));
+      if (mounted) _show(_Msg(failed));
     }
+  }
+
+  /// Opens the cardio screen for a new session and confirms it from the row
+  /// that was read back. Undo deletes the session.
+  Future<void> _openCardio() async {
+    if (_starting) return;
+    _starting = true;
+    final CardioResult? result;
+    final AppScope scope;
+    try {
+      scope = AppScope.of(context);
+      result = await openCardioScreen(context);
+    } finally {
+      _starting = false;
+    }
+    if (!mounted || result is! CardioSaved) return;
+    final row = result.row;
+    final k = row.effectiveKcal;
+    final day = row.localDate == widget.today
+        ? null
+        : S.dayWord(row.localDate, widget.today);
+    _show(
+      _Msg(
+        S.cardioSaved(
+          S.cardioName(row.activityName),
+          k == null ? null : roundForDisplay(k),
+          day,
+        ),
+        undo: () async {
+          await scope.db.deleteCardio(row.id, scope.clock());
+        },
+        undoFailed: S.cardioUndoFailed,
+      ),
+    );
+    _fadeMessage();
   }
 
   Future<void> _return(int workoutId) async {
@@ -272,7 +329,7 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     _starting = true;
     try {
       await openWorkoutScreen(context, workoutId);
-      _toTop();
+      if (mounted) _toTop();
     } finally {
       _starting = false;
     }
@@ -337,6 +394,11 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
     // A workout from today stops every start: only "Return to workout" is
     // offered. One left from an earlier day does not (a start finishes it).
     final blocked = running != null && running.workout.localDate == today;
+    final cardioButton = OutlinedButton(
+      style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+      onPressed: _openCardio,
+      child: const Text(S.logCardio),
+    );
     return ListView(
       controller: _scroll,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -430,10 +492,16 @@ class _WorkoutsTabState extends State<WorkoutsTab> {
                       _start((db, now) => db.startEmptyWorkout(now)),
                   child: const Text(S.emptyWorkout),
                 ),
+                cardioButton,
               ],
             ),
           ),
-        ],
+        ] else
+          // Cardio does not depend on a workout, so it stays when one runs.
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Wrap(children: [cardioButton]),
+          ),
         _Weekly(volume: volume, failed: _libraryFailed, onOpen: _openWeekly),
         const SizedBox(height: 16),
       ],

@@ -1523,6 +1523,29 @@ extension WorkoutData on AppDatabase {
     return i < last.sets.length ? last.sets[i] : last.sets.last;
   }
 
+  /// The day's finished workouts, earliest start first, for Home's Exercise
+  /// rows. A workout still running is not listed.
+  Future<List<WorkoutSummary>> finishedWorkoutsForDay(String localDate) async {
+    final rows =
+        await (select(workouts)
+              ..where(
+                (w) => w.localDate.equals(localDate) & w.endedAtMs.isNotNull(),
+              )
+              ..orderBy([
+                (w) => OrderingTerm.asc(w.startedAtMs),
+                (w) => OrderingTerm.asc(w.id),
+              ]))
+            .get();
+    return _summaries(rows);
+  }
+
+  Stream<List<WorkoutSummary>> watchFinishedWorkoutsForDay(String localDate) =>
+      liveQuery(this, [
+        workouts,
+        workoutSets,
+        routines,
+      ], () => finishedWorkoutsForDay(localDate));
+
   Future<List<Workout>> _finishedNewestFirst(int limit) =>
       (select(workouts)
             ..where((w) => w.endedAtMs.isNotNull())

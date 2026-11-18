@@ -1421,4 +1421,137 @@ class S {
   static const restAlertRefused =
       'Notifications are turned off for Daybook. To get the alert, turn them '
       'on in your phone settings, under Notifications.';
+
+  // The cardio screen and its rows (task 5.3).
+  static const cardioTitle = 'Cardio';
+  static const cardioOther = 'Other...';
+  static const cardioOtherSpoken = 'Other activity, search the list';
+  static String cardioChipSpoken(String name, bool picked) =>
+      picked ? '$name, picked' : name;
+  static const cardioPickPrompt =
+      'Pick an activity, or tap Other... to search.';
+
+  /// The words for a stored activity name. The three groups are stored under
+  /// the Compendium's heading; 'Bicycling' is worded 'Cycling'.
+  static String cardioName(String stored) =>
+      stored == 'Bicycling' ? 'Cycling' : stored;
+
+  static String cardioMatched(String description, String code, String met) =>
+      'Matched $description, code $code, MET $met.';
+  static String cardioPaceIn(String pace) =>
+      'Your pace, $pace, is in this band.';
+  static String cardioPaceNearest(String pace) =>
+      'Nearest to your pace, $pace.';
+
+  /// '6.2 mph', with '(10 km/h)' after it for a user of kilometers.
+  static String cardioPace(double mph, UnitSystem units) {
+    final base = '${_trimmed(mph, 1)} mph';
+    if (units == UnitSystem.imperial) return base;
+    return '$base (${_trimmed(mph * metersPerMile / 1000, 1)} km/h)';
+  }
+
+  static const cardioUsedLastTime = 'Used last time.';
+  static const cardioGeneralEntry =
+      'General entry. Add a distance to match your pace.';
+  static const cardioChosenEntry = 'You chose this entry.';
+  static const cardioNoEntry = 'No Compendium entry is kept for this session.';
+  static String cardioKeptMet(String met) => 'MET $met, kept as it was saved.';
+  static const cardioChangeEntrySpoken = 'Change the entry';
+  static const cardioChangeTimeSpoken = 'Change the date and time';
+  static String cardioEntriesTitle(String name) => 'Other entries for $name';
+  static const cardioInUse = 'In use';
+  static String cardioEntryRow(String description, String met) =>
+      '$description, MET $met';
+
+  static const cardioDuration = 'Duration';
+  static const cardioMinUnit = 'min';
+  static const cardioDistance = 'Distance (optional)';
+  static String distanceUnit(UnitSystem units) =>
+      units == UnitSystem.imperial ? 'mi' : 'km';
+  static const cardioHeartRate = 'Avg heart rate (optional)';
+  static const cardioBpm = 'bpm';
+  static const cardioCalories = 'Calories (own number)';
+  static const cardioKcalUnit = 'kcal';
+
+  static String cardioBarEstimate(String kcal) => '$kcal kcal estimate';
+  static String cardioBarYours(String kcal) => '$kcal kcal your number';
+  static String cardioBarSpoken(String kcal, bool yours) =>
+      '$kcal kilocalories, ${yours ? 'your number' : 'estimate'}';
+  static const cardioBarNeedsDuration = 'Estimate: needs a duration';
+  static const cardioNeedsWeighIn =
+      'An estimate needs a weigh-in. Add your weight, or type your own number.';
+  static const cardioNoEstimate =
+      'No estimate for this session. Type your own number.';
+  static String cardioEstimateFrom(
+    String met,
+    String weight,
+    String unit,
+    int minutes,
+  ) => 'MET $met, $weight $unit, $minutes min';
+  static String cardioEstimateWas(String kcal) => 'Estimate was $kcal.';
+  static const cardioUseEstimate = 'Use estimate';
+
+  static const cardioDurationBad = 'Enter a duration above 0.';
+  static const cardioDistanceBad = 'Enter a number, like 3.1.';
+  static const cardioHeartBad =
+      'Enter a heart rate above 0, or leave it empty.';
+  static const cardioKcalBad = 'Enter a number, like 360, or leave it empty.';
+  static const cardioNeedActivity = 'Pick an activity first.';
+  static const cardioFailed =
+      'Could not save. What you typed is still here. Tap Save to try again.';
+  static const cardioGone = 'This session was deleted, or is no longer there.';
+  static const cardioDeleteFailed =
+      'Could not delete. The session is still logged.';
+  static const cardioLoadFailed =
+      'Could not load the activity list. Go back and try again.';
+  static const cardioMenu = 'Session options';
+
+  static const cardioSearchTitle = 'Other activity';
+  static const cardioSearchHint = 'Search activities';
+  static const cardioSearchPrompt =
+      'Type part of an activity name, like rowing or yoga.';
+  static const cardioSearchNone = 'No activity matches that.';
+  static String cardioSearchMore(int shown) =>
+      'Showing the first $shown. Type more to narrow the list.';
+
+  // Home: the Exercise section and its messages.
+  static const homeExercise = 'Exercise';
+  static const exerciseEmpty = 'Nothing yet.';
+  static String cardioDetail(int minutes, String? distance, String time) =>
+      '$minutes min, ${distance == null ? '' : '$distance, '}$time';
+  static String cardioDistanceShown(double meters, UnitSystem units) {
+    final v = units == UnitSystem.imperial
+        ? metersToMiles(meters)
+        : metersToKm(meters);
+    return '${_trimmed(v, 2)} ${distanceUnit(units)}';
+  }
+
+  /// The distance as typed in the field: no unit word.
+  static String cardioDistanceField(double meters, UnitSystem units) =>
+      _trimmed(
+        units == UnitSystem.imperial
+            ? metersToMiles(meters)
+            : metersToKm(meters),
+        2,
+      );
+  static String? cardioSourceMark(String source) => switch (source) {
+    'health_connect' => 'From Health Connect',
+    'apple_health' => 'From Apple Health',
+    _ => null,
+  };
+  static String cardioSaved(String name, int? kcal, [String? day]) =>
+      '$name saved${day == null ? '' : ' for $day'}'
+      '${kcal == null ? '' : ', ${count(kcal)} kcal'}';
+  static String cardioChanged(String name, int? kcal, [String? day]) =>
+      '$name changed${day == null ? '' : ' for $day'}'
+      '${kcal == null ? '' : ', ${count(kcal)} kcal'}';
+  static String cardioDeleted(String name, int? kcal, [String? day]) =>
+      '$name deleted${day == null ? '' : ' for $day'}'
+      '${kcal == null ? '' : ', ${count(kcal)} kcal'}';
+  static const cardioUndoFailed = 'Could not undo. The session is still saved.';
+  static const cardioUndoDeleteFailed =
+      'Could not undo. The session is still deleted.';
+
+  // The Workouts tab.
+  static const logCardio = 'Log cardio';
 }
