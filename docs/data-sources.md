@@ -189,6 +189,13 @@ Usable: yes, with conditions.
 About screen text:
 > MET values from the 2024 Adult Compendium of Physical Activities (https://pacompendium.com). Herrmann SD, Willis EA, Ainsworth BE, Barreira TV, Hastert M, Kracht CL, Schuna JM Jr, Cai Z, Quan M, Tudor-Locke C, Whitt-Glover MC, Jacobs DR Jr. 2024 Adult Compendium of Physical Activities: A third update of the energy costs of human activities. J Sport Health Sci. 2024;13(1):6-12. doi:10.1016/j.jshs.2023.10.010.
 
+As built (task 5.1, 2026-11-17):
+- Fetched: the PDF at https://pacompendium.com/wp-content/uploads/2025/02/1_2024-adult-compendium_1_2024.pdf on 2026-11-17. 563,091 bytes, SHA-256 `ac30234b8f8f813837e282773cfcb3e0fe062334777c2f7b3213429c4fbc251c`, the same as the plan's pin. The script refuses any other file. The PDF is not committed.
+- Built by `tools/build_met_table.py` into `assets/met/compendium_2024.csv` (code, heading, MET, description, min and max mph), with the citation above and "values unchanged" in `assets/met/README.txt`. Only the PDF, not the journal article, was used.
+- Rows: 1,111, under the same 22 headings. The website says 1,114. Every code in the PDF's text was read (a plain text read of the whole PDF finds no other code), no row was dropped and no line failed to parse, so the 3 missing activities are not in this PDF and the PDF does not say which. Needs a decision from Bart (the email to the Compendium team could ask).
+- Left out: nothing. Values and descriptions are as printed (18290 is printed "8.00"; spelling mistakes in descriptions are kept). Two whitespace changes only: runs of spaces became one, and a description that wraps onto a second line is joined with a space.
+- The speed bands of Running, Walking and Bicycling, and the general entries (Running 12145, "Running, self-selected pace", 10.5; Walking 17190, 3.8; Bicycling 01014, "Bicycling, general", 7.0), are in `lib/data/met_table.dart`. A pace in min/mile or a speed in km/h written beside the mph is ignored, never converted.
+
 ---
 
 ## FDA Daily Values
