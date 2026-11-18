@@ -57,15 +57,19 @@ Speeds (min_mph, max_mph)
   invented. Where a description gives two speeds the first is kept (01050 is
   "16-19 mph, racing/not drafting or >19 mph drafting" and is read as 16 to
   19). "Less than" and "greater than" keep the number as the end of the open
-  range and do not say whether that number is included.
+  range. That number is not part of the open band: "less than 2.0 mph"
+  (17151) does not include 2.0, which belongs to "2.0 to 2.4 mph" (17152),
+  and "<10 mph" (01010) does not include 10, which belongs to "10-11.9 mph"
+  (01020). A band with both numbers includes both of its ends.
   Which rows form the speed bands of Running, Walking and Bicycling, and which
   row is each group's general entry, is chosen in lib/data/met_table.dart.
 
 Left out, and why
-  The Compendium website gives 1,114 activities. The PDF holds 1,111: every
-  code in its text was read, and the PDF does not say which three are missing.
-  No row was dropped by the script: it stops and names any line it cannot
-  place, and there were none.
+  The PDF and the website's 22 heading pages list the same 1,111 codes.
+  1,114 is the journal article's figure. The only other five digit codes in
+  the PDF are two former codes named inside descriptions (11200 and 17120);
+  they are not rows. No row was dropped by the script: it stops and names any
+  line it cannot place, and there were none.
 
 How to rebuild
   python -I tools/build_met_table.py

@@ -318,6 +318,7 @@ void main() {
       // A second connection to the file sees only what is committed, so it
       // shows each set was stored when its tap finished, not at close.
       final reader = AppDatabase(NativeDatabase(file));
+      addTearDown(() => reader.close());
       Future<List<WorkoutSet>> committed(WidgetTester tester) => h.real(
         tester,
         () =>
@@ -344,7 +345,6 @@ void main() {
       final logged = await h.allSets(tester, workoutId);
       expect(logged.where((s) => s.completedAtMs != null), hasLength(2));
       expect(await committed(tester), logged);
-      await tester.runAsync(reader.close);
 
       // The "restart": the app is taken off the screen, the database is
       // closed, and a new database object opens the same file with a new app

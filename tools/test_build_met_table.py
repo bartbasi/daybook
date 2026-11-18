@@ -12,8 +12,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_met_table import (  # noqa: E402
-    COLUMNS, PDF_ROWS, BuildError, check_pdf, check_rows, parse_speed,
-    parse_text, unit_only_rows, write_csv)
+    COLUMNS, CSV_SHA256, PDF_ROWS, BuildError, check_pdf, check_rows,
+    csv_bytes, file_digest, parse_speed, parse_text, unit_only_rows,
+    write_csv)
 
 CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "assets", "met", "compendium_2024.csv")
@@ -260,15 +261,17 @@ class CommittedCsvTests(unittest.TestCase):
         self.assertEqual(self.by["17190"]["met"], "3.8")
 
     def test_wrapped_rows_are_joined(self):
-        self.assertTrue(self.by["02050"]["description"].endswith(
-            "(Taylor Code 210)"))
-        self.assertTrue(self.by["03039"]["description"].endswith(
-            "paso doble, jive)"))
-        self.assertTrue(self.by["02054"]["description"].startswith(
-            "Resistance (weight) training, multiple exercises"))
-        self.assertEqual(self.by["02057"]["description"],
-                         "Body weight resistance exercises (e.g., squat, "
-                         "lunge, push-up, crunch), high intensity")
+        # 02050, 03039 and 05050 really wrap in the PDF text. Each keeps its
+        # own MET and has its second line joined with one space.
+        for code, met, tail in (
+                ("02050", "6.0", "vigorous effort (Taylor Code 210)"),
+                ("03039", "13.0", "rumba, paso doble, jive)"),
+                ("05050", "2.0", "manual appliances, light effort")):
+            self.assertEqual(self.by[code]["met"], met, code)
+            self.assertTrue(self.by[code]["description"].endswith(tail), code)
+            self.assertNotIn("  ", self.by[code]["description"], code)
+        self.assertEqual(self.by["02054"]["met"], "3.5")
+        self.assertEqual(self.by["02057"]["met"], "6.5")
 
     def test_general_entries(self):
         for code, met, text in (
@@ -309,6 +312,9 @@ class CommittedCsvTests(unittest.TestCase):
     def test_no_speed_row_gives_only_a_pace_or_km(self):
         self.assertEqual(unit_only_rows(self.rows), [])
 
+    def test_the_pinned_hash_is_the_hash_of_the_committed_file(self):
+        self.assertEqual(file_digest(CSV_PATH), CSV_SHA256)
+
     def test_write_csv_round_trips(self):
         rows, _ = parse_text(SAMPLE)
         d = tempfile.mkdtemp()
@@ -319,6 +325,44 @@ class CommittedCsvTests(unittest.TestCase):
         self.assertEqual([r["code"] for r in back],
                          sorted(r["code"] for r in rows))
         self.assertEqual(by_code(back)["12050"]["max_mph"], "6.3")
+
+
+class CsvPinTests(unittest.TestCase):
+    def test_a_stray_line_after_a_row_stops_the_build(self):
+        # A page number from another pdftotext build would be joined to the
+        # row above without any error. The pinned hash catches it.
+        clean, _ = parse_text(SAMPLE)
+        pin = __import__("hashlib").sha256(csv_bytes(clean)).hexdigest()
+        stray = SAMPLE.replace(
+            "Running 12060 10.5 Running, 6.7 mph (9 min/mile)\n",
+            "Running 12060 10.5 Running, 6.7 mph (9 min/mile)\n- 41 -\n")
+        rows, problems = parse_text(stray)
+        self.assertEqual(problems, [])  # the parser itself does not notice
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "x.csv")
+        with self.assertRaises(BuildError) as cm:
+            write_csv(rows, path, pin)
+        self.assertIn("committed", str(cm.exception))
+        self.assertFalse(os.path.exists(path))
+
+    def test_the_same_text_is_written_when_the_hash_matches(self):
+        rows, _ = parse_text(SAMPLE)
+        pin = __import__("hashlib").sha256(csv_bytes(rows)).hexdigest()
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "x.csv")
+        write_csv(rows, path, pin)
+        self.assertEqual(file_digest(path), pin)
+
+    def test_a_mismatch_leaves_the_existing_file_alone(self):
+        rows, _ = parse_text(SAMPLE)
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "x.csv")
+        with open(path, "wb") as f:
+            f.write(b"old")
+        with self.assertRaises(BuildError):
+            write_csv(rows, path, "0" * 64)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"old")
 
 
 if __name__ == "__main__":

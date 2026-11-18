@@ -29,6 +29,7 @@ See parse_speed.
 import argparse
 import csv
 import hashlib
+import io
 import os
 import re
 import shutil
@@ -43,6 +44,11 @@ PDF_SHA256 = "ac30234b8f8f813837e282773cfcb3e0fe062334777c2f7b3213429c4fbc251c"
 PDF_NAME = "compendium_2024.pdf"
 SITE_ROWS = 1114  # the number the Compendium website gives
 PDF_ROWS = 1111  # the rows the pinned PDF actually holds (checked 2026-11-17)
+# SHA-256 of assets/met/compendium_2024.csv as committed (LF line endings, as
+# write_csv writes them). The PDF is pinned, so the file built from it is
+# fixed. A different build (say a stray page number joined to a description by
+# another pdftotext) stops the script without touching the committed file.
+CSV_SHA256 = "6256202275f835e02a1728ebacfc230f08f7cdb60992ccebc2161b8a0a7d2e0c"
 USER_AGENT = "met-table-builder/1.0"
 
 COLUMNS = ["code", "heading", "met", "description", "min_mph", "max_mph"]
@@ -225,13 +231,31 @@ def pdf_to_text(pdf, pdftotext):
     return result.stdout.decode("utf-8")
 
 
-def write_csv(rows, path):
+def csv_bytes(rows):
+    """The CSV text as bytes: UTF-8, LF line endings, sorted by code."""
+    out = io.StringIO(newline="")
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(COLUMNS)
+    for r in sorted(rows, key=lambda r: r["code"]):
+        w.writerow([r[c] for c in COLUMNS])
+    return out.getvalue().encode("utf-8")
+
+
+def write_csv(rows, path, sha256=None):
+    """Writes the CSV. With [sha256], raises BuildError (and writes nothing)
+    when the built file does not have that hash."""
+    data = csv_bytes(rows)
+    if sha256 is not None:
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != sha256:
+            raise BuildError(
+                "the CSV built now has SHA-256 %s, but the committed file is "
+                "%s. The PDF text read differently (a stray line?). Nothing "
+                "written; compare with git diff after building elsewhere."
+                % (digest, sha256))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, lineterminator="\n")
-        w.writerow(COLUMNS)
-        for r in sorted(rows, key=lambda r: r["code"]):
-            w.writerow([r[c] for c in COLUMNS])
+    with open(path, "wb") as f:
+        f.write(data)
 
 
 def main(argv=None):
@@ -269,7 +293,12 @@ def main(argv=None):
     only = unit_only_rows(rows)
     if only:
         print("pace or km/h but no mph, no speed recorded: " + ", ".join(only))
-    write_csv(rows, os.path.join(args.out_dir, "compendium_2024.csv"))
+    try:
+        write_csv(rows, os.path.join(args.out_dir, "compendium_2024.csv"),
+                  CSV_SHA256)
+    except BuildError as e:
+        print("error: %s" % e, file=sys.stderr)
+        return 1
     print("written to " + os.path.join(args.out_dir, "compendium_2024.csv"))
     return 0
 

@@ -232,9 +232,10 @@ void main() {
     });
 
     test('the heading counts too', () {
+      // 03010 (Ballet, modern, or jazz...) never says "dancing" itself.
       expect(
-        table.search('dancing').map((a) => a.heading).toSet(),
-        contains('Dancing'),
+        table.search('dancing ballet').map((a) => a.code),
+        contains('03010'),
       );
     });
 

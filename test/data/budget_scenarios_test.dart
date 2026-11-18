@@ -2,6 +2,7 @@
 // Free software under the GNU GPL v3 with additional terms: see LICENSE and NOTICE.
 
 import 'package:daybook/clock.dart';
+import 'package:daybook/data/cardio_data.dart';
 import 'package:daybook/data/database.dart';
 import 'package:daybook/data/food_data.dart';
 import 'package:daybook/data/goal_data.dart';
@@ -185,11 +186,14 @@ void main() {
         ),
       );
 
-  /// Soft delete and put back, the way the data layer marks deleted cardio.
-  Future<void> markDeleted(int id, bool deleted) =>
-      (db.update(db.cardioSessions)..where((c) => c.id.equals(id))).write(
-        CardioSessionsCompanion(deletedAtMs: Value(deleted ? 1 : null)),
-      );
+  /// Delete and Undo, through the cardio data layer.
+  Future<void> markDeleted(int id, bool deleted) async {
+    if (deleted) {
+      await db.deleteCardio(id, localAt('2026-11-12', 23, 0));
+    } else {
+      await db.undoDeleteCardio(id);
+    }
+  }
 
   Future<DayBudget> budget(String day, {int? except}) async =>
       (await db.budgetForDay(day, exceptMealId: except))!;
@@ -412,9 +416,7 @@ void main() {
       final gone = await budget('2026-11-12');
       expect(gone.exerciseKcal, 0);
       expect(gone.shownLeft, 872); // 2,138 + 0 - 1,266
-      // Put back (Undo). The cardio data layer does not exist yet (task 5.2),
-      // so this clears the deleted mark by hand. When 5.2 adds delete and
-      // Undo, this should call them.
+      // Put back (Undo).
       await markDeleted(run, false);
       expect((await budget('2026-11-12')).shownLeft, 1255);
     });

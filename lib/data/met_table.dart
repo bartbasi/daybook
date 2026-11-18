@@ -58,6 +58,13 @@ class MetActivity {
   /// The speed range in mph as the description writes it. Both null: no speed
   /// given. Equal: one speed. Only [maxMph]: "less than". Only [minMph]:
   /// "greater than".
+  ///
+  /// A closed band (both numbers) includes both of its ends. A band with only
+  /// a max ("less than 2.0 mph", "<10 mph") does NOT include that number, and
+  /// a band with only a min (">20 mph") does not include its number. The
+  /// Compendium's own rows show it: "<10 mph" (01010) sits next to "10-11.9
+  /// mph" (01020), and "less than 2.0 mph" (17151) next to "2.0 to 2.4 mph"
+  /// (17152).
   final double? minMph;
   final double? maxMph;
 
@@ -102,6 +109,9 @@ const _groupDefs = <(String, String, List<String>)>[
       '17151', '17152', '17170', '17190', '17200', '17220', '17230', '17231', //
     ],
   ),
+  // 01018 ("leisure 5.5 mph") and 01019 ("leisure, 9.4 mph") are not bands:
+  // they sit inside the "<10 mph" row (01010) and the band rule has no way to
+  // prefer the narrower row.
   (
     'Bicycling',
     '01014',
